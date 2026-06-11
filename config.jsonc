@@ -1,0 +1,32 @@
+{
+  // LiteLLM 本地代理配置
+  "provider": {
+    "litellm": {
+      "api_key": "sk-no-key-needed",
+      "base_url": "http://localhost:4000/v1",
+      "models": [
+        {
+          "id": "ds-deepseek-v4-flash",
+          "context_limit": 64000
+        }
+      ]
+    }
+  },
+
+  "agent": {
+    "system_prompt": "你是一个有用的AI助手，请用中文回答问题。",
+    "default_model": "ds-deepseek-v4-flash",
+    "streaming": true
+  },
+
+  "database": {
+    "url": "sqlite+aiosqlite:///./lc_agent_data.db",
+    "checkpoint_path": "./lc_agent_checkpoints.db"
+  },
+
+  "skills": {
+    "directory": "./skills"
+  },
+
+  "mcp_servers": {}
+}
