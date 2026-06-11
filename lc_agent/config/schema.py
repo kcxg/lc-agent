@@ -21,6 +21,12 @@ class SkillsConfig(BaseModel):
     directory: str = "./skills"
 
 
+class McpServerConfig(BaseModel):
+    command: str
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+
+
 class AppConfig(BaseModel):
     """Application configuration schema."""
 
@@ -35,3 +41,4 @@ class AppConfig(BaseModel):
     session: dict = Field(default_factory=lambda: {"db_path": ""})
     ui: dict = Field(default_factory=dict)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
