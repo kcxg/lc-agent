@@ -11,10 +11,14 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    ChatBubble: typeof import('./src/components/chat/ChatBubble.vue')['default']
+    ChatInput: typeof import('./src/components/chat/ChatInput.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElInput: typeof import('element-plus/es')['ElInput']
     ElTag: typeof import('element-plus/es')['ElTag']
+    InterruptDialog: typeof import('./src/components/chat/InterruptDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    ToolCallCard: typeof import('./src/components/chat/ToolCallCard.vue')['default']
   }
 }
