@@ -9,6 +9,7 @@ from lc_agent import __version__
 from lc_agent.server.routes.health import router as health_router
 from lc_agent.server.routes.tools import router as tools_router
 from lc_agent.server.routes.models import router as models_router
+from lc_agent.server.routes.agents import router as agents_router
 
 
 def create_app(config: dict) -> FastAPI:
@@ -33,6 +34,7 @@ def create_app(config: dict) -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(tools_router, prefix="/api")
     app.include_router(models_router, prefix="/api")
+    app.include_router(agents_router, prefix="/api")
 
     web_dist = Path(__file__).parent.parent / "web" / "dist"
     if web_dist.exists():
