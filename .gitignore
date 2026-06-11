@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# lc_agent runtime data
+*.db
+*.db-shm
+*.db-wal
+lc_agent_data.db
+lc_agent_checkpoints.db
+
+# Vite cache
+frontend/.vite/
+
+# Auto-generated type declarations
+frontend/auto-imports.d.ts
+frontend/components.d.ts
