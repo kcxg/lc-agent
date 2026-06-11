@@ -33,8 +33,9 @@ class ChatWebSocketHandler:
 
         if msg_type == "message":
             content = data.get("content", "")
+            preset_id = data.get("preset_id", "__default__")
             try:
-                async for event in self.engine.chat_stream(content, thread_id):
+                async for event in self.engine.chat_stream(content, thread_id, preset_id):
                     await self._send_event(websocket, event)
                 await websocket.send_json({"type": "done"})
             except Exception as e:
