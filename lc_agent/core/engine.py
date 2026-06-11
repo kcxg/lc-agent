@@ -107,7 +107,8 @@ class AgentEngine:
         """Send a message and get a response (non-streaming)."""
         agent = self._agents.get(preset_id)
         if agent is None:
-            agent = self.build_agent(self._current_preset or self.get_default_preset())
+            preset = self._presets.get(preset_id) or self.get_default_preset()
+            agent = self.build_agent(preset)
 
         config = {"configurable": {"thread_id": thread_id}}
         result = await agent.ainvoke(
@@ -119,11 +120,12 @@ class AgentEngine:
             return messages[-1].content
         return ""
 
-    async def chat_stream(self, message: str, thread_id: str) -> AsyncIterator[dict]:
+    async def chat_stream(self, message: str, thread_id: str, preset_id: str = "__default__") -> AsyncIterator[dict]:
         """Stream chat responses as events."""
-        agent = self._agents.get("__default__")
+        agent = self._agents.get(preset_id)
         if agent is None:
-            agent = self.build_agent()
+            preset = self._presets.get(preset_id) or self.get_default_preset()
+            agent = self.build_agent(preset)
 
         config = {"configurable": {"thread_id": thread_id}}
         async for event in agent.astream_events(
