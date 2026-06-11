@@ -73,6 +73,9 @@ class AgentEngine:
         if self._checkpointer:
             kwargs["checkpointer"] = self._checkpointer
 
+        if preset.dangerous_tools:
+            kwargs["interrupt_before"] = ["tools"]
+
         agent = create_react_agent(
             model=llm,
             tools=tools,
