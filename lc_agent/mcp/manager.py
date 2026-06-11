@@ -79,3 +79,14 @@ class McpManager:
         """Get tool names for a given server."""
         server = self._servers.get(server_name)
         return server.tools if server else []
+
+    def get_langchain_tools(self) -> list:
+        """Get all connected MCP tools as LangChain StructuredTools."""
+        from lc_agent.mcp.tool_adapter import create_langchain_tools_from_schemas
+
+        all_tools = []
+        for server in self._servers.values():
+            if server.status == "connected" and server.tool_schemas:
+                tools = create_langchain_tools_from_schemas(server.name, server.tool_schemas)
+                all_tools.extend(tools)
+        return all_tools

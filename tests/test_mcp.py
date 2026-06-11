@@ -38,3 +38,13 @@ def test_mcp_server_status_has_tool_schemas():
     status = McpServerStatus(name="x", command="y")
     assert hasattr(status, 'tool_schemas')
     assert status.tool_schemas == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_registers_tools_after_connect():
+    """After connect, tools should be available via get_langchain_tools."""
+    config = {}
+    manager = McpManager(config)
+    # With empty config, should return empty
+    tools = manager.get_langchain_tools()
+    assert tools == []

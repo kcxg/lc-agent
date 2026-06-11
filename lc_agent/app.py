@@ -48,6 +48,19 @@ class LcAgentApp:
             except Exception as e:
                 print(f"[Warning] Checkpoint saver setup failed, using None: {e}")
 
+            import asyncio
+
+            async def _connect_mcp_background():
+                try:
+                    await self.mcp_manager.connect_all()
+                    connected = [s for s in self.mcp_manager.servers if s.status == "connected"]
+                    if connected:
+                        print(f"[MCP] Connected: {[s.name for s in connected]}")
+                except Exception as e:
+                    print(f"[MCP] Background connection error: {e}")
+
+            asyncio.create_task(_connect_mcp_background())
+
     def _setup_websocket_route(self):
         @self.fastapi_app.websocket("/ws/chat/{thread_id}")
         async def websocket_chat(websocket: WebSocket, thread_id: str):
