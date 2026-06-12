@@ -38,19 +38,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { useToolsStore } from '@/stores/tools'
 import ToolCallCard from './ToolCallCard.vue'
 import TokenUsagePanel from './TokenUsagePanel.vue'
 import type { ChatMessage } from '@/stores/chat'
-
-interface ThinkingBlock {
-  isThinking: boolean
-  content: string
-  cls: string
-  collapsed: boolean
-}
 
 const props = defineProps<{
   message: ChatMessage
@@ -59,55 +52,24 @@ const props = defineProps<{
 defineEmits<{ edit: [] }>()
 const toolsStore = useToolsStore()
 
+const hasSegments = computed(() =>
+  props.message.segments && props.message.segments.length > 0
+)
+
+const renderedContent = computed(() => renderMarkdown(props.message.content))
+
 function renderMd(content: string): string {
   return renderMarkdown(content)
 }
 
-const thinkingBlocksCache = new WeakMap<object, ThinkingBlock[]>()
-
-function parseThinkingBlocks(text: string): ThinkingBlock[] {
-  const cacheKey = { text }
-  const cached = thinkingBlocksCache.get(cacheKey)
-  if (cached) return cached
-
-  const blocks: ThinkingBlock[] = []
-  const thinkRegex = /<think>([\s\S]*?)(<\/think>|$)/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = thinkRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      const before = text.slice(lastIndex, match.index).trim()
-      if (before) {
-        blocks.push(reactive({ isThinking: false, content: before, cls: 'content-block', collapsed: false }))
-      }
-    }
-    const thinkContent = match[1].trim()
-    if (thinkContent) {
-      blocks.push(reactive({ isThinking: true, content: thinkContent, cls: 'thinking-block', collapsed: false }))
-    }
-    lastIndex = match.index + match[0].length
-  }
-
-  if (lastIndex < text.length) {
-    const remaining = text.slice(lastIndex).trim()
-    if (remaining) {
-      blocks.push(reactive({ isThinking: false, content: remaining, cls: 'content-block', collapsed: false }))
-    }
-  }
-
-  if (blocks.length === 0 && text.trim()) {
-    blocks.push(reactive({ isThinking: false, content: text, cls: 'content-block', collapsed: false }))
-  }
-
-  return blocks
-}
-
-function isBeforeLastTool(segIdx: number): boolean {
+function getSegmentClass(segIdx: number): string {
   const segs = props.message.segments
-  if (!segs) return false
+  if (!segs) return 'content-block'
   const lastToolIdx = segs.reduce((acc, seg, i) => seg.type === 'tool' ? i : acc, -1)
-  return lastToolIdx >= 0 && segIdx < lastToolIdx
+  if (lastToolIdx >= 0 && segIdx < lastToolIdx) {
+    return 'thinking-block'
+  }
+  return 'content-block'
 }
 
 const modelLabel = computed(() => {

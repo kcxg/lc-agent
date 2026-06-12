@@ -60,6 +60,7 @@ class LcAgentApp:
                     connected = [s for s in self.mcp_manager.servers if s.status == "connected"]
                     if connected:
                         print(f"[MCP] Connected: {[s.name for s in connected]}")
+                        self.engine._mcp_generation += 1
                 except Exception as e:
                     print(f"[MCP] Background connection error: {e}")
 

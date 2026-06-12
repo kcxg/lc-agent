@@ -19,6 +19,8 @@ class AgentEngine:
         self._models: list[ModelInfo] = self._parse_models(config)
         self._presets: dict[str, AgentPreset] = {}
         self._custom_presets: dict[str, AgentPreset] = {}
+        self._agent_mcp_gen: dict[str, int] = {}
+        self._mcp_generation: int = 0
 
     def _parse_models(self, config: dict) -> list[ModelInfo]:
         """Extract ModelInfo list from config."""
@@ -161,12 +163,21 @@ class AgentEngine:
             return self._presets[preset_id]
         return self.get_default_preset()
 
+    def _get_or_build_agent(self, preset_id: str):
+        """Get cached agent or build a new one. Rebuilds if MCP state changed."""
+        preset = self._resolve_preset(preset_id)
+        mcp_gen = getattr(self, '_mcp_generation', 0)
+        cached = self._agents.get(preset_id)
+        cached_gen = self._agent_mcp_gen.get(preset_id, -1)
+        if cached is None or cached_gen != mcp_gen:
+            agent = self.build_agent(preset)
+            self._agent_mcp_gen[preset_id] = mcp_gen
+            return agent
+        return cached
+
     async def chat(self, message: str, thread_id: str, preset_id: str = "__chat__") -> str:
         """Send a message and get a response (non-streaming)."""
-        preset = self._resolve_preset(preset_id)
-        agent = self._agents.get(preset_id)
-        if agent is None:
-            agent = self.build_agent(preset)
+        agent = self._get_or_build_agent(preset_id)
 
         config = {"configurable": {"thread_id": thread_id}}
         result = await agent.ainvoke(
@@ -180,10 +191,7 @@ class AgentEngine:
 
     async def chat_stream(self, message: str, thread_id: str, preset_id: str = "__chat__") -> AsyncIterator[dict]:
         """Stream chat responses as events."""
-        preset = self._resolve_preset(preset_id)
-        agent = self._agents.get(preset_id)
-        if agent is None:
-            agent = self.build_agent(preset)
+        agent = self._get_or_build_agent(preset_id)
 
         config = {"configurable": {"thread_id": thread_id}}
         async for event in agent.astream_events(
