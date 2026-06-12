@@ -15,6 +15,11 @@ const router = createRouter({
       component: ChatView,
       props: true,
     },
+    {
+      path: '/test-segments',
+      name: 'test-segments',
+      component: () => import('@/views/TestSegments.vue'),
+    },
   ],
 })
 

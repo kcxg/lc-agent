@@ -16,16 +16,17 @@
         >✏️</button>
       </div>
       <div class="bubble-content">
-        <template v-if="message.role === 'assistant' && hasSegments">
-          <template v-for="(seg, idx) in message.segments" :key="idx">
+        <template v-if="message.role === 'assistant'">
+          <template v-for="(seg, idx) in renderedSegments" :key="idx">
             <ToolCallCard v-if="seg.type === 'tool' && seg.toolCall" :tool-call="seg.toolCall" :collapsed="true" />
-            <div v-else-if="seg.type === 'text' && seg.text" :class="getSegmentClass(idx)">
-              <div v-html="renderMd(seg.text)" class="markdown-body" />
+            <div v-else-if="seg.type === 'text' && seg.html" :class="seg.cls">
+              <div v-if="seg.cls === 'thinking-block'" class="thinking-header">
+                <span class="thinking-icon">💭</span>
+                <span class="thinking-label">思考中</span>
+              </div>
+              <div v-html="seg.html" class="markdown-body" />
             </div>
           </template>
-        </template>
-        <template v-else-if="message.role === 'assistant' && message.content">
-          <div class="markdown-body" v-html="renderedContent" />
         </template>
         <div v-else-if="message.role === 'user'" class="plain-text">{{ message.content }}</div>
 
@@ -43,7 +44,14 @@ import { renderMarkdown } from '@/utils/markdown'
 import { useToolsStore } from '@/stores/tools'
 import ToolCallCard from './ToolCallCard.vue'
 import TokenUsagePanel from './TokenUsagePanel.vue'
-import type { ChatMessage } from '@/stores/chat'
+import type { ChatMessage, ToolCall } from '@/stores/chat'
+
+interface RenderedSegment {
+  type: 'text' | 'tool'
+  html?: string
+  cls?: string
+  toolCall?: ToolCall
+}
 
 const props = defineProps<{
   message: ChatMessage
@@ -52,25 +60,44 @@ const props = defineProps<{
 defineEmits<{ edit: [] }>()
 const toolsStore = useToolsStore()
 
-const hasSegments = computed(() =>
-  props.message.segments && props.message.segments.length > 0
-)
+const renderedSegments = computed((): RenderedSegment[] => {
+  const content = props.message.content
+  if (!content) return []
 
-const renderedContent = computed(() => renderMarkdown(props.message.content))
+  const toolCalls = props.message.toolCalls || []
+  const toolMarkerRe = /<!--TOOL:(\d+)-->/g
+  const parts: RenderedSegment[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  let lastToolSegIdx = -1
 
-function renderMd(content: string): string {
-  return renderMarkdown(content)
-}
-
-function getSegmentClass(segIdx: number): string {
-  const segs = props.message.segments
-  if (!segs) return 'content-block'
-  const lastToolIdx = segs.reduce((acc, seg, i) => seg.type === 'tool' ? i : acc, -1)
-  if (lastToolIdx >= 0 && segIdx < lastToolIdx) {
-    return 'thinking-block'
+  while ((match = toolMarkerRe.exec(content)) !== null) {
+    const textBefore = content.slice(lastIndex, match.index).trim()
+    if (textBefore) {
+      parts.push({ type: 'text', html: renderMarkdown(textBefore), cls: 'thinking-block' })
+    }
+    const tcIdx = parseInt(match[1], 10)
+    if (toolCalls[tcIdx]) {
+      lastToolSegIdx = parts.length
+      parts.push({ type: 'tool', toolCall: toolCalls[tcIdx] })
+    }
+    lastIndex = match.index + match[0].length
   }
-  return 'content-block'
-}
+
+  const remaining = content.slice(lastIndex).trim()
+  if (remaining) {
+    parts.push({ type: 'text', html: renderMarkdown(remaining), cls: 'content-block' })
+  }
+
+  // Re-classify: text before the last tool = thinking, after = content
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].type === 'text') {
+      parts[i].cls = (lastToolSegIdx >= 0 && i < lastToolSegIdx) ? 'thinking-block' : 'content-block'
+    }
+  }
+
+  return parts
+})
 
 const modelLabel = computed(() => {
   const model = toolsStore.currentModel
@@ -162,9 +189,9 @@ const modelLabel = computed(() => {
 }
 
 .thinking-block {
-  background: linear-gradient(135deg, rgba(88, 166, 255, 0.04), rgba(163, 113, 247, 0.06));
-  border: 1px solid rgba(139, 148, 158, 0.15);
-  border-left: 3px solid rgba(163, 113, 247, 0.5);
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.2);
+  border-left: 3px solid rgba(234, 179, 8, 0.6);
   border-radius: 8px;
   padding: 10px 14px;
   margin: 8px 0;
@@ -188,7 +215,7 @@ const modelLabel = computed(() => {
 
 .thinking-label {
   font-size: 11px;
-  color: #a371f7;
+  color: #eab308;
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -200,26 +227,26 @@ const modelLabel = computed(() => {
   margin-left: auto;
 }
 
-.thinking-body {
+.thinking-block :deep(.markdown-body) {
   font-size: 12.5px !important;
-  color: #9198a1 !important;
+  color: #d4a017 !important;
   font-style: italic;
   line-height: 1.65;
-  opacity: 0.85;
+  opacity: 0.9;
 }
 
-.thinking-body :deep(p) {
-  color: #9198a1;
+.thinking-block :deep(.markdown-body p) {
+  color: #d4a017;
   margin: 4px 0;
 }
 
-.thinking-body :deep(code) {
-  background: rgba(110, 118, 129, 0.15);
-  color: #a5b4c5;
+.thinking-block :deep(.markdown-body code) {
+  background: rgba(234, 179, 8, 0.12);
+  color: #eab308;
 }
 
-.thinking-body :deep(strong) {
-  color: #b0bac5;
+.thinking-block :deep(.markdown-body strong) {
+  color: #facc15;
   font-style: normal;
 }
 

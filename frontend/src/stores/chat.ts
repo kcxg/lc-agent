@@ -78,20 +78,12 @@ export const useChatStore = defineStore('chat', () => {
           content: '',
           timestamp: Date.now(),
           isStreaming: true,
-          segments: [],
           usage: { rounds: [], toolCallCount: 0 },
         })
       }
       const last = messages.value[messages.value.length - 1]
       if (last && last.role === 'assistant') {
         last.content += msg.content || ''
-        if (!last.segments) last.segments = []
-        const lastSeg = last.segments[last.segments.length - 1]
-        if (lastSeg && lastSeg.type === 'text') {
-          lastSeg.text = (lastSeg.text || '') + (msg.content || '')
-        } else {
-          last.segments.push({ type: 'text', text: msg.content || '' })
-        }
       }
     })
 
@@ -113,9 +105,24 @@ export const useChatStore = defineStore('chat', () => {
 
 
     ws.value.on('tool_call', (msg: WsMessage) => {
+      // Ensure assistant message exists (DeepSeek may call tools before emitting tokens)
+      if (!isStreaming.value) {
+        isStreaming.value = true
+        streamStartTime = Date.now()
+        currentRoundStart = Date.now()
+        messages.value.push({
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+          isStreaming: true,
+          usage: { rounds: [], toolCallCount: 0 },
+        })
+      }
       const last = messages.value[messages.value.length - 1]
       if (last && last.role === 'assistant') {
         if (!last.toolCalls) last.toolCalls = []
+        const tcIdx = last.toolCalls.length
         const tc: ToolCall = {
           name: msg.name || '',
           args: msg.args,
@@ -123,8 +130,7 @@ export const useChatStore = defineStore('chat', () => {
           startTime: Date.now(),
         }
         last.toolCalls.push(tc)
-        if (!last.segments) last.segments = []
-        last.segments.push({ type: 'tool', toolCall: tc })
+        last.content += `\n<!--TOOL:${tcIdx}-->\n`
         if (last.usage) {
           last.usage.toolCallCount++
         }
