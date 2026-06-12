@@ -44,11 +44,27 @@ const statusLabel = computed(() => {
 
 <style scoped>
 .tool-call-card {
-  border: 1px solid var(--lc-border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin: 4px 0;
-  background: var(--lc-bg-secondary);
+  border: 1px solid var(--lc-glass-border);
+  border-radius: var(--lc-radius-md);
+  padding: 10px 14px;
+  margin: 6px 0;
+  background: var(--lc-glass-bg);
+  border-left: 3px solid var(--lc-text-secondary);
+  transition: border-color var(--lc-transition-normal), box-shadow var(--lc-transition-normal);
+  animation: float-in var(--lc-transition-slow) ease both;
+}
+
+.tool-call-card.running {
+  border-left-color: var(--lc-accent);
+  box-shadow: 0 0 12px rgba(88, 166, 255, 0.08);
+}
+
+.tool-call-card.done {
+  border-left-color: var(--lc-success);
+}
+
+.tool-call-card.error {
+  border-left-color: var(--lc-danger);
 }
 
 .tool-header {
@@ -58,29 +74,33 @@ const statusLabel = computed(() => {
 }
 
 .tool-name {
-  font-family: monospace;
-  font-size: 13px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
   color: var(--lc-accent);
+  font-weight: 500;
 }
 
 .tool-result {
   margin-top: 8px;
-  padding: 8px;
-  background: var(--lc-bg-primary);
-  border-radius: 4px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--lc-radius-sm);
   font-size: 12px;
   max-height: 200px;
   overflow-y: auto;
+  border: 1px solid var(--lc-glass-border);
 }
 
 .tool-result pre {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
+  color: var(--lc-text-secondary);
 }
 
 .spinning {
   animation: spin 1s linear infinite;
+  color: var(--lc-accent);
 }
 
 @keyframes spin {

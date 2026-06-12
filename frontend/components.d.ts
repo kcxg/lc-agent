@@ -15,6 +15,7 @@ declare module 'vue' {
     AppHeader: typeof import('./src/components/layout/AppHeader.vue')['default']
     ChatBubble: typeof import('./src/components/chat/ChatBubble.vue')['default']
     ChatInput: typeof import('./src/components/chat/ChatInput.vue')['default']
+    ElAlert: typeof import('element-plus/es')['ElAlert']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
     ElCheckboxGroup: typeof import('element-plus/es')['ElCheckboxGroup']

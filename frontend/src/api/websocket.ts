@@ -2,6 +2,7 @@ export interface WsMessage {
   type: string
   content?: string
   thread_id?: string
+  title?: string
   name?: string
   result?: string
   message?: string

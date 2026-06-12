@@ -31,6 +31,7 @@ class LcAgentApp:
         self.fastapi_app.state.mcp_manager = self.mcp_manager
         self.fastapi_app.state.skill_scanner = self.skill_scanner
         self.engine._skill_scanner = self.skill_scanner
+        self.engine._mcp_manager = self.mcp_manager
         self.fastapi_app.state.engine = self.engine
         self._ws_handler = ChatWebSocketHandler(self.engine)
         self._setup_websocket_route()
@@ -48,6 +49,8 @@ class LcAgentApp:
                 self.engine._checkpointer = saver
             except Exception as e:
                 print(f"[Warning] Checkpoint saver setup failed, using None: {e}")
+
+            await self._load_presets_from_db()
 
             import asyncio
 
@@ -83,6 +86,37 @@ class LcAgentApp:
             except WebSocketDisconnect:
                 await self._ws_handler.disconnect(tid)
 
+    async def _load_presets_from_db(self):
+        """Load user-created presets from database on startup."""
+        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.models import AgentPresetDB
+        from lc_agent.core.models import AgentPreset
+        from sqlalchemy import select
+
+        session = get_async_session(self._db_url)
+        try:
+            stmt = select(AgentPresetDB)
+            result = await session.execute(stmt)
+            for row in result.scalars().all():
+                preset = AgentPreset(
+                    id=row.id,
+                    name=row.name,
+                    system_prompt=row.system_prompt,
+                    default_model=row.default_model,
+                    allowed_tool_groups=row.allowed_tool_groups,
+                    allowed_mcp_servers=row.allowed_mcp_servers,
+                    allowed_skills=row.allowed_skills,
+                    dangerous_tools=row.dangerous_tools,
+                )
+                self.engine._presets[preset.id] = preset
+            loaded = len(self.engine._presets)
+            if loaded:
+                print(f"[Agents] Loaded {loaded} user presets from database")
+        except Exception as e:
+            print(f"[Warning] Failed to load presets from DB: {e}")
+        finally:
+            await session.close()
+
     def add_agent(self, name: str, graph, description: str = ""):
         """Register a pre-built CompiledStateGraph as a named agent.
 
@@ -102,6 +136,7 @@ class LcAgentApp:
             name=name,
             system_prompt=description or f"Custom agent: {name}",
             default_model="custom",
+            source="code",
         )
         self.engine._custom_presets[name] = preset
 

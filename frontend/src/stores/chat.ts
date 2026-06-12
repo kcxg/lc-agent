@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { ChatWebSocket, type WsMessage } from '@/api/websocket'
+import { useSessionsStore } from '@/stores/sessions'
+import { api } from '@/api/http'
 
 export interface ChatMessage {
   id: string
@@ -103,6 +105,13 @@ export const useChatStore = defineStore('chat', () => {
       }))
     })
 
+    ws.value.on('title_update', (msg: WsMessage) => {
+      if (msg.thread_id && msg.title) {
+        const sessionsStore = useSessionsStore()
+        sessionsStore.updateTitleLocal(msg.thread_id, msg.title)
+      }
+    })
+
     try {
       const tid = await ws.value.connect(existingThreadId)
       threadId.value = tid
@@ -113,7 +122,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function sendMessage(content: string, presetId: string = '__default__') {
+  function sendMessage(content: string, presetId: string = '__chat__') {
     if (!ws.value || !content.trim()) return
 
     messages.value.push({
@@ -130,9 +139,54 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  function respondToInterrupt(approved: boolean, presetId: string = '__default__') {
+  function respondToInterrupt(approved: boolean, presetId: string = '__chat__') {
     ws.value?.sendInterruptResponse(approved, presetId)
     interrupt.value = null
+  }
+
+  async function loadMessages(sessionId: string) {
+    try {
+      const rawMessages = await api.getSessionMessages(sessionId)
+      if (!rawMessages || rawMessages.length === 0) return
+
+      const loaded: ChatMessage[] = []
+      for (const msg of rawMessages) {
+        if (msg.role === 'human') {
+          loaded.push({
+            id: crypto.randomUUID(),
+            role: 'user',
+            content: msg.content || '',
+            timestamp: Date.now(),
+          })
+        } else if (msg.role === 'ai') {
+          const chatMsg: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: msg.content || '',
+            timestamp: Date.now(),
+          }
+          if (msg.tool_calls && msg.tool_calls.length > 0) {
+            chatMsg.toolCalls = msg.tool_calls.map((tc: any) => ({
+              name: tc.name,
+              args: tc.args,
+              status: 'done' as const,
+            }))
+          }
+          loaded.push(chatMsg)
+        } else if (msg.role === 'tool') {
+          const lastAssistant = [...loaded].reverse().find(m => m.role === 'assistant')
+          if (lastAssistant?.toolCalls) {
+            const tc = lastAssistant.toolCalls.find(t => t.name === msg.name && !t.result)
+            if (tc) {
+              tc.result = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+            }
+          }
+        }
+      }
+      messages.value = loaded
+    } catch (e) {
+      console.error('[Chat] Failed to load messages:', e)
+    }
   }
 
   function clearMessages() {
@@ -152,6 +206,7 @@ export const useChatStore = defineStore('chat', () => {
     interrupt,
     lastMessage,
     connect,
+    loadMessages,
     sendMessage,
     respondToInterrupt,
     clearMessages,

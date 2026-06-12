@@ -44,14 +44,23 @@ function handleKeydown(e: KeyboardEvent) {
 <style scoped>
 .chat-input-wrapper {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: flex-end;
-  padding: 12px 16px;
-  border-top: 1px solid var(--lc-border);
-  background: var(--lc-bg-secondary);
+  padding: 14px 20px;
+  background: var(--lc-glass-bg);
+  border-top: 1px solid var(--lc-glass-border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .chat-input-wrapper .el-textarea {
   flex: 1;
+}
+
+.chat-input-wrapper :deep(.el-textarea__inner) {
+  background: transparent !important;
+  color: var(--lc-text-primary);
+  font-size: 14px;
+  line-height: 1.6;
 }
 </style>

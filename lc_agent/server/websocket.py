@@ -1,4 +1,5 @@
 # lc_agent/server/websocket.py
+import asyncio
 import uuid
 from typing import Any
 
@@ -13,6 +14,7 @@ class ChatWebSocketHandler:
     def __init__(self, engine: AgentEngine):
         self.engine = engine
         self.active_connections: dict[str, WebSocket] = {}
+        self._message_counts: dict[str, int] = {}
 
     async def connect(self, websocket: WebSocket, thread_id: str | None = None) -> str:
         """Accept WebSocket connection."""
@@ -33,17 +35,23 @@ class ChatWebSocketHandler:
 
         if msg_type == "message":
             content = data.get("content", "")
-            preset_id = data.get("preset_id", "__default__")
+            preset_id = data.get("preset_id", "__chat__")
             try:
                 async for event in self.engine.chat_stream(content, thread_id, preset_id):
                     await self._send_event(websocket, event)
                 await websocket.send_json({"type": "done"})
+
+                self._message_counts[thread_id] = self._message_counts.get(thread_id, 0) + 1
+                if self._message_counts[thread_id] == 1:
+                    asyncio.create_task(
+                        self._generate_and_push_title(websocket, thread_id, content, preset_id)
+                    )
             except Exception as e:
                 await websocket.send_json({"type": "error", "message": str(e)})
 
         elif msg_type == "interrupt_response":
             approved = data.get("approved", False)
-            preset_id = data.get("preset_id", "__default__")
+            preset_id = data.get("preset_id", "__chat__")
             try:
                 from langgraph.types import Command
 
@@ -64,6 +72,34 @@ class ChatWebSocketHandler:
                 await websocket.send_json({"type": "done"})
             except Exception as e:
                 await websocket.send_json({"type": "error", "message": str(e)})
+
+    async def _generate_and_push_title(self, websocket: WebSocket, thread_id: str, first_message: str, preset_id: str = "__chat__"):
+        """Generate title from first message using the agent's model, save to DB, and push to client."""
+        try:
+            model_id = ""
+            if preset_id in self.engine.BUILTIN_IDS:
+                for bp in self.engine.get_builtin_presets():
+                    if bp.id == preset_id:
+                        model_id = bp.default_model
+                        break
+            else:
+                preset = self.engine._presets.get(preset_id) or self.engine._custom_presets.get(preset_id)
+                if preset:
+                    model_id = preset.default_model
+            title = await self.engine.generate_title(first_message, model_id)
+
+            from lc_agent.db.engine import get_async_session
+            from lc_agent.db.repository import SessionRepository
+            session = get_async_session()
+            try:
+                repo = SessionRepository(session)
+                await repo.update(thread_id, title=title)
+            finally:
+                await session.close()
+
+            await websocket.send_json({"type": "title_update", "thread_id": thread_id, "title": title})
+        except Exception as e:
+            print(f"[WS] Title generation failed: {e}")
 
     async def _send_event(self, websocket: WebSocket, event: dict):
         """Convert LangGraph astream_events v2 to client-friendly format."""
