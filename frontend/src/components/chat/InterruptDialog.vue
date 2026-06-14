@@ -42,19 +42,19 @@ function reject() {
 .action-item {
   margin-bottom: 14px;
   padding: 12px;
-  background: var(--lc-glass-bg);
-  border: 1px solid var(--lc-glass-border);
-  border-radius: var(--lc-radius-md);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
 }
 
 .action-args {
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--el-fill-color);
   padding: 10px;
-  border-radius: var(--lc-radius-sm);
+  border-radius: 6px;
   font-size: 12px;
   overflow-x: auto;
   margin-top: 8px;
-  border: 1px solid var(--lc-glass-border);
+  border: 1px solid var(--el-border-color);
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 </style>

@@ -200,7 +200,7 @@ export const useChatStore = defineStore('chat', () => {
         const usageData = (msg as any).usage as any[] | undefined
         if (usageData && usageData.length > 0 && last.usage) {
           if (last.usage.rounds.length === 0) {
-            last.usage.rounds = usageData.map((r: any) => ({
+            const newRounds = usageData.map((r: any) => ({
               inputTokens: r.input_tokens || 0,
               outputTokens: r.output_tokens || 0,
               totalTokens: r.total_tokens || 0,
@@ -208,6 +208,7 @@ export const useChatStore = defineStore('chat', () => {
               reasoningTokens: r.reasoning_tokens || 0,
               duration: r.duration_ms || undefined,
             }))
+            last.usage.rounds.splice(0, last.usage.rounds.length, ...newRounds)
           }
         }
       }

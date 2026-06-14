@@ -269,9 +269,9 @@ defineExpose({ open })
 .custom-groups {
   margin-top: 8px;
   padding: 10px;
-  background: var(--lc-glass-bg-hover);
-  border: 1px solid var(--lc-glass-border);
-  border-radius: var(--lc-radius-md);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
   max-height: 200px;
   overflow-y: auto;
 }
@@ -284,7 +284,7 @@ defineExpose({ open })
 
 .skill-hint {
   font-size: 11px;
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
   margin-left: 4px;
   opacity: 0.7;
 }

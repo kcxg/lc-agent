@@ -4,166 +4,163 @@
       <transition name="fade">
         <span v-if="!collapsed" class="sidebar-brand">Chats</span>
       </transition>
-      <button class="toggle-btn" @click="emit('toggleCollapse')" :title="collapsed ? '展开侧边栏' : '收起侧边栏'">
-        <span class="toggle-icon" :class="{ flipped: collapsed }">«</span>
+      <div v-if="!collapsed" class="header-actions">
+        <button class="action-btn" @click="toggleAllGroups" :title="allCollapsed ? '全部展开' : '全部折叠'">
+          <span v-if="allCollapsed">⊞</span>
+          <span v-else>⊟</span>
+        </button>
+        <button class="toggle-btn" @click="emit('toggleCollapse')" :title="collapsed ? '展开侧边栏' : '收起侧边栏'">
+          <span class="toggle-icon" :class="{ flipped: collapsed }">«</span>
+        </button>
+      </div>
+      <button v-else class="toggle-btn" @click="emit('toggleCollapse')" title="展开侧边栏">
+        <span class="toggle-icon flipped">«</span>
       </button>
     </div>
 
-    <div v-if="!collapsed" class="session-scroll">
-      <div v-for="group in sessionsStore.groupedByAgent" :key="group.agentId" class="agent-group">
-        <div class="agent-group-header" @click="toggleGroup(group.agentId)">
-          <span class="chevron" :class="{ expanded: !collapsedGroups[group.agentId] }">›</span>
-          <span class="agent-dot" :class="`dot-${group.agentSource}`" />
-          <span class="agent-name">{{ group.agentName }}</span>
-          <span class="source-tag" :class="`tag-${group.agentSource}`">
-            {{ group.agentSource === 'builtin' ? '内置' : group.agentSource === 'code' ? '代码' : '自建' }}
-          </span>
-          <span class="session-count">{{ group.sessions.length }}</span>
-        </div>
-        <transition name="slide">
-          <div v-show="!collapsedGroups[group.agentId]" class="agent-group-body">
-            <div
-              v-for="session in group.sessions"
-              :key="session.id"
-              class="session-item"
-              :class="{ active: session.id === sessionsStore.currentSessionId }"
-              @click="emit('switchSession', session.id)"
-              @contextmenu.prevent="openMenu($event, session)"
-            >
-              <template v-if="renaming === session.id">
-                <input
-                  class="rename-input"
-                  v-model="renameInput"
-                  @keyup.enter="confirmRename(session.id)"
-                  @keyup.escape="cancelRename"
-                  @blur="confirmRename(session.id)"
-                />
-              </template>
-              <template v-else>
-                <span class="session-title">{{ session.title }}</span>
-                <span class="session-time">{{ formatTime(session.updated_at) }}</span>
-              </template>
-            </div>
-          </div>
-        </transition>
-      </div>
-
-      <div v-if="!sessionsStore.sessions.length" class="empty-state">
-        <span class="empty-icon">💬</span>
-        <span class="empty-text">暂无会话</span>
-      </div>
-    </div>
-
-    <teleport to="body">
-      <div v-if="menuVisible" class="menu-backdrop" @click="closeMenu" />
-      <div
-        v-if="menuVisible"
-        class="context-menu"
-        :style="{ left: menuPosition.x + 'px', top: menuPosition.y + 'px' }"
+    <div v-if="!collapsed" class="session-list">
+      <Conversations
+        v-model:active="currentSessionId"
+        :items="conversationItems"
+        :show-tooltip="true"
+        :show-built-in-menu="true"
+        :groupable="true"
+        ungrouped-title="未分组"
+        row-key="id"
+        @change="handleSessionChange"
+        @menu-command="handleMenuCommand"
       >
-        <div class="menu-item" @click="startRename">
-          <span class="menu-icon">✏️</span> 重命名
-        </div>
-        <div class="menu-divider" />
-        <div class="menu-item menu-item-danger" @click="deleteTarget">
-          <span class="menu-icon">🗑️</span> 删除
-        </div>
-      </div>
-    </teleport>
+        <template #groupTitle="{ group }">
+          <div
+            class="group-header"
+            :data-group="group.title"
+            :class="{ 'is-collapsed': collapsedGroups.has(group.title) }"
+            @click.stop="toggleGroup(group.title)"
+          >
+            <span class="group-arrow" :class="{ collapsed: collapsedGroups.has(group.title) }">▶</span>
+            <span class="group-name">{{ group.title }}</span>
+            <span class="group-count">{{ group.children?.length || 0 }}</span>
+          </div>
+        </template>
+      </Conversations>
+    </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick } from 'vue'
-import { useSessionsStore, type Session } from '@/stores/sessions'
+import { computed, ref, watchEffect, nextTick, onMounted } from 'vue'
+import { ElMessageBox } from 'element-plus'
+import { Conversations } from 'vue-element-plus-x'
+import type { ConversationItem, ConversationMenuCommand } from 'vue-element-plus-x/types/Conversations'
+import { useSessionsStore } from '@/stores/sessions'
+import { useAgentsStore } from '@/stores/agents'
 
 defineProps<{ collapsed: boolean }>()
 
 const sessionsStore = useSessionsStore()
+const agentsStore = useAgentsStore()
 const emit = defineEmits<{ newChat: []; switchSession: [id: string]; toggleCollapse: [] }>()
 
-const collapsedGroups = reactive<Record<string, boolean>>({})
-const menuVisible = ref(false)
-const menuPosition = ref({ x: 0, y: 0 })
-const menuTarget = ref<Session | null>(null)
-const renaming = ref<string | null>(null)
-const renameInput = ref('')
+const collapsedGroups = ref<Set<string>>(new Set())
 
-function toggleGroup(agentId: string) {
-  collapsedGroups[agentId] = !collapsedGroups[agentId]
+const allCollapsed = computed(() => {
+  const groupNames = new Set(conversationItems.value.map(i => i.group).filter(Boolean))
+  return groupNames.size > 0 && groupNames.size === collapsedGroups.value.size
+})
+
+function toggleGroup(title: string) {
+  if (collapsedGroups.value.has(title)) {
+    collapsedGroups.value.delete(title)
+  } else {
+    collapsedGroups.value.add(title)
+  }
+  nextTick(syncCollapsedDOM)
 }
 
-function openMenu(event: MouseEvent, session: Session) {
-  menuTarget.value = session
-  menuPosition.value = { x: event.clientX, y: event.clientY }
-  menuVisible.value = true
-}
-
-function closeMenu() {
-  menuVisible.value = false
-  menuTarget.value = null
-}
-
-function startRename() {
-  if (!menuTarget.value) return
-  renaming.value = menuTarget.value.id
-  renameInput.value = menuTarget.value.title
-  closeMenu()
-  nextTick(() => {
-    const input = document.querySelector('.rename-input') as HTMLInputElement
-    input?.focus()
-    input?.select()
+function syncCollapsedDOM() {
+  const headers = document.querySelectorAll('.group-header[data-group]')
+  headers.forEach(header => {
+    const groupName = header.getAttribute('data-group') || ''
+    const groupItems = header.closest('.elx-conversations__group')?.querySelector('.elx-conversations__group-items') as HTMLElement | null
+    if (groupItems) {
+      if (collapsedGroups.value.has(groupName)) {
+        groupItems.style.display = 'none'
+      } else {
+        groupItems.style.display = ''
+      }
+    }
   })
 }
 
-async function confirmRename(sessionId: string) {
-  if (renameInput.value.trim()) {
-    await sessionsStore.updateTitle(sessionId, renameInput.value.trim())
+function toggleAllGroups() {
+  if (allCollapsed.value) {
+    collapsedGroups.value.clear()
+  } else {
+    const groupNames = new Set(conversationItems.value.map(i => i.group).filter(Boolean))
+    collapsedGroups.value = groupNames as Set<string>
   }
-  renaming.value = null
+  nextTick(syncCollapsedDOM)
 }
 
-function cancelRename() {
-  renaming.value = null
+const conversationItems = computed<ConversationItem[]>(() =>
+  sessionsStore.sessions.map(s => ({
+    id: s.id,
+    label: s.title || 'New Chat',
+    group: agentsStore.getAgentName(s.agent_id || '__chat__'),
+  }))
+)
+
+const currentSessionId = computed({
+  get: () => sessionsStore.currentSessionId ?? undefined,
+  set: (_val: string | number | undefined) => { /* handled by @change */ },
+})
+
+function handleSessionChange(item: ConversationItem) {
+  emit('switchSession', String(item.id))
 }
 
-async function deleteTarget() {
-  if (!menuTarget.value) return
-  const id = menuTarget.value.id
-  const wasCurrent = id === sessionsStore.currentSessionId
-  closeMenu()
-  await sessionsStore.deleteSession(id)
-  if (wasCurrent) {
-    if (sessionsStore.sessions.length > 0) {
-      emit('switchSession', sessionsStore.sessions[0].id)
-    } else {
-      emit('newChat')
+async function handleMenuCommand(command: ConversationMenuCommand, item: ConversationItem) {
+  const id = String(item.id)
+  const cmd = typeof command === 'string' ? command : String(command)
+
+  if (cmd === 'rename') {
+    try {
+      const { value } = await ElMessageBox.prompt('输入新标题', '重命名', {
+        inputValue: item.label || '',
+        inputValidator: (v) => !!v?.trim() || '标题不能为空',
+      })
+      if (value?.trim()) {
+        await sessionsStore.updateTitle(id, value.trim())
+      }
+    } catch {
+      // cancelled
+    }
+    return
+  }
+
+  if (cmd === 'delete') {
+    const wasCurrent = id === sessionsStore.currentSessionId
+    await sessionsStore.deleteSession(id)
+    if (wasCurrent) {
+      if (sessionsStore.sessions.length > 0) {
+        emit('switchSession', sessionsStore.sessions[0].id)
+      } else {
+        emit('newChat')
+      }
     }
   }
-}
-
-function formatTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes}分前`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}时前`
-  const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}天前`
-  return new Date(iso).toLocaleDateString()
 }
 </script>
 
 <style scoped>
 .left-sidebar {
-  width: 270px;
-  background: #0d1117;
-  border-right: 1px solid #21262d;
+  width: 260px;
+  background: var(--el-bg-color);
+  border-right: 1px solid var(--el-border-color);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .left-sidebar.collapsed {
@@ -174,16 +171,42 @@ function formatTime(iso: string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 14px 10px;
+  padding: 12px;
   flex-shrink: 0;
-  border-bottom: 1px solid #21262d;
+  border-bottom: 1px solid var(--el-border-color);
 }
 
 .sidebar-brand {
   font-size: 14px;
   font-weight: 700;
-  color: #c9d1d9;
+  color: var(--el-text-color-primary);
   letter-spacing: 0.3px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.action-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s ease;
+}
+
+.action-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
 }
 
 .toggle-btn {
@@ -195,15 +218,15 @@ function formatTime(iso: string): string {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #8b949e;
+  color: var(--el-text-color-secondary);
   cursor: pointer;
   font-size: 14px;
   transition: all 0.15s ease;
 }
 
 .toggle-btn:hover {
-  background: #21262d;
-  color: #c9d1d9;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
 }
 
 .toggle-icon {
@@ -215,278 +238,121 @@ function formatTime(iso: string): string {
   transform: rotate(180deg);
 }
 
-
-.session-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 0;
-}
-
-.session-scroll::-webkit-scrollbar {
-  width: 4px;
-}
-.session-scroll::-webkit-scrollbar-thumb {
-  background: #30363d;
-  border-radius: 4px;
-}
-
-.agent-group {
-  margin-bottom: 0;
-}
-
-.agent-group-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 11px 14px;
-  margin: 0 8px 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  user-select: none;
-  background: linear-gradient(135deg, #1a3052 0%, #162544 100%);
-  border: 1px solid #234876;
-  border-radius: 8px;
-  position: sticky;
-  top: 4px;
-  z-index: 1;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-  margin-top: 8px;
-}
-
-.agent-group-header:hover {
-  background: linear-gradient(135deg, #1f3a62 0%, #1a2d50 100%);
-  border-color: #2d5a9e;
-}
-
-.chevron {
-  font-size: 11px;
-  color: #8b949e;
-  transition: transform 0.2s ease;
-  width: 12px;
-  text-align: center;
-}
-
-.chevron.expanded {
-  transform: rotate(90deg);
-}
-
-.agent-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.dot-builtin {
-  background: #58a6ff;
-}
-
-.dot-code {
-  background: #d29922;
-}
-
-.dot-user {
-  background: #3fb950;
-}
-
-.source-tag {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
-.tag-builtin {
-  background: #1c3a5e;
-  color: #58a6ff;
-}
-
-.tag-code {
-  background: #3d2e00;
-  color: #d29922;
-}
-
-.tag-user {
-  background: #0f2d16;
-  color: #3fb950;
-}
-
-.agent-name {
-  font-size: 13px;
-  font-weight: 700;
-  color: #79b8ff;
+.session-list {
   flex: 1;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.session-count {
-  font-size: 10px;
-  color: #8b949e;
-  background: #21262d;
-  padding: 1px 6px;
-  border-radius: 10px;
-  font-weight: 500;
-  min-width: 18px;
-  text-align: center;
-}
-
-.agent-group-body {
-  padding: 4px 8px;
-  background: #0d1117;
-}
-
-.session-item {
-  display: flex;
-  align-items: center;
-  padding: 7px 12px;
-  margin: 1px 0;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  color: #7d8590;
-  transition: all 0.15s ease;
-  position: relative;
-  background: transparent;
-}
-
-.session-item:hover {
-  background: #21262d;
-  color: #c9d1d9;
-}
-
-.session-item.active {
-  background: #161b22;
-  color: #c9d1d9;
-  border-left: 2px solid #58a6ff;
-  padding-left: 10px;
-}
-
-.session-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  margin-right: 8px;
-  line-height: 1.4;
-}
-
-.session-time {
-  font-size: 10px;
-  color: #484f58;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.session-item:hover .session-time {
-  opacity: 1;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 40px 16px;
-  color: #484f58;
-}
-
-.empty-icon {
-  font-size: 24px;
-}
-
-.empty-text {
-  font-size: 12px;
-}
-
-.rename-input {
+.session-list :deep(.elx-conversations) {
+  height: 100%;
   width: 100%;
-  padding: 4px 8px;
-  font-size: 13px;
-  border: 1px solid #58a6ff;
+  --elx-conversations-list-auto-bg-color: transparent !important;
+}
+
+.session-list :deep(.elx-conversations__list) {
+  width: 100% !important;
+  height: 100% !important;
+  padding: 4px 4px !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border-radius: 0 !important;
+}
+
+.session-list :deep(.elx-conversations-item) {
+  margin: 0;
+  padding: 8px 8px;
+  border-radius: 6px;
+  color: var(--el-text-color-regular);
+}
+
+.session-list :deep(.elx-conversations-item__label) {
+  max-width: none !important;
+  color: var(--el-text-color-regular) !important;
+}
+
+.session-list :deep(.elx-conversations-item--active) {
+  background: var(--el-color-primary-light-9) !important;
+}
+
+.session-list :deep(.elx-conversations-item--active .elx-conversations-item__label) {
+  color: var(--el-color-primary) !important;
+  font-weight: 600;
+}
+
+/* Group header custom styling */
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 4px 8px;
+  margin-top: 4px;
+  cursor: pointer;
+  border-top: 1px solid var(--el-border-color-lighter);
+  user-select: none;
+  transition: background 0.15s;
   border-radius: 4px;
-  background: #0d1117;
-  color: #e6edf3;
-  outline: none;
 }
 
-.rename-input:focus {
-  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.3);
+.group-header:hover {
+  background: var(--el-fill-color-lighter);
 }
 
-.slide-enter-active, .slide-leave-active {
-  transition: all 0.2s ease;
+.session-list :deep(.elx-conversations__group:first-child .group-header) {
+  border-top: none;
+  margin-top: 0;
+}
+
+.group-arrow {
+  font-size: 9px;
+  color: var(--el-text-color-secondary);
+  transition: transform 0.2s ease;
+  transform: rotate(90deg);
+  flex-shrink: 0;
+}
+
+.group-arrow.collapsed {
+  transform: rotate(0deg);
+}
+
+.group-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  letter-spacing: 0.3px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-count {
+  font-size: 10px;
+  color: var(--el-text-color-placeholder);
+  background: var(--el-fill-color);
+  padding: 1px 5px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+/* Hide group items when collapsed */
+.session-list :deep(.elx-conversations__group-items) {
+  transition: max-height 0.25s ease, opacity 0.2s ease;
   overflow: hidden;
 }
-.slide-enter-from, .slide-leave-to {
-  max-height: 0;
-  opacity: 0;
-}
-.slide-enter-to, .slide-leave-from {
-  max-height: 500px;
-  opacity: 1;
+
+/* Reset EPX default group title styling (we use custom slot content) */
+.session-list :deep(.elx-conversations__group-title) {
+  all: unset !important;
+  display: block !important;
 }
 
-.fade-enter-active, .fade-leave-active {
+.fade-enter-active,
+.fade-leave-active {
   transition: opacity 0.2s ease;
 }
-.fade-enter-from, .fade-leave-to {
+
+.fade-enter-from,
+.fade-leave-to {
   opacity: 0;
-}
-</style>
-
-<style>
-.context-menu {
-  position: fixed;
-  z-index: 9999;
-  background: #1c2128;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  padding: 4px;
-  min-width: 140px;
-}
-
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  font-size: 13px;
-  border-radius: 5px;
-  cursor: pointer;
-  color: #c9d1d9;
-  transition: background 0.12s ease;
-}
-
-.menu-item:hover {
-  background: #30363d;
-}
-
-.menu-item-danger {
-  color: #f87171;
-}
-
-.menu-item-danger:hover {
-  background: #3d1f1f;
-}
-
-.menu-icon {
-  font-size: 14px;
-}
-
-.menu-divider {
-  height: 1px;
-  background: #30363d;
-  margin: 3px 8px;
-}
-
-.menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 9998;
 }
 </style>

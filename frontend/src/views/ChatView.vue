@@ -1,44 +1,63 @@
 <template>
   <div class="chat-view">
     <div class="messages-container">
-      <div class="messages-area" ref="messagesRef">
-        <div v-if="!messages.length" class="empty-state">
-          <div class="empty-icon">⚡</div>
-          <p>开始新的对话</p>
-        </div>
-        <TransitionGroup name="msg" tag="div">
-          <ChatBubble
-            v-for="(msg, idx) in messages"
-            :key="msg.id"
-            :ref="el => setBubbleRef(idx, el)"
-            :message="msg"
-            :show-edit="msg.role === 'user' && idx === lastUserMsgIndex && !isStreaming"
-            @edit="handleEdit(idx)"
-          />
-        </TransitionGroup>
-      </div>
-
-      <div v-if="userMessages.length > 1" class="msg-nav">
-        <div class="msg-nav-label">Q</div>
-        <button
-          v-for="(um, i) in userMessages"
-          :key="um.idx"
-          class="msg-nav-dot"
-          :class="{ active: um.idx === nearestUserMsgIdx }"
-          :title="um.preview"
-          @click="scrollToMessage(um.idx)"
-        >
-          <span class="dot-num">{{ i + 1 }}</span>
-        </button>
-      </div>
+      <Welcome
+        v-if="messages.length === 0 && !isLoading"
+        title="Start a conversation"
+        description="Ask me anything"
+        variant="borderless"
+      />
+      <BubbleList
+        v-else
+        :list="bubbleList"
+        max-height="100%"
+        :auto-scroll="isStreaming"
+        :virtual="false"
+      >
+        <template #content="{ item }">
+          <div class="bubble-content-wrap">
+            <template v-if="item.segments && item.segments.length > 0">
+              <template v-for="(seg, segIdx) in item.segments" :key="segIdx">
+                <div
+                  v-if="seg.type === 'text' && seg.text"
+                  class="markdown-body"
+                  v-html="renderMarkdown(seg.text)"
+                />
+                <div v-else-if="seg.type === 'tool' && item.toolCalls && seg.toolIndex != null" class="tool-call-inline">
+                  <ToolCallCard
+                    :tool-call="item.toolCalls[seg.toolIndex!]"
+                    :collapsed="item.toolCalls[seg.toolIndex!]?.status === 'done'"
+                  />
+                </div>
+              </template>
+            </template>
+            <template v-else>
+              <div
+                v-if="item.isMarkdown"
+                class="markdown-body"
+                v-html="renderMarkdown(stripThinkingMarkers(item.content || ''))"
+              />
+              <span v-else>{{ item.content }}</span>
+            </template>
+            <TokenUsagePanel
+              v-if="item.usage"
+              :usage="item.usage"
+              :tool-calls="item.toolCalls"
+            />
+          </div>
+        </template>
+      </BubbleList>
+      <Thinking
+        v-if="isLoading && !isStreaming"
+        status="thinking"
+        content=""
+      />
     </div>
 
     <ChatInput
       :is-streaming="isStreaming"
-      :edit-content="editContent"
       @send="handleSend"
       @stop="handleStop"
-      @cancel-edit="handleCancelEdit"
     />
 
     <InterruptDialog
@@ -49,238 +68,188 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
+import { BubbleList, Thinking, Welcome } from 'vue-element-plus-x'
+import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
 import { useChatStore } from '@/stores/chat'
+import type { ToolCall, MessageUsage } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
-import ChatBubble from '@/components/chat/ChatBubble.vue'
+import { renderMarkdown } from '@/utils/markdown'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import InterruptDialog from '@/components/chat/InterruptDialog.vue'
+import ToolCallCard from '@/components/chat/ToolCallCard.vue'
+import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
+
+interface ContentSegment {
+  type: 'text' | 'tool'
+  text?: string
+  toolIndex?: number
+}
+
+type ChatBubbleItem = BubbleListItemProps & {
+  isMarkdown?: boolean
+  toolCalls?: ToolCall[]
+  segments?: ContentSegment[]
+  usage?: MessageUsage
+}
 
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
 const { messages, isStreaming, interrupt } = storeToRefs(chatStore)
-const messagesRef = ref<HTMLElement>()
-const userScrolledUp = ref(false)
-const editContent = ref('')
-const editingIndex = ref(-1)
-const bubbleRefs = ref<Record<number, any>>({})
-const nearestUserMsgIdx = ref(-1)
 
-const lastUserMsgIndex = computed(() => {
-  for (let i = messages.value.length - 1; i >= 0; i--) {
-    if (messages.value[i].role === 'user') return i
-  }
-  return -1
+const isLoading = computed(() => {
+  const msgs = messages.value
+  if (msgs.length === 0) return false
+  const last = msgs[msgs.length - 1]
+  return last.role === 'user' && !isStreaming.value
 })
 
-const userMessages = computed(() => {
-  return messages.value
-    .map((msg, idx) => ({ msg, idx }))
-    .filter(item => item.msg.role === 'user')
-    .map(item => ({
-      idx: item.idx,
-      preview: item.msg.content.slice(0, 20) + (item.msg.content.length > 20 ? '...' : ''),
-    }))
-})
+const bubbleList = computed((): ChatBubbleItem[] =>
+  messages.value
+    .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+    .map((msg, idx, arr) => ({
+      key: msg.id,
+      role: msg.role === 'assistant' ? 'ai' : 'user',
+      placement: msg.role === 'user' ? 'end' : 'start',
+      content: msg.content || '',
+      shape: 'corner' as const,
+      variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
+      isMarkdown: msg.role !== 'user',
+      toolCalls: msg.toolCalls,
+      usage: msg.usage,
+      segments: msg.role === 'assistant' && msg.toolCalls?.length
+        ? parseSegments(msg.content || '', msg.toolCalls)
+        : undefined,
+      loading:
+        msg.role === 'assistant'
+        && idx === arr.length - 1
+        && isStreaming.value
+        && !msg.content,
+      avatarSize: '28px',
+      avatarGap: '8px',
+    })),
+)
 
-function setBubbleRef(idx: number, el: any) {
-  if (el) {
-    bubbleRefs.value[idx] = el
-  } else {
-    delete bubbleRefs.value[idx]
-  }
+
+function stripThinkingMarkers(content: string): string {
+  return content.replace(/<!--(?:THINK_START|THINK_END)-->/g, '').trim()
 }
 
-function scrollToMessage(msgIdx: number) {
-  const bubble = bubbleRefs.value[msgIdx]
-  if (!bubble?.$el) return
-  const el = bubble.$el as HTMLElement
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  userScrolledUp.value = true
-}
+function parseSegments(content: string, toolCalls?: ToolCall[]): ContentSegment[] {
+  const segments: ContentSegment[] = []
+  const pattern = /<!--TOOL:(\d+)-->/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
 
-onMounted(() => {
-  chatStore.connect()
-  messagesRef.value?.addEventListener('scroll', handleScroll)
-})
-
-onUnmounted(() => {
-  messagesRef.value?.removeEventListener('scroll', handleScroll)
-})
-
-function handleScroll() {
-  if (!messagesRef.value) return
-  const el = messagesRef.value
-  const threshold = 80
-  userScrolledUp.value = el.scrollHeight - el.scrollTop - el.clientHeight > threshold
-  updateNearestUserMsg()
-}
-
-function updateNearestUserMsg() {
-  if (!messagesRef.value) return
-  const containerTop = messagesRef.value.scrollTop
-  let closest = -1
-  let closestDist = Infinity
-
-  for (const um of userMessages.value) {
-    const bubble = bubbleRefs.value[um.idx]
-    if (!bubble?.$el) continue
-    const el = bubble.$el as HTMLElement
-    const dist = Math.abs(el.offsetTop - containerTop)
-    if (dist < closestDist) {
-      closestDist = dist
-      closest = um.idx
+  while ((match = pattern.exec(content)) !== null) {
+    const textBefore = content.slice(lastIndex, match.index).trim()
+    if (textBefore) {
+      segments.push({ type: 'text', text: stripThinkingMarkers(textBefore) })
     }
+    const toolIdx = parseInt(match[1], 10)
+    if (toolCalls && toolIdx < toolCalls.length) {
+      segments.push({ type: 'tool', toolIndex: toolIdx })
+    }
+    lastIndex = match.index + match[0].length
   }
-  nearestUserMsgIdx.value = closest
+
+  const remaining = content.slice(lastIndex).trim()
+  if (remaining) {
+    segments.push({ type: 'text', text: stripThinkingMarkers(remaining) })
+  }
+
+  return segments
 }
 
 function handleSend(content: string) {
-  if (editingIndex.value >= 0) {
-    messages.value.splice(editingIndex.value)
-    editingIndex.value = -1
-  }
-  editContent.value = ''
   chatStore.sendMessage(content, agentsStore.currentAgentId)
-  userScrolledUp.value = false
-  nextTick(() => scrollToBottom())
 }
 
 function handleStop() {
   chatStore.stopGeneration()
 }
 
-function handleEdit(msgIndex: number) {
-  const msg = messages.value[msgIndex]
-  if (!msg) return
-  editContent.value = msg.content
-  editingIndex.value = msgIndex
-}
-
-function handleCancelEdit() {
-  editContent.value = ''
-  editingIndex.value = -1
-}
-
 function handleInterruptDecide(decision: { type: string }) {
   chatStore.respondToInterrupt(decision.type === 'approve', agentsStore.currentAgentId)
 }
 
-function scrollToBottom() {
-  if (messagesRef.value) {
-    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-  }
-}
 
-watch(messages, () => {
-  if (!userScrolledUp.value) {
-    nextTick(() => scrollToBottom())
-  }
-}, { deep: true })
+onMounted(() => {
+  chatStore.connect()
+})
 </script>
 
 <style scoped>
 .chat-view {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   height: 100%;
 }
 
 .messages-container {
   flex: 1;
-  position: relative;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  padding: 16px;
+  background: var(--el-bg-color-page);
 }
 
-.messages-area {
-  height: 100%;
-  overflow-y: auto;
-  padding: 20px 24px;
+.messages-container :deep(.elx-bubble-list) {
+  width: 100%;
 }
 
-.msg-nav {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 4px;
-  background: rgba(22, 27, 34, 0.85);
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  backdrop-filter: blur(6px);
-  z-index: 10;
+.messages-container :deep(.elx-bubble) {
+  max-width: 85% !important;
 }
 
-.msg-nav-label {
-  font-size: 9px;
-  font-weight: 700;
-  color: #58a6ff;
-  margin-bottom: 2px;
-  user-select: none;
+.messages-container :deep(.elx-bubble__content) {
+  max-width: none !important;
 }
 
-.msg-nav-dot {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1.5px solid #30363d;
-  background: transparent;
+.bubble-content-wrap {
+  width: 100%;
+}
+
+.tool-call-inline {
+  margin: 8px 0;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto !important;
+}
+
+.messages-container :deep([style*="pointer-events"]) .tool-call-inline,
+.messages-container :deep(.tool-call-card) {
+  pointer-events: auto !important;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  padding: 0;
 }
 
-.msg-nav-dot:hover {
-  border-color: #58a6ff;
-  background: rgba(88, 166, 255, 0.1);
+.messages-container :deep(.markdown-body) {
+  line-height: 1.7;
+  font-size: 14px;
+  overflow-wrap: break-word;
 }
 
-.msg-nav-dot.active {
-  border-color: #58a6ff;
-  background: rgba(88, 166, 255, 0.2);
+.messages-container :deep(.markdown-body pre) {
+  border-radius: 8px;
+  overflow-x: auto;
 }
 
-.dot-num {
-  font-size: 9px;
-  font-weight: 600;
-  color: #8b949e;
-  line-height: 1;
+.messages-container :deep(.elx-welcome) {
+  background: var(--el-bg-color-overlay) !important;
+  border: 1px solid var(--el-border-color-lighter) !important;
+  border-radius: 12px;
+  color: var(--el-text-color-primary);
 }
 
-.msg-nav-dot:hover .dot-num,
-.msg-nav-dot.active .dot-num {
-  color: #58a6ff;
+.messages-container :deep(.elx-welcome__title) {
+  color: var(--el-text-color-primary) !important;
 }
 
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--lc-text-secondary);
-  gap: 8px;
-}
-
-.empty-icon {
-  font-size: 48px;
-  opacity: 0.4;
-}
-
-.empty-state p {
-  font-size: 16px;
-  opacity: 0.6;
-}
-
-.msg-enter-active {
-  animation: float-in var(--lc-transition-slow) ease both;
+.messages-container :deep(.elx-welcome__description) {
+  color: var(--el-text-color-secondary) !important;
 }
 </style>

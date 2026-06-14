@@ -100,37 +100,35 @@ const agentsStore = useAgentsStore()
 
 <style scoped>
 .right-panel {
-  width: 420px;
-  background: var(--lc-glass-bg);
-  backdrop-filter: blur(var(--lc-glass-blur));
-  -webkit-backdrop-filter: blur(var(--lc-glass-blur));
-  border-left: 1px solid var(--lc-glass-border);
-  padding: 14px;
+  width: 300px;
+  background: var(--el-bg-color);
+  border-left: 1px solid var(--el-border-color);
+  padding: 16px;
   overflow-y: auto;
 }
 
 .panel-section {
   margin-bottom: 16px;
   padding: 12px;
-  background: var(--lc-glass-bg);
-  border: 1px solid var(--lc-glass-border);
-  border-radius: var(--lc-radius-md);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
 }
 
 .panel-section h4 {
   margin: 0 0 10px;
   font-size: 11px;
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
   text-transform: uppercase;
   letter-spacing: 0.7px;
   font-weight: 600;
   padding-bottom: 6px;
-  border-bottom: 1px solid var(--lc-glass-border);
+  border-bottom: 1px solid var(--el-border-color);
 }
 
 .empty-hint {
   font-size: 12px;
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
   margin: 4px 0;
   opacity: 0.6;
 }
@@ -145,26 +143,26 @@ const agentsStore = useAgentsStore()
 
 .status-section code {
   font-size: 11px;
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
 }
 
 .mcp-item {
   margin-bottom: 8px;
   padding: 8px 10px;
-  background: var(--lc-glass-bg-hover);
-  border: 1px solid var(--lc-glass-border);
-  border-radius: var(--lc-radius-sm);
-  transition: border-color var(--lc-transition-fast);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  transition: border-color 0.15s ease;
 }
 
 .mcp-item:hover {
-  border-color: var(--lc-glass-border-hover);
+  border-color: var(--el-color-primary-light-5);
 }
 
 .mcp-item:has(.el-switch:not(.is-checked)) {
   opacity: 0.75;
-  border: 1px dashed rgba(255, 180, 80, 0.35) !important;
-  background: rgba(255, 170, 50, 0.04) !important;
+  border: 1px dashed var(--el-color-warning-light-5) !important;
+  background: var(--el-color-warning-light-9) !important;
 }
 
 .mcp-header {
@@ -181,7 +179,7 @@ const agentsStore = useAgentsStore()
 
 .mcp-error {
   font-size: 11px;
-  color: var(--lc-danger);
+  color: var(--el-color-danger);
   margin-top: 4px;
   word-break: break-all;
   opacity: 0.8;
@@ -202,14 +200,14 @@ const agentsStore = useAgentsStore()
 .skill-item {
   padding: 8px 10px;
   margin-bottom: 4px;
-  background: var(--lc-glass-bg-hover);
-  border: 1px solid var(--lc-glass-border);
-  border-radius: var(--lc-radius-sm);
-  transition: border-color var(--lc-transition-fast);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  transition: border-color 0.15s ease;
 }
 
 .skill-item:hover {
-  border-color: var(--lc-glass-border-hover);
+  border-color: var(--el-color-primary-light-5);
 }
 
 .skill-header {
@@ -221,35 +219,47 @@ const agentsStore = useAgentsStore()
 .skill-name {
   font-size: 13px;
   font-weight: 500;
-  color: var(--lc-accent);
-  transition: color var(--lc-transition-fast), opacity var(--lc-transition-fast);
+  color: var(--el-color-primary);
+  transition: color 0.15s ease, opacity 0.15s ease;
 }
 
 .skill-name.dimmed {
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
   opacity: 0.6;
 }
 
 .skill-disabled {
-  opacity: 0.75;
-  border: 1px dashed rgba(255, 180, 80, 0.4) !important;
-  background: rgba(255, 170, 50, 0.05) !important;
+  opacity: 0.85;
+  border: 1px dashed var(--el-border-color) !important;
+  background: var(--el-fill-color-lighter) !important;
 }
 
 .skill-disabled .skill-name {
-  color: rgba(255, 200, 100, 0.85) !important;
+  color: var(--el-text-color-secondary) !important;
   text-decoration: line-through;
 }
 
+.skill-disabled .skill-desc {
+  color: var(--el-text-color-placeholder);
+}
+
 .skill-desc {
-  font-size: 11px;
-  color: var(--lc-text-secondary);
+  font-size: 12px;
+  color: var(--el-text-color-regular);
   margin-top: 3px;
-  opacity: 0.8;
+  line-height: 1.5;
 }
 
 .not-allowed {
-  opacity: 0.4;
+  opacity: 0.6;
+}
+
+.not-allowed .skill-name {
+  color: var(--el-text-color-secondary) !important;
+}
+
+.not-allowed .skill-desc {
+  color: var(--el-text-color-secondary);
 }
 
 .chat-only-hint {
@@ -275,12 +285,12 @@ const agentsStore = useAgentsStore()
 .hint-text {
   font-size: 14px;
   font-weight: 500;
-  color: var(--lc-text-primary);
+  color: var(--el-text-color-primary);
 }
 
 .hint-sub {
   font-size: 12px;
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
   opacity: 0.7;
 }
 </style>

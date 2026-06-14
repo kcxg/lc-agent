@@ -1,6 +1,6 @@
 <template>
   <div v-if="usage && (usage.rounds.length > 0 || usage.toolCallCount > 0 || usage.totalDuration)" class="token-usage-panel">
-    <div class="usage-header" @click="expanded = !expanded">
+    <div class="usage-header" @click.stop="expanded = !expanded">
       <span class="usage-title">Token 用量</span>
       <div class="usage-badges">
         <span class="badge badge-rounds">🔄 {{ usage.rounds.length }} Rounds</span>
@@ -155,10 +155,10 @@ function statusLabel(status: string): string {
 <style scoped>
 .token-usage-panel {
   margin-top: 12px;
-  background: rgba(22, 27, 34, 0.8);
-  border: 1px solid #30363d;
-  border-radius: 10px;
-  padding: 12px 16px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  padding: 12px;
   font-size: 12px;
 }
 
@@ -172,7 +172,7 @@ function statusLabel(status: string): string {
 
 .usage-title {
   font-weight: 700;
-  color: #e6edf3;
+  color: var(--el-text-color-primary);
   font-size: 13px;
 }
 
@@ -189,21 +189,21 @@ function statusLabel(status: string): string {
 }
 
 .badge-rounds {
-  background: rgba(88, 166, 255, 0.15);
-  color: #58a6ff;
-  border: 1px solid rgba(88, 166, 255, 0.3);
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  border: 1px solid var(--el-color-primary-light-5);
 }
 
 .badge-tools {
-  background: rgba(163, 113, 247, 0.15);
-  color: #a371f7;
-  border: 1px solid rgba(163, 113, 247, 0.3);
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
+  border: 1px solid var(--el-border-color);
 }
 
 .badge-time {
-  background: rgba(56, 211, 159, 0.15);
-  color: #38d39f;
-  border: 1px solid rgba(56, 211, 159, 0.3);
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+  border: 1px solid var(--el-color-success-light-5);
 }
 
 .usage-summary {
@@ -213,8 +213,8 @@ function statusLabel(status: string): string {
 }
 
 .summary-card {
-  background: rgba(13, 17, 23, 0.6);
-  border: 1px solid #21262d;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
   border-radius: 8px;
   padding: 10px 12px;
   text-align: center;
@@ -223,14 +223,15 @@ function statusLabel(status: string): string {
 .summary-value {
   font-size: 18px;
   font-weight: 700;
-  color: #e6edf3;
+  color: var(--el-text-color-primary);
   font-family: 'JetBrains Mono', monospace;
 }
 
 .summary-label {
-  font-size: 11px;
-  color: #8b949e;
-  margin-top: 2px;
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+  margin-top: 4px;
+  font-weight: 600;
 }
 
 .summary-sub {
@@ -239,24 +240,24 @@ function statusLabel(status: string): string {
 }
 
 .card-cached .summary-value {
-  color: #3fb950;
+  color: var(--el-color-success);
 }
 
 .summary-sub.cached {
-  color: #3fb950;
+  color: var(--el-color-success);
 }
 
 .summary-sub.reasoning {
-  color: #a371f7;
+  color: var(--el-text-color-regular);
 }
 
 .summary-sub.time {
-  color: #8b949e;
+  color: var(--el-text-color-secondary);
 }
 
 .usage-details {
   margin-top: 12px;
-  border-top: 1px solid #21262d;
+  border-top: 1px solid var(--el-border-color);
   padding-top: 10px;
 }
 
@@ -268,15 +269,15 @@ function statusLabel(status: string): string {
 }
 
 .detail-toggle {
-  color: #8b949e;
+  color: var(--el-text-color-secondary);
   font-size: 11px;
   cursor: pointer;
 }
 
 .rounds-badge {
   font-size: 10px;
-  color: #58a6ff;
-  background: rgba(88, 166, 255, 0.1);
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
   padding: 1px 6px;
   border-radius: 8px;
 }
@@ -289,11 +290,11 @@ function statusLabel(status: string): string {
 }
 
 .details-table th {
-  color: #8b949e;
+  color: var(--el-text-color-secondary);
   font-weight: 500;
   text-align: right;
   padding: 4px 8px;
-  border-bottom: 1px solid #21262d;
+  border-bottom: 1px solid var(--el-border-color);
 }
 
 .details-table th:first-child {
@@ -301,35 +302,35 @@ function statusLabel(status: string): string {
 }
 
 .details-table td {
-  color: #c9d1d9;
+  color: var(--el-text-color-regular);
   text-align: right;
   padding: 4px 8px;
 }
 
 .col-num {
   text-align: left !important;
-  color: #8b949e !important;
+  color: var(--el-text-color-secondary) !important;
   font-weight: 600;
 }
 
 .col-duration {
-  color: #f0883e !important;
+  color: var(--el-color-warning) !important;
 }
 
 .row-sum {
-  border-top: 1px solid #30363d;
+  border-top: 1px solid var(--el-border-color);
 }
 
 .row-sum td {
   font-weight: 700;
-  color: #e6edf3;
+  color: var(--el-text-color-primary);
 }
 
 .usage-summary-minimal {
   display: flex;
   gap: 6px;
   align-items: center;
-  color: #8b949e;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
 }
 
@@ -343,27 +344,27 @@ function statusLabel(status: string): string {
 }
 
 .badge-tools:hover {
-  background: rgba(163, 113, 247, 0.3);
+  background: var(--el-fill-color-light);
   transform: scale(1.05);
 }
 
 .tools-details {
   margin-top: 12px;
-  border-top: 1px solid #21262d;
+  border-top: 1px solid var(--el-border-color);
   padding-top: 10px;
 }
 
 .tools-badge {
   font-size: 10px;
-  color: #a371f7;
-  background: rgba(163, 113, 247, 0.1);
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color);
   padding: 1px 6px;
   border-radius: 8px;
 }
 
 .col-tool-name {
   text-align: left !important;
-  color: #58a6ff !important;
+  color: var(--el-color-primary) !important;
   font-weight: 500;
 }
 
@@ -381,14 +382,14 @@ function statusLabel(status: string): string {
 }
 
 .status-dot.done {
-  background: #3fb950;
+  background: var(--el-color-success);
 }
 
 .status-dot.running {
-  background: #d29922;
+  background: var(--el-color-warning);
 }
 
 .status-dot.error {
-  background: #f85149;
+  background: var(--el-color-danger);
 }
 </style>

@@ -14,7 +14,7 @@
         :value="model.id"
       >
         <span>{{ model.id }}</span>
-        <span style="float:right; color:var(--lc-text-secondary); font-size:11px">
+        <span style="float:right; color:var(--el-text-color-secondary); font-size:11px">
           {{ model.provider }}
         </span>
       </el-option>

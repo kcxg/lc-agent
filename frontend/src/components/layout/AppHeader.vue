@@ -32,14 +32,18 @@
       <span class="model-badge">{{ modelName }}</span>
       <span class="status-dot" :class="connected ? 'connected' : 'disconnected'" />
       <span class="status-text">{{ connected ? '已连接' : '未连接' }}</span>
+      <el-button :icon="isDark ? Sunny : Moon" circle size="small" @click="toggleDark()" />
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
 import { useAgentsStore } from '@/stores/agents'
+import { useTheme } from '@/composables/useTheme'
+import { Sunny, Moon } from '@element-plus/icons-vue'
 
 const agentsStore = useAgentsStore()
+const { isDark, toggleDark } = useTheme()
 
 defineProps<{
   modelName: string
@@ -59,10 +63,8 @@ defineEmits<{
   align-items: center;
   justify-content: space-between;
   padding: 8px 20px;
-  background: var(--lc-glass-bg);
-  backdrop-filter: blur(var(--lc-glass-blur-heavy));
-  -webkit-backdrop-filter: blur(var(--lc-glass-blur-heavy));
-  border-bottom: 1px solid var(--lc-glass-border);
+  background: var(--el-bg-color);
+  border-bottom: 1px solid var(--el-border-color);
   height: 52px;
   z-index: 100;
 }
@@ -70,10 +72,7 @@ defineEmits<{
 .logo {
   font-size: 16px;
   font-weight: 700;
-  background: var(--lc-gradient-accent);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--el-color-primary);
 }
 
 .header-center {
@@ -85,16 +84,16 @@ defineEmits<{
 .header-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .model-badge {
   font-size: 12px;
   padding: 3px 10px;
-  background: var(--lc-glass-bg-hover);
-  border: 1px solid var(--lc-glass-border);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
   border-radius: 12px;
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
 }
 
 .status-dot {
@@ -104,18 +103,17 @@ defineEmits<{
 }
 
 .status-dot.connected {
-  background: var(--lc-success);
-  box-shadow: 0 0 8px rgba(63, 185, 80, 0.5);
+  background: var(--el-color-success);
   animation: pulse 2s infinite;
 }
 
 .status-dot.disconnected {
-  background: var(--lc-danger);
+  background: var(--el-color-danger);
 }
 
 .status-text {
   font-size: 12px;
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
 }
 
 .agent-option {
@@ -133,21 +131,21 @@ defineEmits<{
 }
 
 .badge-builtin {
-  background: rgba(88, 166, 255, 0.15);
-  color: #58a6ff;
-  border: 1px solid rgba(88, 166, 255, 0.3);
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  border: 1px solid var(--el-color-primary-light-5);
 }
 
 .badge-code {
-  background: rgba(255, 180, 50, 0.15);
-  color: #ffb832;
-  border: 1px solid rgba(255, 180, 50, 0.3);
+  background: var(--el-color-warning-light-9);
+  color: var(--el-color-warning);
+  border: 1px solid var(--el-color-warning-light-5);
 }
 
 .badge-user {
-  background: rgba(63, 185, 80, 0.15);
-  color: #6ee77a;
-  border: 1px solid rgba(63, 185, 80, 0.3);
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+  border: 1px solid var(--el-color-success-light-5);
 }
 
 .header-btn {
@@ -166,33 +164,31 @@ defineEmits<{
 }
 
 .btn-edit {
-  background: #21262d;
-  color: #c9d1d9;
-  border: 1px solid #30363d;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-regular);
+  border: 1px solid var(--el-border-color);
 }
 
 .btn-edit:hover:not(:disabled) {
-  background: #30363d;
-  color: #e6edf3;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
 }
 
 .btn-new-agent {
-  background: linear-gradient(135deg, #238636, #2ea043);
-  color: #ffffff;
+  background: var(--el-color-success);
+  color: var(--el-color-white);
 }
 
 .btn-new-agent:hover {
-  background: linear-gradient(135deg, #2ea043, #3fb950);
-  box-shadow: 0 2px 8px rgba(46, 160, 67, 0.3);
+  background: var(--el-color-success-light-3);
 }
 
 .btn-new-chat {
-  background: linear-gradient(135deg, #1f6feb, #388bfd);
-  color: #ffffff;
+  background: var(--el-color-primary);
+  color: var(--el-color-white);
 }
 
 .btn-new-chat:hover {
-  background: linear-gradient(135deg, #388bfd, #58a6ff);
-  box-shadow: 0 2px 8px rgba(56, 139, 253, 0.3);
+  background: var(--el-color-primary-light-3);
 }
 </style>

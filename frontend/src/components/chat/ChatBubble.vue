@@ -1,3 +1,4 @@
+<!-- @deprecated Use EPX BubbleList in ChatView instead. Kept for TestSegments.vue. -->
 <template>
   <div class="chat-bubble" :class="[message.role, { streaming: message.isStreaming }]">
     <div class="bubble-avatar" :class="message.role">
@@ -142,8 +143,8 @@ const modelLabel = computed(() => {
 }
 
 .chat-bubble.assistant {
-  background: var(--lc-glass-bg);
-  border-color: var(--lc-glass-border);
+  background: var(--el-fill-color-light);
+  border-color: var(--el-border-color);
 }
 
 .bubble-avatar {
@@ -163,7 +164,7 @@ const modelLabel = computed(() => {
 }
 
 .bubble-avatar.assistant {
-  background: #21262d;
+  background: var(--el-fill-color);
 }
 
 .bubble-body {
@@ -185,7 +186,7 @@ const modelLabel = computed(() => {
 }
 
 .ai-name {
-  color: #8b949e;
+  color: var(--el-text-color-secondary);
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
 }
@@ -198,7 +199,7 @@ const modelLabel = computed(() => {
 
 .streaming-cursor {
   animation: blink 1s infinite;
-  color: var(--lc-accent);
+  color: var(--el-color-primary);
   font-size: 16px;
 }
 

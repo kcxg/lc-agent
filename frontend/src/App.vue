@@ -1,4 +1,5 @@
 <template>
+  <ConfigProvider :theme="isDark ? 'dark' : 'light'">
   <div class="app-container">
     <AppHeader
       :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
@@ -25,11 +26,14 @@
 
     <AgentEditorDialog ref="agentEditorRef" />
   </div>
+  </ConfigProvider>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { ConfigProvider } from 'vue-element-plus-x'
+import { useTheme } from '@/composables/useTheme'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore } from '@/stores/agents'
@@ -38,6 +42,8 @@ import AppHeader from '@/components/layout/AppHeader.vue'
 import LeftSidebar from '@/components/layout/LeftSidebar.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'
 import AgentEditorDialog from '@/components/dialogs/AgentEditorDialog.vue'
+
+const { isDark } = useTheme()
 
 const router = useRouter()
 const route = useRoute()
@@ -74,6 +80,7 @@ watch(() => route.params.sessionId, (newId) => {
 })
 
 async function restoreSession(sessionId: string) {
+  if (chatStore.threadId === sessionId) return
   const session = sessionsStore.sessions.find(s => s.id === sessionId)
   if (session) {
     sessionsStore.selectSession(sessionId)
@@ -96,6 +103,12 @@ function handleNewChat() {
 }
 
 async function handleSwitchSession(sessionId: string) {
+  if (chatStore.threadId === sessionId) {
+    const session = sessionsStore.sessions.find(s => s.id === sessionId)
+    const agentId = session?.agent_id || agentsStore.currentAgentId
+    router.push({ name: 'chat', params: { sessionId }, query: { agent: agentId } })
+    return
+  }
   const session = sessionsStore.sessions.find(s => s.id === sessionId)
   sessionsStore.selectSession(sessionId)
   chatStore.clearMessages()
@@ -137,7 +150,7 @@ function createNewAgent() {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--lc-gradient-bg);
+  background: var(--el-bg-color-page);
   position: relative;
 }
 

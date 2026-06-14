@@ -36,15 +36,15 @@ defineEmits<{ toggle: [groupId: string] }>()
 .group-item {
   margin-bottom: 8px;
   padding: 10px;
-  background: var(--lc-glass-bg-hover);
-  border: 1px solid var(--lc-glass-border);
-  border-radius: var(--lc-radius-sm);
-  transition: border-color var(--lc-transition-fast), background var(--lc-transition-fast);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .group-item:hover {
-  border-color: var(--lc-glass-border-hover);
-  background: var(--lc-glass-bg-active);
+  border-color: var(--el-color-primary-light-5);
+  background: var(--el-fill-color);
 }
 
 .group-header {
@@ -57,7 +57,7 @@ defineEmits<{ toggle: [groupId: string] }>()
 .group-name {
   font-size: 13px;
   font-weight: 500;
-  color: var(--lc-text-primary);
+  color: var(--el-text-color-primary);
 }
 
 .group-tools {
@@ -67,7 +67,7 @@ defineEmits<{ toggle: [groupId: string] }>()
 }
 
 .empty {
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
   font-size: 12px;
   opacity: 0.6;
 }
@@ -75,6 +75,6 @@ defineEmits<{ toggle: [groupId: string] }>()
 .not-allowed {
   opacity: 0.4;
   border-style: dashed;
-  border-color: rgba(255, 255, 255, 0.06) !important;
+  border-color: var(--el-border-color) !important;
 }
 </style>

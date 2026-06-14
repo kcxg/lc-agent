@@ -1,11 +1,11 @@
 <template>
   <div class="tool-call-card" :class="[toolCall.status, { 'is-collapsed': isCollapsed }]">
-    <div class="tool-header" @click="toggleCollapse">
+    <div class="tool-header" @click.stop="toggleCollapse">
       <span class="collapse-icon">{{ isCollapsed ? '▸' : '▾' }}</span>
       <el-icon v-if="toolCall.status === 'running'" class="spinning">
         <Loading />
       </el-icon>
-      <el-icon v-else-if="toolCall.status === 'done'" style="color: var(--lc-success)">
+      <el-icon v-else-if="toolCall.status === 'done'" style="color: var(--el-color-success)">
         <Check />
       </el-icon>
       <span class="tool-name">{{ toolCall.name }}</span>
@@ -114,27 +114,26 @@ const statusLabel = computed(() => {
 
 <style scoped>
 .tool-call-card {
-  border: 1px solid var(--lc-glass-border);
-  border-radius: var(--lc-radius-md);
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
   padding: 10px 14px;
   margin: 6px 0;
-  background: var(--lc-glass-bg);
-  border-left: 3px solid var(--lc-text-secondary);
-  transition: border-color var(--lc-transition-normal), box-shadow var(--lc-transition-normal);
-  animation: float-in var(--lc-transition-slow) ease both;
+  background: var(--el-fill-color-light);
+  border-left: 3px solid var(--el-text-color-secondary);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .tool-call-card.running {
-  border-left-color: var(--lc-accent);
-  box-shadow: 0 0 12px rgba(88, 166, 255, 0.08);
+  border-left-color: var(--el-color-primary);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--el-color-primary) 8%, transparent);
 }
 
 .tool-call-card.done {
-  border-left-color: var(--lc-success);
+  border-left-color: var(--el-color-success);
 }
 
 .tool-call-card.error {
-  border-left-color: var(--lc-danger);
+  border-left-color: var(--el-color-danger);
 }
 
 .tool-header {
@@ -151,7 +150,7 @@ const statusLabel = computed(() => {
 
 .collapse-icon {
   font-size: 10px;
-  color: #8b949e;
+  color: var(--el-text-color-secondary);
   width: 12px;
   flex-shrink: 0;
 }
@@ -163,7 +162,7 @@ const statusLabel = computed(() => {
 .tool-name {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 12px;
-  color: var(--lc-accent);
+  color: var(--el-color-primary);
   font-weight: 500;
 }
 
@@ -176,14 +175,14 @@ const statusLabel = computed(() => {
 
 .meta-item {
   font-size: 11px;
-  color: #8b949e;
+  color: var(--el-text-color-secondary);
   white-space: nowrap;
 }
 
 .tool-args {
   margin-top: 6px;
   padding: 5px 8px;
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--el-fill-color);
   border-radius: 4px;
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
@@ -197,25 +196,25 @@ const statusLabel = computed(() => {
 }
 
 .arg-key {
-  color: #79c0ff;
+  color: var(--el-color-primary);
   flex-shrink: 0;
   font-weight: 500;
 }
 
 .arg-value {
-  color: #d2a8ff;
+  color: var(--el-text-color-regular);
   word-break: break-all;
 }
 
 .tool-result {
   margin-top: 8px;
   padding: 8px 10px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: var(--lc-radius-sm);
+  background: var(--el-fill-color);
+  border-radius: 6px;
   font-size: 12px;
   max-height: 200px;
   overflow-y: auto;
-  border: 1px solid var(--lc-glass-border);
+  border: 1px solid var(--el-border-color);
   position: relative;
 }
 
@@ -223,7 +222,7 @@ const statusLabel = computed(() => {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  color: var(--lc-text-secondary);
+  color: var(--el-text-color-secondary);
 }
 
 .fullscreen-btn {
@@ -232,23 +231,23 @@ const statusLabel = computed(() => {
   float: right;
   padding: 2px 8px;
   font-size: 14px;
-  color: #58a6ff;
-  background: rgba(13, 17, 23, 0.9);
-  border: 1px solid rgba(88, 166, 255, 0.3);
+  color: var(--el-color-primary);
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-color-primary-light-5);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .fullscreen-btn:hover {
-  background: rgba(88, 166, 255, 0.15);
-  border-color: #58a6ff;
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
 }
 
 .tool-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: color-mix(in srgb, var(--el-bg-color-page) 70%, transparent);
   z-index: 10000;
   display: flex;
   align-items: center;
@@ -257,14 +256,14 @@ const statusLabel = computed(() => {
 }
 
 .tool-modal {
-  background: #161b22;
-  border: 1px solid #30363d;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
   border-radius: 12px;
   max-width: 90vw;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--el-bg-color-page) 50%, transparent);
   min-width: 500px;
 }
 
@@ -273,7 +272,7 @@ const statusLabel = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid #30363d;
+  border-bottom: 1px solid var(--el-border-color);
   gap: 12px;
 }
 
@@ -286,29 +285,29 @@ const statusLabel = computed(() => {
 .modal-toggle-btn {
   padding: 4px 10px;
   font-size: 12px;
-  border: 1px solid #30363d;
+  border: 1px solid var(--el-border-color);
   border-radius: 6px;
-  background: #21262d;
-  color: #c9d1d9;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-regular);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .modal-toggle-btn:hover {
-  background: #30363d;
+  background: var(--el-fill-color-light);
 }
 
 .modal-toggle-btn.active {
-  background: #1f3d5e;
-  border-color: #58a6ff;
-  color: #58a6ff;
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
 }
 
 .tool-modal-title {
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
   font-weight: 600;
-  color: #58a6ff;
+  color: var(--el-color-primary);
 }
 
 .tool-modal-close {
@@ -320,14 +319,14 @@ const statusLabel = computed(() => {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #8b949e;
+  color: var(--el-text-color-secondary);
   font-size: 16px;
   cursor: pointer;
 }
 
 .tool-modal-close:hover {
-  background: #21262d;
-  color: #e6edf3;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
 }
 
 .tool-modal-body {
@@ -339,7 +338,7 @@ const statusLabel = computed(() => {
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-all;
-  color: #c9d1d9;
+  color: var(--el-text-color-regular);
 }
 
 .tool-modal-body.rendered {
@@ -349,7 +348,7 @@ const statusLabel = computed(() => {
 
 .spinning {
   animation: spin 1s linear infinite;
-  color: var(--lc-accent);
+  color: var(--el-color-primary);
 }
 
 @keyframes spin {

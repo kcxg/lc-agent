@@ -1,11 +1,11 @@
 <template>
-  <div style="padding:20px; background:#0d1117; min-height:100vh; color:#c9d1d9;">
+  <div style="padding:20px; background:var(--el-bg-color-page); min-height:100vh; color:var(--el-text-color-regular);">
     <h2>Segments Rendering Test</h2>
     <button @click="simulateStream" style="padding:8px 16px; margin:10px 0;">
       Simulate Stream (think → tool → answer)
     </button>
     <button @click="resetMsg" style="padding:8px 16px; margin:10px;">Reset</button>
-    <div style="margin:10px 0; font-size:12px; color:#8b949e;">
+    <div style="margin:10px 0; font-size:12px; color:var(--el-text-color-secondary);">
       Segments: {{ msg.segments?.length || 0 }} | Content length: {{ msg.content.length }}
     </div>
     <ChatBubble :message="msg" />

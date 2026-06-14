@@ -68,6 +68,10 @@ class ChatWebSocketHandler:
                     if len(usage_rounds) > prev_len:
                         usage_rounds[-1]["duration_ms"] = int((time.time() - round_start_time) * 1000)
                         round_start_time = time.time()
+                        await websocket.send_json({
+                            "type": "llm_usage",
+                            **usage_rounds[-1],
+                        })
 
                 done_payload: dict = {"type": "done"}
                 if usage_rounds:
