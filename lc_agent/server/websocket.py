@@ -1,5 +1,6 @@
 # lc_agent/server/websocket.py
 import asyncio
+import time
 import uuid
 from typing import Any
 
@@ -40,12 +41,15 @@ class ChatWebSocketHandler:
             return
 
         if msg_type == "message":
-            import time
             content = data.get("content", "")
             preset_id = data.get("preset_id", "__chat__")
             self._cancel_flags[thread_id] = False
             usage_rounds: list[dict] = []
             round_start_time = time.time()
+            stream_start_time = time.time()
+            assistant_content_parts: list[str] = []
+            assistant_tool_calls: list[dict[str, Any]] = []
+            assistant_in_thinking = False
 
             is_first = self._message_counts.get(thread_id, 0) == 0
             if is_first:
@@ -58,10 +62,17 @@ class ChatWebSocketHandler:
                 asyncio.create_task(self._save_title(thread_id, preliminary_title))
 
             try:
+                await self._save_ui_message(thread_id, "user", content)
                 async for event in self.engine.chat_stream(content, thread_id, preset_id):
                     if self._cancel_flags.get(thread_id):
                         await websocket.send_json({"type": "cancelled"})
                         return
+                    assistant_in_thinking = self._accumulate_assistant_display_state(
+                        event,
+                        assistant_content_parts,
+                        assistant_tool_calls,
+                        assistant_in_thinking,
+                    )
                     await self._send_event(websocket, event)
                     prev_len = len(usage_rounds)
                     self._accumulate_usage(event, usage_rounds)
@@ -76,6 +87,18 @@ class ChatWebSocketHandler:
                 done_payload: dict = {"type": "done"}
                 if usage_rounds:
                     done_payload["usage"] = usage_rounds
+                if assistant_content_parts or assistant_tool_calls or usage_rounds:
+                    await self._save_ui_message(
+                        thread_id,
+                        "assistant",
+                        "".join(assistant_content_parts),
+                        tool_calls=assistant_tool_calls or None,
+                        usage={
+                            "rounds": usage_rounds,
+                            "tool_call_count": len(assistant_tool_calls),
+                            "total_duration_ms": int((time.time() - stream_start_time) * 1000),
+                        },
+                    )
                 await websocket.send_json(done_payload)
 
                 self._message_counts[thread_id] = self._message_counts.get(thread_id, 0) + 1
@@ -155,6 +178,104 @@ class ChatWebSocketHandler:
             await websocket.send_json({"type": "title_update", "thread_id": thread_id, "title": title})
         except Exception as e:
             print(f"[WS] Title generation failed: {e}")
+
+    async def _save_ui_message(
+        self,
+        thread_id: str,
+        role: str,
+        content: str,
+        *,
+        tool_calls: list[dict[str, Any]] | None = None,
+        usage: dict[str, Any] | None = None,
+    ):
+        """Persist replay data for the web chat history."""
+        try:
+            from lc_agent.db.engine import get_async_session
+            from lc_agent.db.repository import ChatUiMessageRepository
+
+            session = get_async_session()
+            try:
+                repo = ChatUiMessageRepository(session)
+                await repo.create(
+                    session_id=thread_id,
+                    role=role,
+                    content=content,
+                    tool_calls=tool_calls,
+                    usage=usage,
+                )
+            finally:
+                await session.close()
+        except Exception as e:
+            print(f"[WS] Failed to persist UI message for {thread_id}: {e}")
+
+    def _accumulate_assistant_display_state(
+        self,
+        event: dict,
+        content_parts: list[str],
+        tool_calls: list[dict[str, Any]],
+        in_thinking: bool,
+    ) -> bool:
+        """Mirror the client display markers so history can replay the same layout."""
+        kind = event.get("event", "")
+
+        if kind == "on_chat_model_stream":
+            chunk = event.get("data", {}).get("chunk")
+            if not chunk:
+                return in_thinking
+
+            additional = getattr(chunk, "additional_kwargs", None) or {}
+            reasoning = additional.get("reasoning_content") or additional.get("reasoning")
+            if reasoning:
+                if not in_thinking:
+                    content_parts.append("<!--THINK_START-->")
+                    in_thinking = True
+                content_parts.append(reasoning)
+
+            if hasattr(chunk, "content") and chunk.content:
+                if in_thinking:
+                    content_parts.append("<!--THINK_END-->")
+                    in_thinking = False
+                content_parts.append(chunk.content)
+
+        elif kind == "on_tool_start":
+            if in_thinking:
+                content_parts.append("<!--THINK_END-->")
+                in_thinking = False
+
+            tool_idx = len(tool_calls)
+            tool_calls.append(
+                {
+                    "name": event.get("name", ""),
+                    "runId": event.get("run_id", ""),
+                    "args": event.get("data", {}).get("input", {}),
+                    "status": "running",
+                    "startTime": int(time.time() * 1000),
+                }
+            )
+            content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
+
+        elif kind == "on_tool_end":
+            output = event.get("data", {}).get("output", "")
+            result_str = str(output)
+            run_id = event.get("run_id", "")
+            name = event.get("name", "")
+            tool_call = next(
+                (
+                    tc
+                    for tc in tool_calls
+                    if (run_id and tc.get("runId") == run_id)
+                    or (not run_id and tc.get("name") == name and tc.get("status") == "running")
+                ),
+                None,
+            )
+            if tool_call:
+                start_time = tool_call.get("startTime")
+                tool_call["result"] = result_str
+                tool_call["status"] = "done"
+                tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
+                tool_call["resultLength"] = len(result_str)
+
+        return in_thinking
 
     def _accumulate_usage(self, event: dict, usage_rounds: list[dict]):
         """Extract token usage from on_chat_model_end events."""

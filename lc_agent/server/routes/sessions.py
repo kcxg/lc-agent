@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from lc_agent.db.repository import SessionRepository
+from lc_agent.db.repository import ChatUiMessageRepository, SessionRepository
 from lc_agent.server.dependencies import get_db_session, get_engine
 
 router = APIRouter(tags=["sessions"])
@@ -63,8 +63,26 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db_sess
 
 
 @router.get("/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str, request: Request):
-    """Retrieve message history for a session from the LangGraph checkpoint."""
+async def get_session_messages(
+    session_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Retrieve message history for a session."""
+    ui_messages = await ChatUiMessageRepository(db).list_by_session(session_id)
+    if ui_messages:
+        return [
+            {
+                "id": msg.id,
+                "role": msg.role,
+                "content": msg.content,
+                "tool_calls": msg.tool_calls or [],
+                "usage": msg.usage,
+                "created_at": msg.created_at.isoformat(),
+            }
+            for msg in ui_messages
+        ]
+
     engine = request.app.state.engine
     checkpointer = engine._checkpointer
     if checkpointer is None:

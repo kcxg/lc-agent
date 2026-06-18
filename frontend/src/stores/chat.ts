@@ -38,6 +38,7 @@ export interface ChatMessage {
 
 export interface ToolCall {
   name: string
+  runId?: string
   args?: Record<string, any>
   result?: string
   status: 'pending' | 'running' | 'done' | 'error'
@@ -49,6 +50,92 @@ export interface ToolCall {
 export interface InterruptInfo {
   actionRequests: any[]
   reviewConfigs: any[]
+}
+
+function normalizeToolStatus(status: any): ToolCall['status'] {
+  if (status === 'pending' || status === 'running' || status === 'done' || status === 'error') {
+    return status
+  }
+  if (status === 'success') return 'done'
+  return 'done'
+}
+
+function ensureToolMarkers(content: string, toolCalls?: ToolCall[]): string {
+  if (!toolCalls?.length) return content
+  const missingIndexes = toolCalls
+    .map((_, idx) => idx)
+    .filter(idx => !content.includes(`<!--TOOL:${idx}-->`))
+  if (missingIndexes.length === 0) return content
+  return `${content}\n${missingIndexes.map(idx => `<!--TOOL:${idx}-->`).join('\n')}\n`
+}
+
+function normalizeHistoryUsage(rawUsage: any): MessageUsage | undefined {
+  if (!rawUsage) return undefined
+  const rounds = (rawUsage.rounds || []).map((round: any) => ({
+    inputTokens: round.inputTokens ?? round.input_tokens ?? 0,
+    outputTokens: round.outputTokens ?? round.output_tokens ?? 0,
+    totalTokens: round.totalTokens ?? round.total_tokens ?? 0,
+    cacheReadTokens: round.cacheReadTokens ?? round.cache_read_tokens ?? 0,
+    reasoningTokens: round.reasoningTokens ?? round.reasoning_tokens ?? 0,
+    duration: round.duration ?? round.duration_ms,
+  }))
+  return {
+    rounds,
+    toolCallCount: rawUsage.toolCallCount ?? rawUsage.tool_call_count ?? 0,
+    totalDuration: rawUsage.totalDuration ?? rawUsage.total_duration_ms,
+  }
+}
+
+function normalizeHistoryMessage(msg: any): ChatMessage | null {
+  const role = msg.role === 'human' ? 'user' : msg.role === 'ai' ? 'assistant' : msg.role
+  if (!['user', 'assistant', 'tool'].includes(role)) return null
+
+  const toolCalls = (msg.tool_calls || msg.toolCalls || []).map((tc: any) => ({
+    name: tc.name || '',
+    runId: tc.runId || tc.run_id || tc.id,
+    args: tc.args || {},
+    result: tc.result,
+    status: normalizeToolStatus(tc.status),
+    startTime: tc.startTime ?? tc.start_time,
+    duration: tc.duration,
+    resultLength: tc.resultLength ?? tc.result_length ?? tc.result?.length,
+  }))
+  const usage = normalizeHistoryUsage(msg.usage)
+  if (usage && toolCalls.length > usage.toolCallCount) {
+    usage.toolCallCount = toolCalls.length
+  }
+
+  return {
+    id: msg.id || crypto.randomUUID(),
+    role,
+    content: role === 'assistant' ? ensureToolMarkers(msg.content || '', toolCalls) : msg.content || '',
+    timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now(),
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    usage,
+  }
+}
+
+function normalizeHistoryMessages(rawMessages: any[]): ChatMessage[] {
+  const loaded: ChatMessage[] = []
+  for (const msg of rawMessages) {
+    const chatMsg = normalizeHistoryMessage(msg)
+    if (!chatMsg) continue
+    if (chatMsg.role === 'tool') {
+      const lastAssistant = [...loaded].reverse().find(m => m.role === 'assistant')
+      if (lastAssistant?.toolCalls) {
+        const tc = lastAssistant.toolCalls.find(t => t.name === msg.name && !t.result)
+        if (tc) {
+          const resultStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+          tc.result = resultStr
+          tc.status = 'done'
+          tc.resultLength = resultStr.length
+        }
+      }
+      continue
+    }
+    loaded.push(chatMsg)
+  }
+  return loaded
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -157,6 +244,7 @@ export const useChatStore = defineStore('chat', () => {
         const tcIdx = last.toolCalls.length
         const tc: ToolCall = {
           name: msg.name || '',
+          runId: msg.run_id,
           args: msg.args,
           status: 'running',
           startTime: Date.now(),
@@ -227,12 +315,7 @@ export const useChatStore = defineStore('chat', () => {
 
     ws.value.on('history', (msg: WsMessage) => {
       const historyMessages = (msg as any).messages || []
-      messages.value = historyMessages.map((m: any, idx: number) => ({
-        id: crypto.randomUUID(),
-        role: m.role === 'human' ? 'user' : m.role === 'ai' ? 'assistant' : m.role,
-        content: m.content || '',
-        timestamp: Date.now() - (historyMessages.length - idx) * 1000,
-      }))
+      messages.value = normalizeHistoryMessages(historyMessages)
     })
 
     ws.value.on('title_update', (msg: WsMessage) => {
@@ -297,43 +380,7 @@ export const useChatStore = defineStore('chat', () => {
       const rawMessages = await api.getSessionMessages(sessionId)
       if (!rawMessages || rawMessages.length === 0) return
 
-      const loaded: ChatMessage[] = []
-      for (const msg of rawMessages) {
-        if (msg.role === 'human') {
-          loaded.push({
-            id: crypto.randomUUID(),
-            role: 'user',
-            content: msg.content || '',
-            timestamp: Date.now(),
-          })
-        } else if (msg.role === 'ai') {
-          const chatMsg: ChatMessage = {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: msg.content || '',
-            timestamp: Date.now(),
-          }
-          if (msg.tool_calls && msg.tool_calls.length > 0) {
-            chatMsg.toolCalls = msg.tool_calls.map((tc: any) => ({
-              name: tc.name,
-              args: tc.args || {},
-              status: 'done' as const,
-            }))
-          }
-          loaded.push(chatMsg)
-        } else if (msg.role === 'tool') {
-          const lastAssistant = [...loaded].reverse().find(m => m.role === 'assistant')
-          if (lastAssistant?.toolCalls) {
-            const tc = lastAssistant.toolCalls.find(t => t.name === msg.name && !t.result)
-            if (tc) {
-              const resultStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
-              tc.result = resultStr
-              tc.resultLength = resultStr.length
-            }
-          }
-        }
-      }
-      messages.value = loaded
+      messages.value = normalizeHistoryMessages(rawMessages)
     } catch (e) {
       console.error('[Chat] Failed to load messages:', e)
     }

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlmodel import SQLModel, Field
 from sqlalchemy import Column, JSON
@@ -34,3 +35,15 @@ class SessionMeta(SQLModel, table=True):
     message_count: int = 0
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ChatUiMessage(SQLModel, table=True):
+    __tablename__ = "chat_ui_messages"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    session_id: str = Field(index=True)
+    role: str
+    content: str = ""
+    tool_calls: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
+    usage: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)

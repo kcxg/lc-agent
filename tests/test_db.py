@@ -2,7 +2,7 @@ import pytest
 
 from lc_agent.db.models import AgentPresetDB, SessionMeta
 from lc_agent.db.engine import get_async_session, init_db, reset_engine
-from lc_agent.db.repository import PresetRepository, SessionRepository
+from lc_agent.db.repository import ChatUiMessageRepository, PresetRepository, SessionRepository
 
 
 @pytest.fixture(autouse=True)
@@ -90,3 +90,48 @@ async def test_session_repository_crud():
         await repo.delete(created.id)
         sessions = await repo.list_all()
         assert len(sessions) == 0
+
+
+@pytest.mark.asyncio
+async def test_chat_ui_message_repository_preserves_tool_calls_and_usage():
+    async with get_async_session("sqlite+aiosqlite:///:memory:") as session:
+        repo = ChatUiMessageRepository(session)
+
+        await repo.create(session_id="thread-1", role="user", content="查一下 langgraph")
+        await repo.create(
+            session_id="thread-1",
+            role="assistant",
+            content="我查到了。\n<!--TOOL:0-->\n结论如下。",
+            tool_calls=[
+                {
+                    "name": "nbrag_search",
+                    "runId": "run-1",
+                    "args": {"query": "langgraph"},
+                    "status": "done",
+                    "result": "LangGraph docs",
+                    "duration": 12,
+                    "resultLength": 14,
+                }
+            ],
+            usage={
+                "rounds": [
+                    {
+                        "input_tokens": 12,
+                        "output_tokens": 8,
+                        "total_tokens": 20,
+                        "cache_read_tokens": 3,
+                        "reasoning_tokens": 0,
+                        "duration_ms": 1200,
+                    }
+                ],
+                "tool_call_count": 1,
+                "total_duration_ms": 1400,
+            },
+        )
+
+        messages = await repo.list_by_session("thread-1")
+
+        assert [m.role for m in messages] == ["user", "assistant"]
+        assert messages[1].content == "我查到了。\n<!--TOOL:0-->\n结论如下。"
+        assert messages[1].tool_calls[0]["runId"] == "run-1"
+        assert messages[1].usage["rounds"][0]["total_tokens"] == 20

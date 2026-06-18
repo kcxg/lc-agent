@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "test:chat-width": "node scripts/check-chat-width-contract.mjs",
+    "test:chat-history": "node scripts/check-chat-history-contract.mjs",
     "test:markdown": "node scripts/check-markdown-theme.mjs",
     "test:responsive": "node scripts/check-responsive-layout.mjs",
     "preview": "vite preview"

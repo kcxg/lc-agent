@@ -184,3 +184,58 @@ async def test_handle_message_llm_error(handler):
     error_calls = [c for c in calls if c[0][0].get("type") == "error"]
     assert len(error_calls) == 1
     assert "API key invalid" in error_calls[0][0][0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_handle_message_persists_user_and_assistant_ui_messages(handler):
+    from lc_agent.db.engine import get_async_session, init_db, reset_engine
+    from lc_agent.db.repository import ChatUiMessageRepository
+
+    reset_engine()
+    await init_db("sqlite+aiosqlite:///:memory:")
+    ws = AsyncMock()
+
+    async def fake_stream(msg, tid, pid):
+        chunk = MagicMock()
+        chunk.content = "先查资料。"
+        chunk.additional_kwargs = {}
+        yield {"event": "on_chat_model_stream", "data": {"chunk": chunk}}
+        yield {
+            "event": "on_tool_start",
+            "name": "nbrag_search",
+            "run_id": "run-1",
+            "data": {"input": {"query": "funboost"}},
+        }
+        yield {
+            "event": "on_tool_end",
+            "name": "nbrag_search",
+            "run_id": "run-1",
+            "data": {"output": "funboost 是任务队列框架"},
+        }
+        output = MagicMock()
+        output.usage_metadata = {
+            "input_tokens": 10,
+            "output_tokens": 6,
+            "total_tokens": 16,
+            "input_token_details": {"cache_read": 2},
+        }
+        yield {"event": "on_chat_model_end", "data": {"output": output}}
+        chunk2 = MagicMock()
+        chunk2.content = "适合异步任务。"
+        chunk2.additional_kwargs = {}
+        yield {"event": "on_chat_model_stream", "data": {"chunk": chunk2}}
+
+    handler.engine.chat_stream = fake_stream
+
+    await handler.handle_message(ws, "thread-persist", {"type": "message", "content": "funboost怎么样"})
+
+    async with get_async_session("sqlite+aiosqlite:///:memory:") as session:
+        records = await ChatUiMessageRepository(session).list_by_session("thread-persist")
+
+    assert [r.role for r in records] == ["user", "assistant"]
+    assert records[0].content == "funboost怎么样"
+    assert "<!--TOOL:0-->" in records[1].content
+    assert records[1].tool_calls[0]["name"] == "nbrag_search"
+    assert records[1].tool_calls[0]["runId"] == "run-1"
+    assert records[1].tool_calls[0]["result"] == "funboost 是任务队列框架"
+    assert records[1].usage["rounds"][0]["total_tokens"] == 16

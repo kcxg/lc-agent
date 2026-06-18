@@ -13,6 +13,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$RepoDir = "D:\codes\lc-agent"
 $FrontendDir = "D:\codes\lc-agent\frontend"
 $BfzsDir = "D:\codes\lc-agent-bfzs"
 $Python = "D:\ProgramData\miniconda3\envs\py312\python.exe"
@@ -43,6 +44,7 @@ if ($pids) {
 
 Write-Host "`n=== [3/3] Starting bfzs server ===" -ForegroundColor Cyan
 $env:PYTHONUNBUFFERED = "1"
+$env:PYTHONPATH = if ($env:PYTHONPATH) { "$RepoDir;$env:PYTHONPATH" } else { $RepoDir }
 Push-Location $BfzsDir
 try {
     & $Python -u -m bfzs.main --port $Port --host $Host_
