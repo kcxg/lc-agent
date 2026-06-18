@@ -293,4 +293,27 @@ const agentsStore = useAgentsStore()
   color: var(--el-text-color-secondary);
   opacity: 0.7;
 }
+
+@media (max-width: 900px) {
+  .right-panel {
+    width: min(90vw, 380px);
+    max-width: 90vw;
+    padding: 12px;
+  }
+
+  .panel-section {
+    padding: 10px;
+    margin-bottom: 12px;
+  }
+
+  .mcp-header {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .mcp-name,
+  .skill-name {
+    word-break: break-word;
+  }
+}
 </style>

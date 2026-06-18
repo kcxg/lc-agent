@@ -1,13 +1,21 @@
 <template>
   <header class="app-header">
     <div class="header-left">
+      <el-button
+        class="mobile-sidebar-btn"
+        :icon="Menu"
+        circle
+        size="small"
+        aria-label="打开会话列表"
+        @click="$emit('openMobileSidebar')"
+      />
       <span class="logo">⚡ lc_agent</span>
     </div>
     <div class="header-center">
       <el-select
+        class="agent-select"
         :model-value="agentsStore.currentAgentId"
         size="small"
-        style="width: 240px"
         @change="agentsStore.selectAgent"
       >
         <el-option
@@ -29,6 +37,14 @@
       <button class="header-btn btn-new-chat" @click="$emit('newChat')">+ 新对话</button>
     </div>
     <div class="header-right">
+      <el-button
+        class="mobile-tools-btn"
+        :icon="Setting"
+        circle
+        size="small"
+        aria-label="打开工具和状态面板"
+        @click="$emit('openMobileTools')"
+      />
       <span class="model-badge">{{ modelName }}</span>
       <span class="status-dot" :class="connected ? 'connected' : 'disconnected'" />
       <span class="status-text">{{ connected ? '已连接' : '未连接' }}</span>
@@ -40,7 +56,7 @@
 <script setup lang="ts">
 import { useAgentsStore } from '@/stores/agents'
 import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon } from '@element-plus/icons-vue'
+import { Sunny, Moon, Menu, Setting } from '@element-plus/icons-vue'
 
 const agentsStore = useAgentsStore()
 const { isDark, toggleDark } = useTheme()
@@ -54,6 +70,8 @@ defineEmits<{
   editAgent: []
   newAgent: []
   newChat: []
+  openMobileSidebar: []
+  openMobileTools: []
 }>()
 </script>
 
@@ -75,16 +93,32 @@ defineEmits<{
   color: var(--el-color-primary);
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .header-center {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .header-right {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.mobile-sidebar-btn,
+.mobile-tools-btn {
+  display: none;
+}
+
+.agent-select {
+  width: 240px;
 }
 
 .model-badge {
@@ -186,9 +220,72 @@ defineEmits<{
 .btn-new-chat {
   background: var(--el-color-primary);
   color: var(--el-color-white);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .btn-new-chat:hover {
   background: var(--el-color-primary-light-3);
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .mobile-sidebar-btn,
+  .mobile-tools-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+
+  .header-left,
+  .header-right {
+    flex-shrink: 0;
+  }
+
+  .header-center {
+    flex: 1;
+    justify-content: flex-end;
+  }
+
+  .agent-select {
+    width: min(42vw, 220px);
+  }
+
+  .btn-edit,
+  .btn-new-agent,
+  .model-badge {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .logo {
+    font-size: 14px;
+  }
+
+  .agent-select {
+    width: min(40vw, 160px);
+  }
+
+  .status-text {
+    display: none;
+  }
+
+  .btn-new-chat {
+    padding: 5px 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .logo {
+    display: none;
+  }
+
+  .agent-select {
+    width: min(46vw, 170px);
+  }
 }
 </style>

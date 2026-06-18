@@ -48,9 +48,13 @@ function handleSubmit() {
   padding: 10px 20px 14px;
   border-top: 1px solid var(--el-border-color);
   background: var(--el-bg-color);
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 100%;
 }
 
 .chat-input-wrapper :deep(.elx-x-sender) {
+  width: 100%;
   background: var(--el-bg-color-overlay) !important;
   border-color: var(--el-border-color) !important;
   border-radius: 8px;
@@ -75,5 +79,19 @@ function handleSubmit() {
 
 .chat-input-wrapper :deep(.chat-grid-wrap) {
   color: var(--el-text-color-primary) !important;
+}
+
+@media (max-width: 520px) {
+  .chat-input-wrapper {
+    padding: 8px 10px 10px;
+  }
+
+  .chat-input-wrapper :deep(.elx-x-sender) {
+    border-radius: 10px;
+  }
+
+  .chat-input-wrapper :deep([contenteditable="true"]) {
+    min-height: 22px;
+  }
 }
 </style>

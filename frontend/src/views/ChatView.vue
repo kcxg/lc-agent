@@ -196,6 +196,7 @@ onMounted(() => {
   overflow: hidden;
   padding: 16px;
   background: var(--el-bg-color-page);
+  min-width: 0;
 }
 
 .messages-container :deep(.elx-bubble-list) {
@@ -208,10 +209,13 @@ onMounted(() => {
 
 .messages-container :deep(.elx-bubble__content) {
   max-width: none !important;
+  min-width: 0;
 }
 
 .bubble-content-wrap {
   width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .tool-call-inline {
@@ -219,6 +223,8 @@ onMounted(() => {
   position: relative;
   z-index: 1;
   pointer-events: auto !important;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .messages-container :deep([style*="pointer-events"]) .tool-call-inline,
@@ -229,6 +235,17 @@ onMounted(() => {
 
 .messages-container :deep(.markdown-body) {
   max-width: 100%;
+}
+
+.messages-container :deep(.markdown-body pre),
+.messages-container :deep(.markdown-body table),
+.messages-container :deep(.tool-call-card) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.messages-container :deep(.markdown-body code) {
+  overflow-wrap: anywhere;
 }
 
 .messages-container :deep(.markdown-body pre.hljs) {
@@ -248,5 +265,29 @@ onMounted(() => {
 
 .messages-container :deep(.elx-welcome__description) {
   color: var(--el-text-color-secondary) !important;
+}
+
+@media (max-width: 900px) {
+  .messages-container {
+    padding: 12px;
+  }
+
+  .messages-container :deep(.elx-bubble) {
+    max-width: 100% !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .messages-container {
+    padding: 8px;
+  }
+
+  .messages-container :deep(.elx-bubble) {
+    max-width: 100% !important;
+  }
+
+  .messages-container :deep(.elx-bubble__content) {
+    padding: 8px 10px;
+  }
 }
 </style>

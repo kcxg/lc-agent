@@ -7,11 +7,26 @@
       @edit-agent="editCurrentAgent"
       @new-agent="createNewAgent"
       @new-chat="handleNewChat"
+      @open-mobile-sidebar="openMobileLeft"
+      @open-mobile-tools="openMobileRight"
     />
 
-    <div class="app-body">
+    <div
+      v-if="mobileLeftOpen || mobileRightOpen"
+      class="mobile-drawer-backdrop"
+      @click="closeMobileDrawers"
+    />
+
+    <div
+      class="app-body"
+      :class="{
+        'mobile-left-open': mobileLeftOpen,
+        'mobile-right-open': mobileRightOpen,
+      }"
+    >
       <LeftSidebar
-        :collapsed="sidebarCollapsed"
+        class="mobile-left-panel"
+        :collapsed="mobileLeftOpen ? false : sidebarCollapsed"
         @new-chat="handleNewChat"
         @switch-session="handleSwitchSession"
         @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
@@ -21,7 +36,7 @@
         <router-view />
       </main>
 
-      <RightPanel />
+      <RightPanel class="mobile-right-panel" />
     </div>
 
     <AgentEditorDialog ref="agentEditorRef" />
@@ -53,6 +68,8 @@ const agentsStore = useAgentsStore()
 const sessionsStore = useSessionsStore()
 const agentEditorRef = ref<InstanceType<typeof AgentEditorDialog>>()
 const sidebarCollapsed = ref(false)
+const mobileLeftOpen = ref(false)
+const mobileRightOpen = ref(false)
 let skipAgentWatch = false
 
 onMounted(async () => {
@@ -100,6 +117,7 @@ function handleNewChat() {
   chatStore.clearMessages()
   chatStore.disconnect()
   router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: agentsStore.currentAgentId } })
+  closeMobileDrawers()
 }
 
 async function handleSwitchSession(sessionId: string) {
@@ -107,6 +125,7 @@ async function handleSwitchSession(sessionId: string) {
     const session = sessionsStore.sessions.find(s => s.id === sessionId)
     const agentId = session?.agent_id || agentsStore.currentAgentId
     router.push({ name: 'chat', params: { sessionId }, query: { agent: agentId } })
+    closeMobileDrawers()
     return
   }
   const session = sessionsStore.sessions.find(s => s.id === sessionId)
@@ -121,6 +140,7 @@ async function handleSwitchSession(sessionId: string) {
     agentsStore.selectAgent(session.agent_id)
   }
   router.push({ name: 'chat', params: { sessionId }, query: { agent: agentId } })
+  closeMobileDrawers()
 }
 
 watch(() => agentsStore.currentAgentId, (newAgentId) => {
@@ -133,6 +153,7 @@ watch(() => agentsStore.currentAgentId, (newAgentId) => {
     chatStore.clearMessages()
     chatStore.disconnect()
     router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: newAgentId } })
+    closeMobileDrawers()
   }
 })
 
@@ -143,6 +164,21 @@ function editCurrentAgent() {
 function createNewAgent() {
   agentEditorRef.value?.open()
 }
+
+function openMobileLeft() {
+  mobileLeftOpen.value = true
+  mobileRightOpen.value = false
+}
+
+function openMobileRight() {
+  mobileRightOpen.value = true
+  mobileLeftOpen.value = false
+}
+
+function closeMobileDrawers() {
+  mobileLeftOpen.value = false
+  mobileRightOpen.value = false
+}
 </script>
 
 <style scoped>
@@ -152,6 +188,7 @@ function createNewAgent() {
   height: 100vh;
   background: var(--el-bg-color-page);
   position: relative;
+  overflow: hidden;
 }
 
 .app-body {
@@ -165,5 +202,64 @@ function createNewAgent() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.mobile-drawer-backdrop {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .app-body {
+    position: relative;
+  }
+
+  .chat-main {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mobile-drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 52px 0 0;
+    background: rgba(15, 23, 42, 0.35);
+    backdrop-filter: blur(2px);
+    z-index: 180;
+  }
+
+  .mobile-left-panel,
+  .mobile-right-panel {
+    position: fixed;
+    top: 52px;
+    bottom: 0;
+    height: calc(100dvh - 52px);
+    z-index: 200;
+    pointer-events: none;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+    transition: transform 0.24s ease, box-shadow 0.24s ease;
+  }
+
+  .mobile-left-panel {
+    left: 0;
+    transform: translateX(-100%);
+  }
+
+  .mobile-right-panel {
+    right: 0;
+    transform: translateX(100%);
+  }
+
+  .app-body.mobile-left-open .mobile-left-panel,
+  .app-body.mobile-right-open .mobile-right-panel {
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-left-panel,
+  .mobile-right-panel {
+    transition: none;
+  }
 }
 </style>

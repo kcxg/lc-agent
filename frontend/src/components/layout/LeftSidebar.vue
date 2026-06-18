@@ -355,4 +355,21 @@ async function handleMenuCommand(command: ConversationMenuCommand, item: Convers
 .fade-leave-to {
   opacity: 0;
 }
+
+@media (max-width: 900px) {
+  .left-sidebar,
+  .left-sidebar.collapsed {
+    width: min(86vw, 340px);
+    max-width: 86vw;
+    height: 100%;
+  }
+
+  .sidebar-header {
+    padding: 10px 12px;
+  }
+
+  .session-list {
+    overflow-y: auto;
+  }
+}
 </style>
