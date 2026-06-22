@@ -4,6 +4,7 @@
       :model-value="currentModel"
       placeholder="选择模型"
       size="small"
+      filterable
       style="width: 100%"
       @change="$emit('change', $event)"
     >

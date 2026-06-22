@@ -1,6 +1,9 @@
 <template>
   <div class="chat-view">
     <div class="messages-container">
+      <div v-if="messages.length > 0" class="chat-actions-bar">
+        <CopyRoundsButton :messages="messages" :model-name="sessionModel" />
+      </div>
       <Welcome
         v-if="messages.length === 0 && !isLoading"
         title="Start a conversation"
@@ -96,6 +99,14 @@
                 </span>
               </div>
             </div>
+            <MessageToolbar
+              v-if="getOriginalMessage(item.messageId) && !item.loading"
+              :message="getOriginalMessage(item.messageId)!"
+              :model-name="sessionModel"
+              :has-thinking="item.hasThinking"
+              :has-tool-calls="item.hasToolCalls"
+              :has-answer="item.hasAnswer"
+            />
             <TokenUsagePanel
               v-if="item.usage"
               :usage="item.usage"
@@ -142,6 +153,8 @@ import ChatInput from '@/components/chat/ChatInput.vue'
 import InterruptDialog from '@/components/chat/InterruptDialog.vue'
 import ToolCallCard from '@/components/chat/ToolCallCard.vue'
 import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
+import MessageToolbar from '@/components/chat/MessageToolbar.vue'
+import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
 
 interface ContentSegment {
   type: 'text' | 'thinking' | 'tool'
@@ -156,6 +169,9 @@ type ChatBubbleItem = BubbleListItemProps & {
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
   usage?: MessageUsage
+  hasThinking?: boolean
+  hasToolCalls?: boolean
+  hasAnswer?: boolean
 }
 
 const chatStore = useChatStore()
@@ -175,33 +191,45 @@ const isLoading = computed(() => {
 const bubbleList = computed((): ChatBubbleItem[] =>
   messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
-    .map((msg, idx, arr) => ({
-      key: msg.id,
-      messageId: msg.id,
-      role: msg.role === 'assistant' ? 'ai' : 'user',
-      placement: msg.role === 'user' ? 'end' : 'start',
-      content: msg.content || '',
-      shape: 'corner' as const,
-      variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
-      isMarkdown: msg.role !== 'user',
-      toolCalls: msg.toolCalls,
-      usage: msg.usage,
-      segments: msg.role === 'assistant' && hasStructuredSegments(msg.content || '', msg.toolCalls)
+    .map((msg, idx, arr) => {
+      const segs = msg.role === 'assistant' && hasStructuredSegments(msg.content || '', msg.toolCalls)
         ? parseSegments(msg.content || '', msg.toolCalls)
-        : undefined,
-      loading:
-        msg.role === 'assistant'
-        && idx === arr.length - 1
-        && isStreaming.value
-        && !msg.content,
-      avatarSize: '28px',
-      avatarGap: '8px',
-    })),
+        : undefined
+      return {
+        key: msg.id,
+        messageId: msg.id,
+        role: msg.role === 'assistant' ? 'ai' : 'user',
+        placement: msg.role === 'user' ? 'end' : 'start',
+        content: msg.content || '',
+        shape: 'corner' as const,
+        variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
+        isMarkdown: msg.role !== 'user',
+        toolCalls: msg.toolCalls,
+        usage: msg.usage,
+        segments: segs,
+        hasThinking: segs?.some(s => s.type === 'thinking' && s.text?.trim()) ?? false,
+        hasToolCalls: segs?.some(s => s.type === 'tool') ?? false,
+        hasAnswer: segs?.some(s => s.type === 'text' && s.text?.trim()) ?? false,
+        loading:
+          msg.role === 'assistant'
+          && idx === arr.length - 1
+          && isStreaming.value
+          && !msg.content,
+        avatarSize: '28px',
+        avatarGap: '8px',
+      }
+    }),
 )
 
 const lastUserMessage = computed(() =>
   [...messages.value].reverse().find(msg => msg.role === 'user'),
 )
+
+const sessionModel = computed(() => getModelLabel())
+
+function getOriginalMessage(messageId: string) {
+  return messages.value.find(m => m.id === messageId)
+}
 
 function getAssistantLabel(): string {
   return agentsStore.currentAgent?.name || 'AI'
@@ -437,6 +465,13 @@ onBeforeUnmount(() => {
   padding: 16px;
   background: var(--el-bg-color-page);
   min-width: 0;
+}
+
+.chat-actions-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 4px 4px;
+  flex-shrink: 0;
 }
 
 .messages-container :deep(.elx-bubble-list) {
