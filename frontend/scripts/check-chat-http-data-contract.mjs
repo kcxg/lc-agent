@@ -18,7 +18,7 @@ expectIncludes('chat.ts', chatStore, 'export interface HttpTrace')
 expectIncludes('chat.ts', chatStore, 'httpTraces?: HttpTrace[]')
 expectIncludes('chat.ts', chatStore, 'function normalizeHttpTrace')
 expectIncludes('chat.ts', chatStore, 'function normalizeHttpTraces')
-expectIncludes('chat.ts', chatStore, 'httpTraces: normalizeHttpTraces(msg.http_traces || msg.httpTraces)')
+expectIncludes('chat.ts', chatStore, 'normalizeHttpTraces(msg.http_traces || msg.httpTraces)')
 expectIncludes('chat.ts', chatStore, 'last.httpTraces = normalizeHttpTraces((msg as any).http_traces || (msg as any).httpTraces)')
 expectIncludes('websocket.ts', websocket, 'http_traces?: any[]')
 

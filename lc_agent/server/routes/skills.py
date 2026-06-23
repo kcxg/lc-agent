@@ -15,6 +15,7 @@ def list_skills(request: Request):
             "description": s.description,
             "group": s.group,
             "file_path": s.file_path,
+            "content": s.content,
             "enabled": s.name not in scanner._disabled_skills,
         }
         for s in scanner.skills

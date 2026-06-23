@@ -110,6 +110,14 @@ function ensureToolMarkers(content: string, toolCalls?: ToolCall[]): string {
   return `${content}\n${missingIndexes.map(idx => `<!--TOOL:${idx}-->`).join('\n')}\n`
 }
 
+function ensureHttpMarkers(content: string, traceCount: number): string {
+  if (traceCount <= 0) return content
+  const missing = Array.from({ length: traceCount }, (_, i) => i)
+    .filter(i => !content.includes(`<!--HTTP:${i}-->`))
+  if (missing.length === 0) return content
+  return `${content}\n${missing.map(i => `<!--HTTP:${i}-->`).join('\n')}\n`
+}
+
 function normalizeHistoryUsage(rawUsage: any): MessageUsage | undefined {
   if (!rawUsage) return undefined
   const rounds = (rawUsage.rounds || []).map((round: any) => ({
@@ -178,14 +186,20 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     usage.toolCallCount = toolCalls.length
   }
 
+  const httpTraces = normalizeHttpTraces(msg.http_traces || msg.httpTraces)
+  let content = role === 'assistant' ? ensureToolMarkers(msg.content || '', toolCalls) : msg.content || ''
+  if (role === 'assistant' && httpTraces?.length) {
+    content = ensureHttpMarkers(content, httpTraces.length)
+  }
+
   return {
     id: msg.id || createClientId(),
     role,
-    content: role === 'assistant' ? ensureToolMarkers(msg.content || '', toolCalls) : msg.content || '',
+    content,
     timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now(),
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     usage,
-    httpTraces: normalizeHttpTraces(msg.http_traces || msg.httpTraces),
+    httpTraces,
   }
 }
 
@@ -295,6 +309,13 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
 
+    ws.value.on('content', (msg: WsMessage) => {
+      const last = messages.value[messages.value.length - 1]
+      if (last && last.role === 'assistant') {
+        last.content += msg.content || ''
+      }
+    })
+
     ws.value.on('llm_usage', (msg: WsMessage) => {
       const last = messages.value[messages.value.length - 1]
       if (last?.usage) {
@@ -382,6 +403,9 @@ export const useChatStore = defineStore('chat', () => {
           mergeFinalUsageRounds(last.usage.rounds, usageData)
         }
         last.httpTraces = normalizeHttpTraces((msg as any).http_traces || (msg as any).httpTraces)
+        if (last.httpTraces?.length) {
+          last.content = ensureHttpMarkers(last.content, last.httpTraces.length)
+        }
       }
     })
 

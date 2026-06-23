@@ -18,6 +18,7 @@ def list_mcp_servers(request: Request):
             "enabled": s.enabled,
             "status": s.status,
             "tools": s.tools,
+            "tool_schemas": s.tool_schemas if hasattr(s, 'tool_schemas') else [],
             "error": s.error,
         }
         for s in manager.servers

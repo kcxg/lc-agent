@@ -4,10 +4,42 @@ import { api } from '@/api/http'
 import { useAgentsStore } from '@/stores/agents'
 import { useSessionsStore } from '@/stores/sessions'
 
+export interface ToolItem {
+  name: string
+  description: string
+  input_schema?: any
+}
+
 export interface ToolGroup {
   id: string
   description: string
-  tools: { name: string; description: string }[]
+  tools: ToolItem[]
+  enabled: boolean
+}
+
+export interface McpToolSchema {
+  name: string
+  description: string
+  input_schema: any
+}
+
+export interface McpServer {
+  name: string
+  type: string
+  command?: string
+  url?: string
+  enabled: boolean
+  status: string
+  tools: string[]
+  tool_schemas?: McpToolSchema[]
+  error?: string
+}
+
+export interface Skill {
+  name: string
+  description: string
+  content?: string
+  file_path?: string
   enabled: boolean
 }
 
@@ -21,8 +53,8 @@ export interface ModelInfo {
 export const useToolsStore = defineStore('tools', () => {
   const groups = ref<ToolGroup[]>([])
   const models = ref<ModelInfo[]>([])
-  const mcpServers = ref<any[]>([])
-  const skills = ref<any[]>([])
+  const mcpServers = ref<McpServer[]>([])
+  const skills = ref<Skill[]>([])
   const currentModel = ref('')
 
   const localOverrides = reactive<Record<string, boolean>>({})

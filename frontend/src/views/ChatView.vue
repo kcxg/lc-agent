@@ -79,6 +79,7 @@
                 <HttpTraceBlock
                   v-else-if="seg.type === 'http' && seg.httpIndex != null && item.httpTraces?.[seg.httpIndex]"
                   :trace="item.httpTraces[seg.httpIndex]"
+                  :usage-round="item.usage?.rounds?.[seg.httpIndex]"
                 />
               </template>
             </template>
@@ -300,7 +301,7 @@ function stripThinkingMarkers(content: string): string {
 }
 
 function stripUiMarkers(content: string): string {
-  return stripThinkingMarkers(content).replace(/<!--TOOL:\d+-->/g, '').trim()
+  return stripThinkingMarkers(content).replace(/<!--TOOL:\d+-->/g, '').replace(/<!--HTTP:\d+-->/g, '').trim()
 }
 
 function getReplayHistory(beforeMessageId: string): ReplayMessage[] {

@@ -15,6 +15,7 @@
         <ToolGroupPanel
           :groups="toolsStore.filteredGroups"
           @toggle="toolsStore.toggleGroup"
+          @detail="(group) => openDetail('tool-group', group.description || group.id, group)"
         />
       </div>
 
@@ -30,6 +31,10 @@
                 @change="toolsStore.toggleMcp(server.name)"
               />
               <span class="mcp-name">{{ server.name }}</span>
+              <button class="detail-btn" type="button" @click="openDetail('mcp', server.name, server)">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              详情
+            </button>
             </div>
             <el-tag size="small" :type="!server.allowed ? 'warning' : server.status === 'connected' ? 'success' : server.status === 'error' ? 'danger' : server.status === 'disabled' ? 'warning' : 'info'">
               {{ !server.allowed ? '未授权' : server.status === 'connected' ? '已连接' : server.status === 'error' ? '错误' : server.status === 'disabled' ? '已禁用' : '未连接' }}
@@ -55,6 +60,10 @@
               @change="toolsStore.toggleSkill(skill.name)"
             />
             <span class="skill-name" :class="{ dimmed: !skill.enabled }">{{ skill.name }}</span>
+            <button class="detail-btn" type="button" @click="openDetail('skill', skill.name, skill)">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              详情
+            </button>
           </div>
           <span class="skill-desc">{{ skill.description }}</span>
         </div>
@@ -83,19 +92,47 @@
         <code>{{ chatStore.threadId.slice(0, 8) }}...</code>
       </div>
     </div>
+
+    <DetailModal
+      v-model:visible="detailModal.visible"
+      :title="detailModal.title"
+      :mode="detailModal.mode"
+      :data="detailModal.data"
+    />
   </aside>
 </template>
 
 <script setup lang="ts">
+import { reactive } from 'vue'
 import { useToolsStore } from '@/stores/tools'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
+import DetailModal from '@/components/panels/DetailModal.vue'
 
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
+
+const detailModal = reactive<{
+  visible: boolean
+  mode: 'tool-group' | 'mcp' | 'skill'
+  title: string
+  data: any
+}>({
+  visible: false,
+  mode: 'tool-group',
+  title: '',
+  data: null,
+})
+
+function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, data: any) {
+  detailModal.mode = mode
+  detailModal.title = title
+  detailModal.data = data
+  detailModal.visible = true
+}
 </script>
 
 <style scoped>
@@ -214,6 +251,34 @@ const agentsStore = useAgentsStore()
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.detail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
+  font-size: 11px;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.detail-btn:hover {
+  background: color-mix(in srgb, var(--el-color-primary) 15%, transparent);
+  border-color: var(--el-color-primary-light-3);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+}
+
+.detail-btn:active {
+  transform: scale(0.95);
+  background: color-mix(in srgb, var(--el-color-primary) 20%, transparent);
 }
 
 .skill-name {

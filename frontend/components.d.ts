@@ -16,6 +16,7 @@ declare module 'vue' {
     ChatBubble: typeof import('./src/components/chat/ChatBubble.vue')['default']
     ChatInput: typeof import('./src/components/chat/ChatInput.vue')['default']
     CopyRoundsButton: typeof import('./src/components/chat/CopyRoundsButton.vue')['default']
+    DetailModal: typeof import('./src/components/panels/DetailModal.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']

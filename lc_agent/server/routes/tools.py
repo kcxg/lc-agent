@@ -30,9 +30,17 @@ def list_tool_groups(registry: ToolRegistry = Depends(get_registry)):
         group_name = entry["group"] or "__ungrouped__"
         if group_name not in groups:
             groups[group_name] = []
+        tool_obj = entry["tool"]
+        schema = None
+        if hasattr(tool_obj, "args_schema") and tool_obj.args_schema:
+            try:
+                schema = tool_obj.args_schema.model_json_schema()
+            except Exception:
+                pass
         groups[group_name].append({
             "name": name,
-            "description": entry["tool"].description,
+            "description": tool_obj.description,
+            "input_schema": schema,
         })
     disabled = registry._disabled_groups
     return [
