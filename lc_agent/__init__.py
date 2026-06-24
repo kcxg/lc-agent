@@ -1,7 +1,12 @@
 # lc_agent/__init__.py
 """lc_agent — LangChain Agent framework with built-in Web UI."""
 
-__version__ = "0.1.0"
+from importlib.metadata import version, PackageNotFoundError
+
+try:
+    __version__ = version("lc-agent")
+except PackageNotFoundError:
+    __version__ = "0.0.0-dev"
 
 from lc_agent.app import LcAgentApp
 from lc_agent.config.loader import load_config
