@@ -236,7 +236,7 @@ metadata:
 ### lc-agent 能做什么？
 
 - 当做 OpenWebUI / PrivateGPT 使用：配 API Key 聊天
-- 当做 Codex / Claude Code 使用：配置 MCP 和 Skills 获得工具调用能力
+- 当做 Codex / Claude Code 使用：配置 MCP 和 Skills 获得工具调用能力。如果你要实现ai coding编程，推荐配置 serena 这个mcp，一站式搞定索引代码、读代码、写代码、改代码、执行代码，无需自己亲自吃苦实现编程能力。
 - 当做 LangChain Agent 管理界面：热切换模型/工具/MCP，比改代码重启强得多
 
 ### 比一般 LLM 网页聊天有什么优势？
