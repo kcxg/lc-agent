@@ -1,5 +1,5 @@
 [project]
-name = "lcagent"
+name = "lc-agent-app"
 version = "0.2.0"
 description = "LangChain Agent framework with built-in Web UI"
 requires-python = ">=3.12"

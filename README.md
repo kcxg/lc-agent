@@ -27,7 +27,7 @@ lc-agent 是一个**可导入的框架**，用户在自己的项目中 `import l
 
 ```bash
 # 从 PyPI 安装
-pip install lcagent
+pip install lc-agent-app
 
 # 或从源码开发安装
 pip install -e .

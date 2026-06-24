@@ -4,7 +4,7 @@
 from importlib.metadata import version, PackageNotFoundError
 
 try:
-    __version__ = version("lcagent")
+    __version__ = version("lc-agent-app")
 except PackageNotFoundError:
     __version__ = "0.0.0-dev"
 
