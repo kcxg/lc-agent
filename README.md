@@ -9,7 +9,7 @@
 
 lc-agent 是一个**可导入的框架**，用户在自己的项目中 `import lc_agent` 来开发自定义 Agent 应用，无需 clone 或修改框架代码。 用户如果一行代码不会写，也可以使用他来接入mcp和skills来实现agent，这就好比你使用codex claudecode opencode等工具，虽然你不会改造codex claudecode的源码但是可以接入mcp 和skills来实现自己的个性化agent。
 
-如果你啥mcp 和skills都不配置，直接使用lc-agent。只配置baseurl 和apikey，那么也可以使用内置的chat智能体，就是那种不能执行工具的，就好像你在deepseek 豆包网页上聊天那种，此时大模型只能聊天不能调用工具操作你的电脑。
+如果你啥mcp 和skills都不配置，直接使用lc-agent。只配置baseurl 和apikey，那么也可以使用内置的chat智能体，就是那种不能执行工具的，就好像你在deepseek 豆包网页上聊天那种，此时大模型只能聊天不能调用各种工具，只是充当一个聊天机器人而不是agent。
 
 ## 功能
 
@@ -22,6 +22,12 @@ lc-agent 是一个**可导入的框架**，用户在自己的项目中 `import l
 - 会话持久化（SQLModel + SQLite）
 - Human-in-the-loop 审批机制
 - Agent 预设管理（代码注册 / 页面创建）
+- 超级丰富的对开发agent应用友好的功能，提供了强大的直接可观测性能力，对tokens消耗，工具调用详情，每一轮的原始对ai大模型api的请求和响应，在当前聊天区域自带了类似langfuse langsmith的可观测性能力。
+
+## 优势
+lc-agent 既是框架又是产品。用户可以直接使用不写py代码，当做是一个openwebui privategpt cherrystudio那样的大模型网页聊天工具来使用。也可以导入使用，自定义agent skills tools等。
+
+lc-agent 比常用的llm网页聊天工具，例如openwebui privategpt cherrystudio等，提供了更加丰富的对agent开发友好的功能，例如对tokens消耗，工具调用详情，每一轮的原始对ai大模型api的请求和响应，在当前聊天区域自带了类似langfuse langsmith的可观测性能力。
 
 ## 安装
 
