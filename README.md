@@ -1,42 +1,37 @@
 # lc-agent
 
-基于 LangChain / LangGraph 的 AI Agent 框架，内置 Web UI。lc-agent 既是框架又是产品。
-用户可以在自己项目导入lc-agent框架，使用langchain框架开发自己的具体的agent应用，页面能自动管理用户所有的langchain的agent对象(CompiledStateGraph类型的对象)；用户也可以不写代码，直接在页面创建配置智能体。
+基于 LangChain / LangGraph 的 AI Agent 框架，内置 Web UI。
 
-## 技术栈
+**lc-agent 既是框架又是产品。** 用户可以在自己项目中 `import lc_agent` 开发自定义 Agent 应用；也可以零代码，直接在页面创建配置智能体。
 
-lc-agent 的web 前端 使用vue + Element Plus X 框架。后端使用fastapi + asyncio + sqlmodel + langchain + langgraph + deepagents 框架。
-
-
-## 演示import lc-agent 框架开发自己的agent应用
-[lc-agent-bfzs](https://github.com/ydf0509/lc-agent-bfzs) 是基于lc-agent框架开发的自定义项目,是用于演示使用lc-agent框架的项目。
-
-lc_agent 是一个空壳框架，不自带 tools mcp skills 自定义agents，内置了3个agent。
-用户可以在页面创建agent，也可以用代码创建agent。
+> [lc-agent-bfzs](https://github.com/ydf0509/lc-agent-bfzs) 是基于 lc-agent 框架开发的演示项目。
 
 ## 定位
 
-lc-agent 是一个**可导入的框架**，用户在自己的项目中 `import lc_agent` 来开发自定义 Agent 应用，无需 clone 或修改框架代码。 用户如果一行代码不会写，也可以使用他来接入mcp和skills来实现agent，这就好比你使用codex claudecode opencode等工具，虽然你不会改造codex claudecode的源码但是可以接入mcp 和skills来实现自己的个性化agent。
+| 使用方式 | 类比 | 说明 |
+|----------|------|------|
+| 纯聊天 | DeepSeek / 豆包网页 | 配好 API Key 即可对话 |
+| 接入 MCP & Skills | Codex / Claude Code / OpenCode | 无需改框架代码，配置即 Agent |
+| 作为框架开发 | LangServe / Dify SDK | `import lc_agent` 注册自定义工具和 Agent |
+| 可观测性 | LangSmith / LangFuse | 内置 HTTP 追踪、Token 统计、工具调用可视化 |
 
-如果你啥mcp 和skills都不配置，直接使用lc-agent。只配置baseurl 和apikey，那么也可以使用内置的chat智能体，就是那种不能执行工具的，就好像你在deepseek 豆包网页上聊天那种，此时大模型只能聊天不能调用各种工具，只是充当一个聊天机器人而不是agent。
+## 截图预览
 
-## 功能
+**桌面端 — 对话 + MCP/Skills 面板**
 
-- 内置 FastAPI 服务器 + WebSocket 流式对话
-- Vue 3 暗色主题 Web UI（Element Plus）
-- LangGraph ReAct Agent 引擎
-- 工具注册表（`@tool` 装饰器，支持分组 + 分组描述）
-- SKILL.md 技能扫描（支持 `metadata.group` 分组）
-- MCP 服务器管理 + 工具适配
-- 会话持久化（SQLModel + SQLite）
-- Human-in-the-loop 审批机制
-- Agent 预设管理（代码注册 / 页面创建）
-- 超级丰富的对开发agent应用友好的功能，提供了强大的直接可观测性能力，对tokens消耗，工具调用详情，每一轮的原始对ai大模型api的请求和响应，在当前聊天区域自带了类似langfuse langsmith的可观测性能力。
+![桌面端对话界面](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc01.png)
 
-## 优势
-lc-agent 既是框架又是产品。用户可以直接使用不写py代码，当做是一个openwebui privategpt cherrystudio那样的大模型网页聊天工具来使用。也可以导入使用，自定义agent skills tools等。
+**可观测性 — HTTP 追踪 + Token 统计 + 工具调用**
 
-lc-agent 比常用的llm网页聊天工具，例如openwebui privategpt cherrystudio等，提供了更加丰富的对agent开发友好的功能，例如对tokens消耗，工具调用详情，每一轮的原始对ai大模型api的请求和响应，在当前聊天区域自带了类似langfuse langsmith的可观测性能力，不用你再次去登录langfuse网站苦逼的去找你的trace请求。
+![HTTP追踪与Token面板](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc02.png)
+
+**工具调用详情 — 参数、返回值、思考过程**
+
+![工具调用卡片](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc03.png)
+
+**移动端适配**
+
+![移动端界面](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/phone01.png)
 
 ## 安装
 
@@ -47,6 +42,59 @@ pip install lc-agent-app
 # 或从源码开发安装
 pip install -e .
 ```
+
+## 截图
+
+
+## 核心特性
+
+### Agent 引擎
+- 基于 `langchain.agents.create_agent` 构建 Agent（支持所有 LangChain 兼容 LLM）
+- 三套内置预设：**Chat**（纯聊天）、**Empty**（全部工具默认关）、**Power**（全部工具默认开）
+- 运行时热切换模型 / 工具 / MCP / Skills，无需重启
+- 每次对话可临时覆盖模型（前端直接切换）
+- 代码注册自定义 `CompiledStateGraph` Agent
+
+### 可观测性（类 LangFuse）
+- **HTTP 追踪**：自动捕获每轮 LLM 请求/响应全文，敏感信息自动脱敏
+- **Token 面板**：每轮 input / output / cache_read / reasoning tokens 详细展示 + 累计汇总
+- **工具调用卡片**：参数、返回值、耗时、运行状态一目了然
+- **追踪持久化**：HTTP traces 存入数据库，历史会话可回放完整调试信息
+
+### 工具 & Skills & MCP
+- `@tool` 装饰器注册工具，支持分组 + 分组描述
+- SKILL.md 技能扫描（遵循 agentskills.io 规范，支持 `metadata.group` 分组）
+- MCP 服务器管理：支持 **stdio / SSE / Streamable HTTP** 三种传输方式
+- MCP 自动重连（工具调用超时/异常时自动重连一次）
+- MCP JSON Schema → LangChain StructuredTool 自动适配
+- 三值权限控制：`null` = 全部允许，`[]` = 全部禁止，`["x","y"]` = 白名单
+- 危险工具标记 + Human-in-the-loop 审批（LangGraph interrupt）
+
+### 对话体验
+- WebSocket 流式输出（thinking / 工具调用 / 回答实时交替渲染）
+- 流式生成随时中断（真正取消，不是假停止）
+- 消息编辑 & 重发（编辑历史消息，自动截断后续并重新生成）
+- 自动生成会话标题（≤30字）
+- 会话固定/分组/搜索/深度链接（`#/c/:sessionId`）
+
+### Reasoning 思考过程
+- 自定义 `ChatOpenAIReasoning` 类自动提取 `reasoning_content`
+- 支持 DeepSeek / GLM / 任何返回 reasoning 字段的供应商
+- 无需为每个供应商 import 不同 Chat Model 类
+
+### Web UI
+- **Vue 3 + TypeScript + Element Plus X**（AI 专用组件：BubbleList、XSender、Thinking）
+- 明暗主题切换
+- 完整移动端适配（抽屉式侧栏、触控手势、表格横滚+首列固定）
+- Markdown 渲染 + 语法高亮 + 代码一键复制
+- 丰富的复制工具（全部 / 仅思考 / 仅工具 / 仅回答 / 最近 N 轮）
+- Agent 编辑器（页面创建/编辑预设，细粒度权限配置）
+- Agent 来源标识（内置 / 代码 / 自建）
+
+### 数据持久化
+- 双存储模型：SQLModel（会话/预设/UI消息）+ LangGraph AsyncSqliteSaver（checkpoint）
+- Alembic 自动迁移（启动时自动升级 schema）
+- 会话历史完整保存（含思考、工具调用、HTTP追踪）
 
 ## 快速开始
 
@@ -81,9 +129,22 @@ app.add_agent("my_agent", build_my_agent(config), description="自定义Agent")
 app.run()
 ```
 
+## CLI 参数
+
+```bash
+lc-agent [OPTIONS]
+
+  -c, --config PATH      配置文件路径（默认搜索顺序见下方）
+  -p, --port INT         监听端口（默认 8000）
+  --host TEXT            绑定地址（默认 127.0.0.1）
+  --dotenv PATH          指定 .env 文件路径
+```
+
 ## 配置
 
-使用 `config.jsonc`（支持注释 + `{env:VAR}` 环境变量替换）：
+使用 `config.jsonc`（支持注释 + `{env:VAR}` 环境变量替换 + `.env` 自动加载）：
+
+**配置搜索顺序**：命令行 `-c` 指定 → `./config.jsonc` → `~/.lc_agent/config.jsonc` → 内置默认值
 
 ```jsonc
 {
@@ -128,7 +189,7 @@ def read_file(path: str) -> str:
 
 ```
 myskills/
-└── my-skill/           # 文件夹名 = name 字段
+└── my-skill/
     └── SKILL.md
 ```
 
@@ -141,9 +202,50 @@ description: 技能描述
 metadata:
   group: "技能组名"
 ---
-# 技能内容
+# 技能内容（会注入到 Agent 系统提示词）
 ...
 ```
+
+## API 概览
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/health` | 版本 + 配置状态 |
+| `GET /api/models` | 可用模型列表 |
+| `GET/POST /api/tools` | 工具列表 / 分组开关 |
+| `GET/POST/PUT/DELETE /api/agents` | Agent 预设 CRUD + 激活 |
+| `GET/POST/PUT/DELETE /api/sessions` | 会话 CRUD + 消息历史 |
+| `GET/POST /api/skills` | Skills 列表 / 开关 |
+| `GET/POST /api/mcp` | MCP 服务器状态 / 开关 |
+| `WS /ws/chat[/{thread_id}]` | 流式对话 WebSocket |
+| `GET /api/docs` | OpenAPI 文档 |
+
+## 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| AI 引擎 | LangChain `create_agent` + `init_chat_model`（多提供商统一接入） |
+| LLM 客户端 | `ChatOpenAIReasoning` — 自动提取 reasoning_content |
+| 后端 | FastAPI + SQLModel + Alembic + asyncio |
+| 前端 | Vue 3 + TypeScript + Element Plus X + Vite |
+| 数据库 | SQLite（aiosqlite）+ LangGraph Checkpoint |
+| 通信 | WebSocket（流式）+ REST API |
+
+## 自问自答
+
+### lc-agent 能做什么？
+
+- 当做 OpenWebUI / PrivateGPT 使用：配 API Key 聊天
+- 当做 Codex / Claude Code 使用：配置 MCP 和 Skills 获得工具调用能力
+- 当做 LangChain Agent 管理界面：热切换模型/工具/MCP，比改代码重启强得多
+
+### 比一般 LLM 网页聊天有什么优势？
+
+可观测性。把工具调用入参/响应时间/返回内容可视化，每轮 tokens 消耗/缓存命中详细记录。效果接近 LangSmith / LangFuse，但零配置开箱即用。
+
+### 有 RAG 知识库功能吗？
+
+通过 [nbrag](https://github.com/ydf0509/nbrag) MCP 实现 Agentic RAG。lc-agent 不重复造轮子，nbrag 远超 Dify 和 OpenWebUI 内置的知识库检索能力。
 
 ## 开发
 
@@ -160,45 +262,6 @@ npm install
 npm run dev      # 开发模式（热更新，代理到 :8000）
 npm run build    # 构建到 lc_agent/web/dist/
 ```
-
-## 技术栈
-
-| 层级 | 技术 |
-|------|------|
-| AI 引擎 | LangChain `create_agent` + `init_chat_model` (多提供商) |
-| LLM 客户端 | `ChatOpenAIReasoning` — 自动提取 reasoning_content（兼容所有供应商） |
-| 后端 | FastAPI + SQLModel + asyncio |
-| 前端 | Vue 3 + TypeScript + Element Plus + Vite |
-| 数据库 | SQLite (aiosqlite) |
-| 通信 | WebSocket (流式) + REST API |
-
-## Reasoning / 思考过程显示
-
-框架使用自定义的 `ChatOpenAIReasoning` 类（继承 `ChatOpenAI`），自动从流式响应中提取 `reasoning_content` 字段，支持任何返回该字段的模型：
-
-- DeepSeek 系列（通过 DeepSeek 官方 / 字节方舟 / 阿里百炼等）
-- GLM 系列（复杂任务时自动触发思考）
-- 任何其他返回 `reasoning_content` 或 `reasoning` 的供应商
-
-无需为每个供应商 import 不同的 Chat Model 类。
-
-## 自问自答
-### 1. lc-agent 能做什么？
-答：
-可以当做是openwebui privategpt来使用，自定义apikey和baseurl，实现聊天功能。
-也可以当做是codex claudecode opencode来使用，配置编程专用mcp serena和skills。
-可以当做是langchain 智能体的管理界面，管理自己的智能体，同时支持热切换模型 skills  mcp tools，比频繁修改代码然后重启在控制台循环提问好很多。
-
-### 2. lc-agent 比一般的llm网页聊天工具有什么优势？
-答：
-lc-agent比一般的llm网页聊天项目录入openwebui这种，加了更多可视化利于码农调试agent的内容
-例如把工具调用入参和响应时间和返回内容可视化做得非常好，几乎等同于有了langsmith langfuse那种可观测性了，
-把agent会话的每一轮tokens 消耗、缓存命中详细记录，让人心里有谱，花了多少tokens
-
-### 3. lc-agent 知否有rag知识库的功能？
-
-答： [nbrag](https://github.com/ydf0509/nbrag) ，lc-agent不重复实现rag知识库，通过把nbrag这个mcp配置给agent，实现agentic rag功能，nbrag远超dify 和 openwebui 内置的知识库检索能力。
-
 
 ## License
 
