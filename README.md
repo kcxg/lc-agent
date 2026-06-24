@@ -36,7 +36,7 @@ lc-agent 是一个**可导入的框架**，用户在自己的项目中 `import l
 ## 优势
 lc-agent 既是框架又是产品。用户可以直接使用不写py代码，当做是一个openwebui privategpt cherrystudio那样的大模型网页聊天工具来使用。也可以导入使用，自定义agent skills tools等。
 
-lc-agent 比常用的llm网页聊天工具，例如openwebui privategpt cherrystudio等，提供了更加丰富的对agent开发友好的功能，例如对tokens消耗，工具调用详情，每一轮的原始对ai大模型api的请求和响应，在当前聊天区域自带了类似langfuse langsmith的可观测性能力。
+lc-agent 比常用的llm网页聊天工具，例如openwebui privategpt cherrystudio等，提供了更加丰富的对agent开发友好的功能，例如对tokens消耗，工具调用详情，每一轮的原始对ai大模型api的请求和响应，在当前聊天区域自带了类似langfuse langsmith的可观测性能力，不用你再次去登录langfuse网站苦逼的去找你的trace请求。
 
 ## 安装
 
