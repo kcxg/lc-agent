@@ -694,6 +694,28 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary) !important;
 }
 
+/* 大屏逐步放宽气泡宽度，避免浪费空间 */
+@media (min-width: 1200px) {
+  .messages-container {
+    --chat-assistant-bubble-width: min(80%, 1024px);
+    --chat-user-bubble-max-width: min(74%, 800px);
+  }
+}
+
+@media (min-width: 1600px) {
+  .messages-container {
+    --chat-assistant-bubble-width: min(75%, 1120px);
+    --chat-user-bubble-max-width: min(70%, 880px);
+  }
+}
+
+@media (min-width: 2000px) {
+  .messages-container {
+    --chat-assistant-bubble-width: min(72%, 1200px);
+    --chat-user-bubble-max-width: min(66%, 920px);
+  }
+}
+
 @media (max-width: 900px) {
   .messages-container {
     --chat-assistant-bubble-width: 100%;
