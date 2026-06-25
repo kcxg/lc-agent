@@ -126,7 +126,7 @@ function fmtTokens(n: number | undefined): string {
 
 function httpTraceToMarkdown(trace: HttpTrace, usageRound?: LlmRoundUsage): string {
   const method = trace.request.method || 'HTTP'
-  const status = trace.error ? '失败' : trace.response.status ?? '未返回'
+  const status = trace.error ? '❌ 失败' : `${trace.response.status ?? '?'}`
   const duration = trace.durationMs != null
     ? (trace.durationMs >= 1000 ? `${(trace.durationMs / 1000).toFixed(1)}s` : `${trace.durationMs}ms`)
     : '-'
@@ -138,18 +138,19 @@ function httpTraceToMarkdown(trace: HttpTrace, usageRound?: LlmRoundUsage): stri
     if (usageRound.outputTokens) tokenParts.push(`输出 ${fmtTokens(usageRound.outputTokens)}`)
     if (usageRound.reasoningTokens) tokenParts.push(`推理 ${fmtTokens(usageRound.reasoningTokens)}`)
   }
-  const tokenSuffix = tokenParts.length > 0 ? ` | ${tokenParts.join(' ')}` : ''
+  const tokenStr = tokenParts.length > 0 ? tokenParts.join(' ') : ''
 
-  const summary = `🌐 HTTP #${trace.sequence} ${method} ${status} ${duration}${tokenSuffix}`
-
-  const url = trace.request.url || '未采集'
   const model = [trace.provider, trace.model].filter(Boolean).join(' / ')
+  const url = trace.request.url || '未采集'
 
   const lines: string[] = []
-  lines.push(`> ${summary}`)
-  lines.push(`> URL: \`${url}\``)
-  if (model) lines.push(`> 模型: ${model}`)
-  if (trace.error) lines.push(`> 错误: ${trace.error}`)
+  lines.push('| 项目 | 值 |')
+  lines.push('| :-- | :-- |')
+  lines.push(`| 🌐 HTTP | **#${trace.sequence}** \`${method}\` **${status}** ${duration} |`)
+  if (tokenStr) lines.push(`| Tokens | ${tokenStr} |`)
+  lines.push(`| URL | \`${url}\` |`)
+  if (model) lines.push(`| 模型 | ${model} |`)
+  if (trace.error) lines.push(`| 错误 | ${trace.error} |`)
 
   return lines.join('\n')
 }

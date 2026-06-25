@@ -384,6 +384,8 @@ html:not(.dark) .markdown-body {
   margin: 0;
   padding: 14px 16px;
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 420px;
   color: var(--md-code-text);
   background: var(--md-code-bg);
   font-family: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
@@ -524,5 +526,6 @@ html:not(.dark) .markdown-body {
   .markdown-code-block pre.hljs {
     padding: 12px;
     font-size: 12.5px;
+    max-height: 320px;
   }
 }

@@ -25,9 +25,7 @@
     "checkpoint_path": "./lc_agent_checkpoints.db"
   },
 
-  "skills": {
-    "directory": "./skills"
-  },
+  "skills": ["./skills"],
 
   "mcp_servers": {}
 }
