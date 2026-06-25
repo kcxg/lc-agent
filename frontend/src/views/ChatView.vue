@@ -428,7 +428,7 @@ onBeforeUnmount(() => {
 .messages-container :deep(.elx-bubble--end) {
   width: auto !important;
   max-width: var(--chat-user-bubble-max-width) !important;
-  align-self: flex-end;
+  margin-left: auto;
   justify-content: flex-end;
 }
 
@@ -750,6 +750,7 @@ onBeforeUnmount(() => {
   .messages-container :deep(.elx-bubble--end) {
     width: auto !important;
     max-width: var(--chat-user-bubble-max-width) !important;
+    margin-left: auto;
     justify-content: flex-end;
   }
 
