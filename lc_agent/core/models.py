@@ -11,6 +11,8 @@ class ModelInfo(BaseModel):
     context_limit: int = 8000
     max_output_tokens: int = 0
     api_key: str = ""
+    timeout: int = 120
+    temperature: float = 0.7
 
 
 class AgentPreset(BaseModel):

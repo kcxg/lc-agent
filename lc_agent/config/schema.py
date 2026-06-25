@@ -5,6 +5,8 @@ class ModelConfig(BaseModel):
     id: str
     context_limit: int = 8000
     max_output_tokens: int = 65536
+    timeout: int = 120
+    temperature: float = 0.7
 
 
 class ProviderConfig(BaseModel):

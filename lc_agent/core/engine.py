@@ -40,6 +40,8 @@ class AgentEngine:
                         context_limit=model_conf.get("context_limit", 8000),
                         max_output_tokens=model_conf.get("max_output_tokens", 0),
                         api_key=provider_conf.get("api_key", ""),
+                        timeout=model_conf.get("timeout", 120),
+                        temperature=model_conf.get("temperature", 0.7),
                     ))
         return models
 
@@ -165,7 +167,7 @@ class AgentEngine:
             provider=provider,
             model=resolved_model,
             base_url=base_url or "https://api.openai.com/v1",
-            timeout=120,
+            timeout=model_info.timeout if model_info else 120,
         )
 
     def _create_llm(self, model_info: ModelInfo | None, model_id: str):
@@ -181,7 +183,7 @@ class AgentEngine:
                 model=model_info.id,
                 base_url=model_info.base_url,
                 api_key=model_info.api_key or "not-set",
-                temperature=0.7,
+                temperature=model_info.temperature,
                 stream_usage=True,
                 http_async_client=self._build_tracing_async_client(model_info, model_id),
             )
@@ -196,7 +198,7 @@ class AgentEngine:
             return init_chat_model(
                 model_str,
                 api_key=model_info.api_key or "not-set",
-                temperature=0.7,
+                temperature=model_info.temperature,
                 stream_usage=True,
             )
 

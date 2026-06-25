@@ -7,8 +7,10 @@
       "models": [
         {
           "id": "ds-deepseek-v4-flash",
-          "context_limit": 64000,
-          "max_output_tokens": 16384
+          "context_limit": 1000000,
+          "max_output_tokens": 384000,
+          "timeout": 300,
+          "temperature": 0.7
         }
       ]
     }
@@ -17,7 +19,8 @@
   "agent": {
     "system_prompt": "你是一个有用的AI助手，请用中文回答问题。",
     "default_model": "ds-deepseek-v4-flash",
-    "streaming": true
+    "streaming": true,
+    "recursion_limit": 1000
   },
 
   "database": {
