@@ -20,8 +20,10 @@
         />
       </div>
 
-      <div v-if="chatStore.todos.length > 0" class="panel-section">
-        <TodoList :todos="chatStore.todos" />
+      <div class="panel-section">
+        <h4>任务进度</h4>
+        <TodoList v-if="chatStore.todos.length > 0" :todos="chatStore.todos" />
+        <p v-else class="empty-hint">暂无任务</p>
       </div>
     </div>
 
