@@ -9,7 +9,7 @@
         aria-label="打开会话列表"
         @click="$emit('openMobileSidebar')"
       />
-      <span class="logo">⚡ lc_agent</span>
+      <span class="logo">⚡ ops_agent</span>
     </div>
     <div class="header-center">
       <el-select
