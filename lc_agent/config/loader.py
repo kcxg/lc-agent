@@ -79,7 +79,7 @@ def load_config(
             "url": "sqlite+aiosqlite:///./lc_agent_data.db",
             "checkpoint_path": "./lc_agent_checkpoints.db",
         },
-        "skills": {"directory": "./skills"},
+        "skills": ["./skills"],
         "mcp_servers": {},
         "_config_path": None,
         "_project_root": str(Path.cwd()),

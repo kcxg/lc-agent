@@ -18,10 +18,6 @@ class DatabaseConfig(BaseModel):
     checkpoint_path: str = "./lc_agent_checkpoints.db"
 
 
-class SkillsConfig(BaseModel):
-    directory: str = "./skills"
-
-
 class McpServerConfig(BaseModel):
     type: str = "local"  # "local", "sse", "http"
     command: str | list[str] = ""
@@ -44,5 +40,5 @@ class AppConfig(BaseModel):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     session: dict = Field(default_factory=lambda: {"db_path": ""})
     ui: dict = Field(default_factory=dict)
-    skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    skills: list[str] = Field(default_factory=lambda: ["./skills"])
     mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)

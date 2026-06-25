@@ -23,8 +23,8 @@ class LcAgentApp:
         self._checkpoint_path = config.get("database", {}).get("checkpoint_path", "./lc_agent_checkpoints.db")
         self.engine = AgentEngine(config)
         from lc_agent.skills.scanner import SkillScanner
-        skills_dir = config.get("skills", {}).get("directory", "./skills")
-        self.skill_scanner = SkillScanner(skills_dir)
+        skills_dirs = config.get("skills", ["./skills"])
+        self.skill_scanner = SkillScanner(skills_dirs)
         self.skill_scanner.scan()
         from lc_agent.mcp.manager import McpManager
         mcp_config = config.get("mcp_servers", {})

@@ -24,8 +24,10 @@ class SkillInfo:
 class SkillScanner:
     """Discovers and parses SKILL.md files from a directory."""
 
-    def __init__(self, directory: str = "./skills"):
-        self.directory = Path(directory)
+    def __init__(self, directories: list[str] | str = "./skills"):
+        if isinstance(directories, str):
+            directories = [directories]
+        self.directories = [Path(d) for d in directories]
         self._skills: list[SkillInfo] = []
         self._disabled_skills: set[str] = set()
 
@@ -34,15 +36,18 @@ class SkillScanner:
         return self._skills
 
     def scan(self) -> list[SkillInfo]:
-        """Scan directory recursively for SKILL.md files."""
+        """Scan all directories recursively for SKILL.md files."""
         self._skills = []
-        if not self.directory.exists():
-            return self._skills
+        seen_names: set[str] = set()
 
-        for skill_file in self.directory.rglob("SKILL.md"):
-            skill = self._parse_skill(skill_file)
-            if skill:
-                self._skills.append(skill)
+        for directory in self.directories:
+            if not directory.exists():
+                continue
+            for skill_file in directory.rglob("SKILL.md"):
+                skill = self._parse_skill(skill_file)
+                if skill and skill.name not in seen_names:
+                    self._skills.append(skill)
+                    seen_names.add(skill.name)
 
         return self._skills
 
