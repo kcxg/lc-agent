@@ -109,6 +109,14 @@ export const useToolsStore = defineStore('tools', () => {
     }
   }
 
+  // 在 store 创建时注册 watcher（而非 init 内部），避免重复监听
+  {
+    const agentsStore = useAgentsStore()
+    watch(() => agentsStore.currentAgentId, () => {
+      _clearOverrides()
+    })
+  }
+
   async function init() {
     try {
       const [groupsData, modelsData, mcpData, skillsData] = await Promise.all([
@@ -124,11 +132,6 @@ export const useToolsStore = defineStore('tools', () => {
       if (modelsData.length > 0 && !currentModel.value) {
         currentModel.value = modelsData[0].id
       }
-
-      const agentsStore = useAgentsStore()
-      watch(() => agentsStore.currentAgentId, () => {
-        _clearOverrides()
-      })
     } catch (e) {
       console.error('[ToolsStore] Failed to fetch:', e)
     }

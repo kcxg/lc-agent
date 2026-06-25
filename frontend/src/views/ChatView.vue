@@ -87,7 +87,7 @@
               <div
                 v-if="item.isMarkdown"
                 class="markdown-body"
-                v-html="renderMarkdown(stripThinkingMarkers(item.content || ''))"
+                v-html="renderMarkdown(stripUiMarkers(item.content || ''))"
               />
               <span v-else class="user-plain-text">{{ item.content }}</span>
             </template>
@@ -154,6 +154,8 @@ import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ChatMessage } fr
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
 import { renderMarkdown } from '@/utils/markdown'
+import { parseSegments, hasStructuredSegments, stripUiMarkers, getReasoningTokenTotal } from '@/utils/parse-segments'
+import type { ContentSegment } from '@/utils/parse-segments'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import InterruptDialog from '@/components/chat/InterruptDialog.vue'
 import ToolCallCard from '@/components/chat/ToolCallCard.vue'
@@ -161,13 +163,6 @@ import HttpTraceBlock from '@/components/chat/HttpTraceBlock.vue'
 import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
 import MessageToolbar from '@/components/chat/MessageToolbar.vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
-
-interface ContentSegment {
-  type: 'text' | 'thinking' | 'tool' | 'http'
-  text?: string
-  toolIndex?: number
-  httpIndex?: number
-}
 
 type ChatBubbleItem = BubbleListItemProps & {
   role: 'user' | 'ai'
@@ -201,7 +196,7 @@ const bubbleList = computed((): ChatBubbleItem[] =>
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
     .map((msg, idx, arr) => {
       const segs = msg.role === 'assistant' && hasStructuredSegments(msg.content || '', msg.toolCalls)
-        ? parseSegments(msg.content || '', msg.toolCalls)
+        ? parseSegments(msg.content || '')
         : undefined
       return {
         key: msg.id,
@@ -268,19 +263,6 @@ function cancelEdit() {
   editingContent.value = ''
 }
 
-function hasStructuredSegments(content: string, toolCalls?: ToolCall[]): boolean {
-  return Boolean(
-    toolCalls?.length
-    || content.includes('<!--THINK_START-->')
-    || content.includes('<!--THINK_END-->')
-    || content.includes('<!--HTTP:'),
-  )
-}
-
-function getReasoningTokenTotal(usage?: MessageUsage): number {
-  return usage?.rounds.reduce((total, round) => total + (round.reasoningTokens || 0), 0) || 0
-}
-
 function hasThinkingSegment(segments?: ContentSegment[]): boolean {
   return Boolean(segments?.some(seg => seg.type === 'thinking' && seg.text?.trim()))
 }
@@ -294,14 +276,6 @@ function shouldShowReasoningNotice(item: ChatBubbleItem): boolean {
 function formatCompactTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
   return String(n)
-}
-
-function stripThinkingMarkers(content: string): string {
-  return content.replace(/<!--(?:THINK_START|THINK_END)-->/g, '').trim()
-}
-
-function stripUiMarkers(content: string): string {
-  return stripThinkingMarkers(content).replace(/<!--TOOL:\d+-->/g, '').replace(/<!--HTTP:\d+-->/g, '').trim()
 }
 
 function getReplayHistory(beforeMessageId: string): ReplayMessage[] {
@@ -318,62 +292,6 @@ function getReplayHistory(beforeMessageId: string): ReplayMessage[] {
       content: stripUiMarkers(msg.content || ''),
     }))
     .filter(msg => msg.content.trim())
-}
-
-function parseSegments(content: string, toolCalls?: ToolCall[]): ContentSegment[] {
-  const segments: ContentSegment[] = []
-  const pattern = /<!--(?:TOOL:(\d+)|HTTP:(\d+)|THINK_START|THINK_END)-->/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-  let inThinking = false
-
-  while ((match = pattern.exec(content)) !== null) {
-    const textBefore = content.slice(lastIndex, match.index).trim()
-    const marker = match[0]
-
-    if (marker === '<!--THINK_START-->') {
-      if (textBefore) {
-        segments.push({ type: inThinking ? 'thinking' : 'text', text: stripThinkingMarkers(textBefore) })
-      }
-      inThinking = true
-      lastIndex = match.index + match[0].length
-      continue
-    }
-
-    if (marker === '<!--THINK_END-->') {
-      if (textBefore) {
-        segments.push({ type: 'thinking', text: stripThinkingMarkers(textBefore) })
-      }
-      inThinking = false
-      lastIndex = match.index + match[0].length
-      continue
-    }
-
-    if (match[2] != null) {
-      if (textBefore) {
-        segments.push({ type: inThinking ? 'thinking' : 'text', text: stripThinkingMarkers(textBefore) })
-      }
-      segments.push({ type: 'http', httpIndex: parseInt(match[2], 10) })
-      lastIndex = match.index + match[0].length
-      continue
-    }
-
-    if (textBefore) {
-      segments.push({ type: inThinking ? 'thinking' : 'text', text: stripThinkingMarkers(textBefore) })
-    }
-    const toolIdx = parseInt(match[1], 10)
-    if (toolCalls && toolIdx < toolCalls.length) {
-      segments.push({ type: 'tool', toolIndex: toolIdx })
-    }
-    lastIndex = match.index + match[0].length
-  }
-
-  const remaining = content.slice(lastIndex).trim()
-  if (remaining) {
-    segments.push({ type: inThinking ? 'thinking' : 'text', text: stripThinkingMarkers(remaining) })
-  }
-
-  return segments
 }
 
 function handleSend(content: string) {

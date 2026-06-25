@@ -9,10 +9,10 @@ export default defineConfig({
   plugins: [
     vue(),
     AutoImport({
-      resolvers: [ElementPlusResolver()],
+      resolvers: [ElementPlusResolver({ importStyle: 'css' })],
     }),
     Components({
-      resolvers: [ElementPlusResolver()],
+      resolvers: [ElementPlusResolver({ importStyle: 'css' })],
     }),
   ],
   resolve: {
@@ -33,5 +33,28 @@ export default defineConfig({
   build: {
     outDir: '../lc_agent/web/dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules')) {
+            if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
+              return 'vendor-vue'
+            }
+            if (id.includes('element-plus') || id.includes('@element-plus')) {
+              return 'vendor-element-plus'
+            }
+            if (id.includes('vue-element-plus-x')) {
+              return 'vendor-element-plus-x'
+            }
+            if (id.includes('markdown-it') || id.includes('highlight.js')) {
+              return 'vendor-markdown'
+            }
+            if (id.includes('@vueuse')) {
+              return 'vendor-utils'
+            }
+          }
+        },
+      },
+    },
   },
 })

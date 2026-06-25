@@ -1,4 +1,6 @@
 import type { HttpTrace, LlmRoundUsage } from '@/stores/chat'
+import { parseSegments as parseContentSegments } from './parse-segments'
+import type { ContentSegment } from './parse-segments'
 
 export interface CopyOptions {
   includeThinking?: boolean
@@ -22,72 +24,6 @@ interface MessageLike {
   toolCalls?: ToolCallLike[]
   httpTraces?: HttpTrace[]
   usage?: { rounds: LlmRoundUsage[] }
-}
-
-const THINK_START = '<!--THINK_START-->'
-const THINK_END = '<!--THINK_END-->'
-const TOOL_RE = /<!--TOOL:(\d+)-->/
-const HTTP_RE = /<!--HTTP:(\d+)-->/
-
-interface Segment {
-  type: 'text' | 'thinking' | 'tool' | 'http'
-  content: string
-  toolIndex?: number
-  httpIndex?: number
-}
-
-function parseSegments(content: string): Segment[] {
-  const segments: Segment[] = []
-  let remaining = content
-  let inThinking = false
-
-  while (remaining.length > 0) {
-    if (!inThinking) {
-      const thinkStart = remaining.indexOf(THINK_START)
-      const toolMatch = TOOL_RE.exec(remaining)
-      const httpMatch = HTTP_RE.exec(remaining)
-
-      const nextThink = thinkStart >= 0 ? thinkStart : Infinity
-      const nextTool = toolMatch ? toolMatch.index : Infinity
-      const nextHttp = httpMatch ? httpMatch.index : Infinity
-
-      if (nextThink === Infinity && nextTool === Infinity && nextHttp === Infinity) {
-        const trimmed = remaining.trim()
-        if (trimmed) segments.push({ type: 'text', content: trimmed })
-        break
-      }
-
-      const nextMarker = Math.min(nextThink, nextTool, nextHttp)
-      const before = remaining.slice(0, nextMarker).trim()
-      if (before) segments.push({ type: 'text', content: before })
-
-      if (nextThink <= nextTool && nextThink <= nextHttp) {
-        remaining = remaining.slice(thinkStart + THINK_START.length)
-        inThinking = true
-      } else if (nextTool <= nextHttp) {
-        const idx = parseInt(toolMatch![1], 10)
-        segments.push({ type: 'tool', content: '', toolIndex: idx })
-        remaining = remaining.slice(toolMatch!.index + toolMatch![0].length)
-      } else {
-        const idx = parseInt(httpMatch![1], 10)
-        segments.push({ type: 'http', content: '', httpIndex: idx })
-        remaining = remaining.slice(httpMatch!.index + httpMatch![0].length)
-      }
-    } else {
-      const thinkEnd = remaining.indexOf(THINK_END)
-      if (thinkEnd >= 0) {
-        const thinking = remaining.slice(0, thinkEnd).trim()
-        if (thinking) segments.push({ type: 'thinking', content: thinking })
-        remaining = remaining.slice(thinkEnd + THINK_END.length)
-        inThinking = false
-      } else {
-        const thinking = remaining.trim()
-        if (thinking) segments.push({ type: 'thinking', content: thinking })
-        break
-      }
-    }
-  }
-  return segments
 }
 
 function toolCallToMarkdown(tc: ToolCallLike): string {
@@ -166,13 +102,14 @@ export function singleMessageToMarkdown(
 
   const modelSuffix = opts.modelName ? ` (${opts.modelName})` : ''
   const lines: string[] = [`## Assistant${modelSuffix}`, '']
-  const segments = parseSegments(msg.content)
+  const segments = parseContentSegments(msg.content)
 
   for (const seg of segments) {
+    const segText = seg.text || ''
     if (seg.type === 'thinking' && opts.includeThinking) {
       lines.push('<details><summary>💭 思考过程</summary>')
       lines.push('')
-      lines.push(seg.content)
+      lines.push(segText)
       lines.push('')
       lines.push('</details>')
       lines.push('')
@@ -190,7 +127,7 @@ export function singleMessageToMarkdown(
         lines.push('')
       }
     } else if (seg.type === 'text') {
-      lines.push(seg.content)
+      lines.push(segText)
       lines.push('')
     }
   }
@@ -209,14 +146,14 @@ export function messagesToMarkdown(
 }
 
 export function extractThinking(msg: MessageLike): string {
-  return parseSegments(msg.content)
+  return parseContentSegments(msg.content)
     .filter(s => s.type === 'thinking')
-    .map(s => s.content)
+    .map(s => s.text || '')
     .join('\n\n')
 }
 
 export function extractToolCalls(msg: MessageLike): string {
-  const segments = parseSegments(msg.content)
+  const segments = parseContentSegments(msg.content)
   return segments
     .filter(s => s.type === 'tool')
     .map(s => {
@@ -228,9 +165,9 @@ export function extractToolCalls(msg: MessageLike): string {
 }
 
 export function extractAnswer(msg: MessageLike): string {
-  return parseSegments(msg.content)
+  return parseContentSegments(msg.content)
     .filter(s => s.type === 'text')
-    .map(s => s.content)
+    .map(s => s.text || '')
     .join('\n\n')
 }
 
