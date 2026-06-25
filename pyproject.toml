@@ -43,7 +43,6 @@ packages = ["lc_agent"]
 
 [tool.hatch.build.targets.sdist]
 include = ["lc_agent/**", "README.md", "pyproject.toml", "LICENSE"]
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
