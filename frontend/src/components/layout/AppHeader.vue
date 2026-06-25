@@ -88,7 +88,7 @@ defineEmits<{
   border-bottom: 1px solid var(--el-border-color);
   height: 52px;
   flex-shrink: 0;
-  z-index: 100;
+  z-index: var(--z-sticky);
 }
 
 .logo {

@@ -76,7 +76,7 @@ function handleCancelEdit() {
   box-sizing: border-box;
   flex-shrink: 0;
   position: relative;
-  z-index: 120;
+  z-index: var(--z-input);
   width: 100%;
 }
 

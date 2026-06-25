@@ -270,9 +270,9 @@ function closeMobileDrawers() {
     display: block;
     position: fixed;
     inset: 52px 0 0;
-    background: rgba(15, 23, 42, 0.35);
+    background: color-mix(in srgb, var(--el-color-black) 35%, transparent);
     backdrop-filter: blur(2px);
-    z-index: 180;
+    z-index: var(--z-backdrop);
   }
 
   .mobile-left-panel,
@@ -281,7 +281,7 @@ function closeMobileDrawers() {
     top: 52px;
     bottom: 0;
     height: calc(100dvh - 52px);
-    z-index: 200;
+    z-index: var(--z-drawer);
     pointer-events: none;
     box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
     transition: transform 0.24s ease, box-shadow 0.24s ease;

@@ -507,15 +507,15 @@ onBeforeUnmount(() => {
 }
 
 .role-avatar.is-user {
-  color: #f7fee7;
-  background: linear-gradient(135deg, #2ea043, #1f7a3a);
-  border-color: rgba(74, 222, 128, 0.45);
+  color: var(--el-color-white);
+  background: linear-gradient(135deg, var(--el-color-success), var(--el-color-success-dark-2));
+  border-color: color-mix(in srgb, var(--el-color-success) 45%, transparent);
 }
 
 .role-avatar.is-ai {
-  color: #d8f3dc;
-  background: linear-gradient(135deg, #15382a, #0b2119);
-  border-color: rgba(74, 222, 128, 0.32);
+  color: var(--el-color-success-light-5);
+  background: linear-gradient(135deg, var(--el-color-success-dark-2), var(--el-color-success-light-9));
+  border-color: color-mix(in srgb, var(--el-color-success) 32%, transparent);
 }
 
 .role-header {
@@ -538,9 +538,9 @@ onBeforeUnmount(() => {
   width: 20px;
   height: 20px;
   border-radius: 999px;
-  color: #d8f3dc;
-  background: linear-gradient(135deg, #15382a, #0b2119);
-  border: 1px solid rgba(74, 222, 128, 0.32);
+  color: var(--el-color-success-light-5);
+  background: linear-gradient(135deg, var(--el-color-success-dark-2), var(--el-color-success-light-9));
+  border: 1px solid color-mix(in srgb, var(--el-color-success) 32%, transparent);
 }
 
 .role-name {
@@ -585,9 +585,9 @@ onBeforeUnmount(() => {
 .thinking-block {
   margin: 8px 0 10px;
   border-radius: 12px;
-  border: 1px solid rgba(234, 179, 8, 0.22);
-  border-left: 3px solid rgba(234, 179, 8, 0.72);
-  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid color-mix(in srgb, var(--el-color-warning) 22%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--el-color-warning) 72%, transparent);
+  background: color-mix(in srgb, var(--el-color-warning) 8%, transparent);
   overflow: hidden;
 }
 
@@ -598,7 +598,7 @@ onBeforeUnmount(() => {
   padding: 8px 11px;
   cursor: pointer;
   user-select: none;
-  color: #d69e2e;
+  color: var(--el-color-warning);
   font-size: 12px;
   font-weight: 700;
 }
@@ -621,7 +621,7 @@ onBeforeUnmount(() => {
 
 .thinking-body {
   padding: 0 12px 10px;
-  color: #c58f22;
+  color: var(--el-color-warning-light-3);
   font-size: 13px;
   opacity: 0.92;
 }

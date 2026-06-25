@@ -76,7 +76,7 @@ expectMatch('ChatView.vue', files.chatView, /@media\s*\(max-width:\s*520px\)[\s\
 
 expectMatch('ChatInput.vue', files.chatInput, /@media\s*\(max-width:\s*520px\)/, '缺少输入框手机断点')
 expectIncludes('ChatInput.vue', files.chatInput, 'width: 100%')
-expectMatch('ChatInput.vue', files.chatInput, /\.chat-input-wrapper\s*\{[\s\S]*position:\s*relative[\s\S]*z-index:\s*120/, '底部输入框应固定在布局底层之上，不能被滚动内容覆盖或挤出')
+expectMatch('ChatInput.vue', files.chatInput, /\.chat-input-wrapper\s*\{[\s\S]*position:\s*relative[\s\S]*z-index:\s*(?:120|var\(--z-input\))/, '底部输入框应固定在布局底层之上，不能被滚动内容覆盖或挤出')
 
 if (failures.length > 0) {
   console.error('响应式布局契约测试失败:')
