@@ -411,33 +411,6 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-/* ChatInput 靠右对齐，与用户消息气泡宽度一致 */
-.chat-view :deep(.chat-input-wrapper) {
-  width: var(--chat-input-max-width, min(78%, 720px));
-  align-self: flex-end;
-  padding-left: 0;
-  padding-right: 0;
-}
-
-/* 和气泡宽度一起在大屏放宽 */
-@media (min-width: 1200px) {
-  .chat-view :deep(.chat-input-wrapper) {
-    --chat-input-max-width: min(74%, 800px);
-  }
-}
-
-@media (min-width: 1600px) {
-  .chat-view :deep(.chat-input-wrapper) {
-    --chat-input-max-width: min(70%, 880px);
-  }
-}
-
-@media (min-width: 2000px) {
-  .chat-view :deep(.chat-input-wrapper) {
-    --chat-input-max-width: min(66%, 920px);
-  }
-}
-
 .messages-container :deep(.elx-bubble-list) {
   width: 100%;
 }
@@ -453,8 +426,8 @@ onBeforeUnmount(() => {
 }
 
 .messages-container :deep(.elx-bubble--end) {
-  width: 100% !important;
-  max-width: 100% !important;
+  width: auto !important;
+  max-width: var(--chat-user-bubble-max-width) !important;
   align-self: flex-end;
   justify-content: flex-end;
 }
@@ -775,14 +748,9 @@ onBeforeUnmount(() => {
   }
 
   .messages-container :deep(.elx-bubble--end) {
-    width: 100% !important;
-    max-width: 100% !important;
-    justify-content: flex-end;
-  }
-
-  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
-    width: fit-content;
+    width: auto !important;
     max-width: var(--chat-user-bubble-max-width) !important;
+    justify-content: flex-end;
   }
 
   .messages-container :deep(.elx-bubble__content) {
