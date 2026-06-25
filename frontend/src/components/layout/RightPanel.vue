@@ -1,5 +1,15 @@
 <template>
-  <aside class="right-panel">
+  <aside class="right-panel" :class="{ collapsed }">
+    <div class="panel-header">
+      <transition name="fade">
+        <span v-if="!collapsed" class="panel-title">工具</span>
+      </transition>
+      <button class="toggle-btn" @click="emit('toggleCollapse')" :title="collapsed ? '展开工具面板' : '收起工具面板'">
+        <span class="toggle-icon" :class="{ flipped: collapsed }">»</span>
+      </button>
+    </div>
+
+    <div v-if="!collapsed" class="panel-body">
     <div class="panel-section">
       <h4>模型</h4>
       <ModelSelector
@@ -99,6 +109,7 @@
       :mode="detailModal.mode"
       :data="detailModal.data"
     />
+    </div>
   </aside>
 </template>
 
@@ -110,6 +121,9 @@ import { useAgentsStore } from '@/stores/agents'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
 import DetailModal from '@/components/panels/DetailModal.vue'
+
+const props = defineProps<{ collapsed: boolean }>()
+const emit = defineEmits<{ toggleCollapse: [] }>()
 
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()
@@ -140,8 +154,81 @@ function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, data: a
   width: 450px;
   background: var(--el-bg-color);
   border-left: 1px solid var(--el-border-color);
-  padding: 16px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.right-panel.collapsed {
+  width: 48px;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 0;
+  flex-shrink: 0;
+}
+
+.right-panel.collapsed .panel-header {
+  justify-content: center;
+  padding: 12px 0 0;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  letter-spacing: 0.3px;
+}
+
+.toggle-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.toggle-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+}
+
+.toggle-icon {
+  display: inline-block;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.toggle-icon.flipped {
+  transform: rotate(180deg);
+}
+
+.panel-body {
+  padding: 12px 16px 16px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 .panel-section {
