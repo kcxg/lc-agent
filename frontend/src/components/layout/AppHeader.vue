@@ -9,7 +9,7 @@
         aria-label="打开会话列表"
         @click="$emit('openMobileSidebar')"
       />
-      <span class="logo">⚡ 运维助手</span>
+      <span class="logo">⚡ {{ appName }}</span>
     </div>
     <div class="header-center">
       <el-select
@@ -66,6 +66,7 @@ const { isDark, toggleDark } = useTheme()
 defineProps<{
   modelName: string
   connected: boolean
+  appName: string
 }>()
 
 defineEmits<{
@@ -88,7 +89,7 @@ defineEmits<{
   border-bottom: 1px solid var(--el-border-color);
   height: 52px;
   flex-shrink: 0;
-  z-index: var(--z-sticky);
+  z-index: 100;
 }
 
 .logo {
