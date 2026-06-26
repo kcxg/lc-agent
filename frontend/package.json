@@ -22,6 +22,7 @@
     "test:responsive": "node scripts/check-responsive-layout.mjs",
     "test:chat-http-data": "node scripts/check-chat-http-data-contract.mjs",
     "test:chat-http-ui": "node scripts/check-chat-http-ui-contract.mjs",
+    "test:chat-empty-state": "node scripts/check-chat-empty-state-contract.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

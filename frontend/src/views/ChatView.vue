@@ -4,12 +4,14 @@
       <div v-if="messages.length > 0" class="chat-actions-bar">
         <CopyRoundsButton :messages="messages" :model-name="sessionModel" />
       </div>
-      <Welcome
-        v-if="messages.length === 0 && !isLoading"
-        title="Start a conversation"
-        description="Ask me anything"
-        variant="borderless"
-      />
+      <div v-if="messages.length === 0 && !isLoading" class="chat-empty-state">
+        <div class="chat-empty-accent" aria-hidden="true" />
+        <Welcome
+          title="开始新的对话"
+          description="有什么想法、问题或任务，都可以直接告诉我。"
+          variant="borderless"
+        />
+      </div>
       <BubbleList
         v-else
         :list="bubbleList"
@@ -426,10 +428,11 @@ onBeforeUnmount(() => {
 }
 
 .messages-container :deep(.elx-bubble--end) {
-  width: auto !important;
+  width: 100% !important;
   max-width: var(--chat-user-bubble-max-width) !important;
   margin-left: auto;
   justify-content: flex-end;
+  align-self: flex-end;
 }
 
 .messages-container :deep(.elx-bubble--end .elx-bubble__avatar) {
@@ -679,19 +682,63 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
+.chat-empty-state {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  position: relative;
+  min-height: 280px;
+  padding: 36px 16px;
+}
+
+.chat-empty-accent {
+  position: absolute;
+  width: min(420px, 72%);
+  height: 1px;
+  transform: translateY(-74px);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--el-color-success) 58%, transparent),
+    transparent
+  );
+}
+
+.chat-empty-accent::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--el-color-success);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--el-color-success) 12%, transparent);
+  transform: translateX(-50%);
+}
+
 .messages-container :deep(.elx-welcome) {
-  background: var(--el-bg-color-overlay) !important;
-  border: 1px solid var(--el-border-color-lighter) !important;
-  border-radius: 12px;
+  width: min(520px, 100%);
+  padding: 28px 30px !important;
+  background: color-mix(in srgb, var(--el-bg-color-overlay) 92%, var(--el-color-success) 8%) !important;
+  border: 1px solid color-mix(in srgb, var(--el-color-success) 24%, var(--el-border-color-lighter)) !important;
+  border-radius: 8px;
   color: var(--el-text-color-primary);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.10);
 }
 
 .messages-container :deep(.elx-welcome__title) {
   color: var(--el-text-color-primary) !important;
+  font-size: 24px;
+  font-weight: 750;
+  line-height: 1.25;
 }
 
 .messages-container :deep(.elx-welcome__description) {
   color: var(--el-text-color-secondary) !important;
+  font-size: 14px;
+  line-height: 1.7;
+  margin-top: 8px;
 }
 
 /* 大屏逐步放宽气泡宽度，避免浪费空间 */
@@ -734,6 +781,24 @@ onBeforeUnmount(() => {
     padding: 6px 6px 8px 0;
   }
 
+  .chat-empty-state {
+    min-height: 240px;
+    padding: 20px 10px;
+  }
+
+  .chat-empty-accent {
+    width: 68%;
+    transform: translateY(-66px);
+  }
+
+  .messages-container :deep(.elx-welcome) {
+    padding: 22px 18px !important;
+  }
+
+  .messages-container :deep(.elx-welcome__title) {
+    font-size: 21px;
+  }
+
   .messages-container :deep(.elx-bubble) {
     max-width: 100% !important;
   }
@@ -748,7 +813,7 @@ onBeforeUnmount(() => {
   }
 
   .messages-container :deep(.elx-bubble--end) {
-    width: auto !important;
+    width: 100% !important;
     max-width: var(--chat-user-bubble-max-width) !important;
     margin-left: auto;
     justify-content: flex-end;
