@@ -284,7 +284,7 @@ git commit -m "feat: add auth session helpers"
 - Consumes: Task 1 auth helpers.
 - Produces: `router` in `lc_agent.server.routes.auth`; protected routers use `Depends(require_auth)` only when auth is enabled.
 
-- [ ] **Step 1: Write failing route tests**
+- [x] **Step 1: Write failing route tests**
 
 Extend `tests/test_auth.py`:
 
@@ -340,13 +340,13 @@ async def test_protected_api_accepts_authenticated_requests():
         assert resp.status_code == 200
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
 Expected: failures for missing auth routes, unprotected `/api/sessions`, and missing authenticated `/api/tools` access.
 
-- [ ] **Step 3: Add auth router**
+- [x] **Step 3: Add auth router**
 
 Create `lc_agent/server/routes/auth.py`:
 
@@ -417,13 +417,13 @@ app.include_router(mcp_router, prefix="/api", dependencies=protected_dependencie
 
 Keep `/api/health` public so deployments can still perform health checks.
 
-- [ ] **Step 4: Run route tests**
+- [x] **Step 4: Run route tests**
 
 Run: `uv run --extra dev python -m pytest tests/test_auth.py tests/test_server.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lc_agent/server/routes/auth.py lc_agent/server/app.py tests/test_auth.py
