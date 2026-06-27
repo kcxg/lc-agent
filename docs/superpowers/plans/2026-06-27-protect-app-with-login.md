@@ -692,7 +692,7 @@ git commit -m "feat: add frontend login flow"
 - Consumes: `useAuthStore()`.
 - Produces: app store initialization only after authenticated state; `logout` event from `AppHeader.vue`.
 
-- [ ] **Step 1: Extend frontend contract**
+- [x] **Step 1: Extend frontend contract**
 
 Add checks to `frontend/scripts/check-auth-contract.mjs`:
 
@@ -707,13 +707,13 @@ expectIncludes('AppHeader.vue', files.header, 'logout: []')
 expectIncludes('AppHeader.vue', files.header, "@click=\"$emit('logout')\"")
 ```
 
-- [ ] **Step 2: Run contract and verify it fails**
+- [x] **Step 2: Run contract and verify it fails**
 
 Run from `frontend/`: `npm run test:auth`
 
 Expected: failures for missing app/header auth behavior.
 
-- [ ] **Step 3: Gate app initialization**
+- [x] **Step 3: Gate app initialization**
 
 In `frontend/src/App.vue`:
 
@@ -725,11 +725,11 @@ In `frontend/src/App.vue`:
 
 Keep existing session restore behavior intact inside the authenticated branch.
 
-- [ ] **Step 4: Add logout control**
+- [x] **Step 4: Add logout control**
 
 In `frontend/src/components/layout/AppHeader.vue`, add a compact icon or text button in the right header area that emits `logout`. Prefer an Element Plus icon button with a tooltip if an existing icon is available.
 
-- [ ] **Step 5: Run frontend verification**
+- [x] **Step 5: Run frontend verification**
 
 Run from `frontend/`:
 
@@ -740,7 +740,7 @@ npm run build
 
 Expected: both PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/App.vue frontend/src/components/layout/AppHeader.vue frontend/scripts/check-auth-contract.mjs
