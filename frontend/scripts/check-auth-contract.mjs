@@ -21,6 +21,13 @@ function expectIncludes(name, content, expected) {
 function expectMatch(name, content, pattern, message) {
   if (!pattern.test(content)) failures.push(`${name} ${message}`)
 }
+function expectHandleLogoutAlwaysRoutesToLogin(content) {
+  const match = content.match(/async function handleLogout\(\) \{([\s\S]*?)\n\}/)
+  const body = match?.[1] || ''
+  if (!/try\s*\{[\s\S]*await authStore\.logout\(\)[\s\S]*\}\s*finally\s*\{[\s\S]*await router\.replace\('\/login'\)[\s\S]*\}/.test(body)) {
+    failures.push('App.vue handleLogout 应在 authStore.logout() 成败后都跳转 /login')
+  }
+}
 
 expectIncludes('http.ts', files.http, "credentials: 'same-origin'")
 expectIncludes('http.ts', files.http, 'login:')
@@ -36,6 +43,7 @@ expectMatch('LoginView.vue', files.loginView, /<el-form[\s\S]*@submit\.prevent=/
 expectIncludes('App.vue', files.app, 'useAuthStore')
 expectIncludes('App.vue', files.app, 'authStore.authenticated')
 expectIncludes('App.vue', files.app, 'async function handleLogout()')
+expectHandleLogoutAlwaysRoutesToLogin(files.app)
 expectIncludes('AppHeader.vue', files.header, 'logout: []')
 expectIncludes('AppHeader.vue', files.header, '@click="$emit(\'logout\')"')
 

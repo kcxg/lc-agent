@@ -230,8 +230,11 @@ async function handleAgentChange(agentId: string) {
 async function handleLogout() {
   chatStore.disconnect()
   closeMobileDrawers()
-  await authStore.logout()
-  await router.replace('/login')
+  try {
+    await authStore.logout()
+  } finally {
+    await router.replace('/login')
+  }
 }
 
 function editCurrentAgent() {
