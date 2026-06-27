@@ -5,6 +5,7 @@
     <AppHeader
       :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
       :connected="chatStore.isConnected"
+      :app-name="appName"
       @edit-agent="editCurrentAgent"
       @new-agent="createNewAgent"
       @new-chat="handleNewChat"
@@ -63,6 +64,7 @@ import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore } from '@/stores/agents'
 import { useSessionsStore } from '@/stores/sessions'
 import { useAuthStore } from '@/stores/auth'
+import { api } from '@/api/http'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import LeftSidebar from '@/components/layout/LeftSidebar.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'
@@ -83,8 +85,15 @@ const rightPanelCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
 const protectedStoresReady = ref(false)
+const appName = ref('lc_agent')
 
 onMounted(async () => {
+  try {
+    const health = await api.health()
+    if (health.app_name) {
+      appName.value = health.app_name
+    }
+  } catch { /* use default */ }
   if (authStore.authenticated) {
     await initializeProtectedStores()
   }

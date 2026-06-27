@@ -10,8 +10,10 @@ router = APIRouter(tags=["health"])
 async def health(request: Request):
     """Health check endpoint."""
     config = request.app.state.config
+    ui_config = config.get("ui", {})
     return {
         "status": "ok",
         "version": __version__,
         "config_loaded": config.get("_config_path") is not None,
+        "app_name": ui_config.get("app_name"),
     }
