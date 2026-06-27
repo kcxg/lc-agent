@@ -11,11 +11,12 @@
 
     // ----- 登录认证 -----
     "auth": {
-        // 设为 true 后需要管理员账号密码登录
+        // 设为 true 后需要管理员账号密码登录。
+        // 启用时请填写真实值，或改用 {env:LC_AGENT_ADMIN_PASSWORD} / {env:LC_AGENT_SESSION_SECRET}
         "enabled": false,
         "admin_username": "admin",
-        "admin_password": "{env:LC_AGENT_ADMIN_PASSWORD}",
-        "session_secret": "{env:LC_AGENT_SESSION_SECRET}",
+        "admin_password": "",
+        "session_secret": "",
         "cookie_name": "lc_agent_session",
         "session_ttl_seconds": 28800,
         "cookie_secure": false

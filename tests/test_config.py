@@ -66,6 +66,19 @@ class TestLoadConfigFromFile:
         with pytest.raises(FileNotFoundError):
             load_config_from_file("/nonexistent/path/config.jsonc")
 
+    def test_example_loads_when_auth_is_disabled_without_auth_env(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.delenv("LC_AGENT_ADMIN_PASSWORD", raising=False)
+        monkeypatch.delenv("LC_AGENT_SESSION_SECRET", raising=False)
+
+        example_path = Path(__file__).parents[1] / "config.example.jsonc"
+
+        config = load_config_from_file(str(example_path))
+
+        assert config["auth"]["enabled"] is False
+        assert config["auth"]["admin_password"] == ""
+        assert config["auth"]["session_secret"] == ""
+
 
 class TestAppConfig:
     def test_validates_minimal_config(self):
