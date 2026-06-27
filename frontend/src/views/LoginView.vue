@@ -8,7 +8,7 @@
 
     <section class="login-panel" aria-labelledby="login-title">
       <div class="login-heading">
-        <p class="login-brand" id="login-title">→ sreagent</p>
+        <p class="login-brand" id="login-title">SRE Agent</p>
         <p class="login-subtitle">智能运维控制中心</p>
       </div>
 
@@ -370,21 +370,28 @@ onUnmounted(stopCanvas)
 /* ── 标题区 ──────────────────────────────── */
 .login-heading {
   margin-bottom: 28px;
+  text-align: center;
 }
 
 .login-brand {
-  margin: 0 0 4px;
+  margin: 0 0 6px;
   font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
-  font-size: 20px;
-  font-weight: 600;
-  color: #f1f5f9;
-  letter-spacing: 0.02em;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background: linear-gradient(135deg, #22d3ee, #818cf8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 12px rgba(129, 140, 248, 0.35));
 }
 
 .login-subtitle {
   margin: 0;
   font-size: 13px;
   color: #64748b;
+  text-align: center;
 }
 
 /* ── 错误提示 ──────────────────────────────── */
