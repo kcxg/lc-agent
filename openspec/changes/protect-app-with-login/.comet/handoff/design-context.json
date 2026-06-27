@@ -1,0 +1,14 @@
+{
+  "change": "protect-app-with-login",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "5b068822a58a151069cf0e18102451ff336d5a0f0178a44326f8998d0715c2f8",
+  "files": [
+    { "path": "openspec/changes/protect-app-with-login/proposal.md", "sha256": "7844a29c667fe908b076c32cad0879e83bec6fd210d8e0c1de18774f366eedda" },
+    { "path": "openspec/changes/protect-app-with-login/design.md", "sha256": "726dfb4910524756cc23c6f691e741a0816c3474ae5e56d1d69e7c77a3069ea2" },
+    { "path": "openspec/changes/protect-app-with-login/tasks.md", "sha256": "b42686399edf486bb37cda6b1a23219f4d4d29d3ade9d31e8433f7fe8d88725e" },
+    { "path": "openspec/changes/protect-app-with-login/specs/app-authentication/spec.md", "sha256": "830664585ee7565a83b40b05e626ded36409113b632e4942b8286d881fe740ec" }
+  ]
+}

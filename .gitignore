@@ -240,3 +240,6 @@ nul
 .tmp_pytest_run/
 .nezha/config.toml
 .tmp/bfzs-runlogs
+
+# Local feature worktrees
+.worktrees/
