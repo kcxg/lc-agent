@@ -227,6 +227,7 @@ lc_agent_data.db
 lc_agent_checkpoints.db
 
 # Vite cache
+node_modules/
 frontend/.vite/
 
 # Auto-generated type declarations
