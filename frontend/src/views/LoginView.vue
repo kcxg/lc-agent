@@ -310,51 +310,194 @@ onUnmounted(stopCanvas)
 </script>
 
 <style scoped>
+/* ── Canvas 背景 ──────────────────────────────── */
+.login-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ── 主容器 ──────────────────────────────── */
 .login-view {
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 24px;
-  background: var(--el-bg-color-page);
+  background: #090d1a;
+  position: relative;
 }
 
+/* ── 登录面板 ──────────────────────────────── */
 .login-panel {
-  width: min(100%, 380px);
-  padding: 28px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-bg-color);
-  box-shadow: var(--el-box-shadow-light);
+  position: relative;
+  z-index: 1;
+  width: min(100% - 32px, 380px);
+  padding: 32px;
+  border: 1px solid rgba(129, 140, 248, 0.2);
+  border-radius: 12px;
+  background: rgba(17, 24, 39, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
+@media (max-width: 400px) {
+  .login-panel {
+    width: 100%;
+    border-radius: 8px;
+    padding: 24px;
+  }
+}
+
+/* ── 标题区 ──────────────────────────────── */
 .login-heading {
-  margin-bottom: 22px;
+  margin-bottom: 28px;
 }
 
-.login-heading h1 {
-  margin: 0 0 8px;
-  font-size: 22px;
-  font-weight: 650;
-  color: var(--el-text-color-primary);
+.login-brand {
+  margin: 0 0 4px;
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 20px;
+  font-weight: 600;
+  color: #f1f5f9;
+  letter-spacing: 0.02em;
 }
 
-.login-heading p {
+.login-subtitle {
   margin: 0;
-  color: var(--el-text-color-secondary);
-  font-size: 14px;
+  font-size: 13px;
+  color: #64748b;
 }
 
+/* ── 错误提示 ──────────────────────────────── */
 .login-error {
-  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 10px 14px;
+  border-left: 3px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 0 6px 6px 0;
+  animation: error-slide-in 200ms ease;
 }
 
+.login-error-text {
+  font-size: 13px;
+  color: #fbbf24;
+}
+
+@keyframes error-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── 表单 ──────────────────────────────── */
 .login-form {
   display: flex;
   flex-direction: column;
 }
 
+.form-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+/* ── 输入框深度样式 ────────────────────────── */
+:deep(.login-input .el-input__wrapper) {
+  background: #0f172a;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 8px;
+  box-shadow: none;
+  transition: border-color 200ms ease;
+}
+
+:deep(.login-input .el-input__wrapper:hover) {
+  border-color: rgba(129, 140, 248, 0.4);
+}
+
+:deep(.login-input .el-input__wrapper.is-focus) {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.25);
+}
+
+:deep(.login-input .el-input__inner) {
+  color: #f1f5f9;
+  font-size: 14px;
+}
+
+:deep(.login-input .el-input__inner::placeholder) {
+  color: #475569;
+}
+
+:deep(.login-input.is-disabled .el-input__wrapper) {
+  opacity: 0.5;
+}
+
+/* 密码可见切换按钮 */
+:deep(.login-input .el-input__suffix-inner .el-icon) {
+  color: #64748b;
+}
+
+/* ── 提交按钮 ──────────────────────────────── */
 .login-submit {
   width: 100%;
-  margin-top: 6px;
+  height: 42px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 8px;
+  background: #818cf8;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+}
+
+.login-submit:hover {
+  background: #6366f1;
+  box-shadow: 0 0 20px rgba(129, 140, 248, 0.3);
+}
+
+.login-submit:active {
+  transform: scale(0.985);
+}
+
+.login-submit.is-loading {
+  background: #6366f1;
+}
+
+/* 覆盖 Element Plus 按钮默认样式 */
+:deep(.login-submit .el-button__loading-icon) {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* ── 焦点环 ──────────────────────────────── */
+:deep(.login-input .el-input__wrapper:focus-within) {
+  outline: 2px solid rgba(129, 140, 248, 0.5);
+  outline-offset: 2px;
+}
+
+.login-submit:focus-visible {
+  outline: 2px solid rgba(129, 140, 248, 0.5);
+  outline-offset: 2px;
+}
+
+/* ── reduced-motion ─────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .login-error {
+    animation: none;
+  }
+
+  .login-submit {
+    transition: none;
+  }
 }
 </style>
