@@ -100,7 +100,7 @@ ipython_config.py
 #   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
 #   commonly ignored for libraries.
-# uv.lock
+uv.lock
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
@@ -227,6 +227,7 @@ lc_agent_data.db
 lc_agent_checkpoints.db
 
 # Vite cache
+node_modules/
 frontend/.vite/
 
 # Auto-generated type declarations
@@ -239,3 +240,7 @@ nul
 .tmp_pytest/
 .tmp_pytest_run/
 .tmp/bfzs-runlogs
+
+# Local tool state
+.codegraph/
+.nezha/
