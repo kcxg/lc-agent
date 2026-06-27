@@ -239,7 +239,6 @@ tests_my/ai_tests/
 nul
 .tmp_pytest/
 .tmp_pytest_run/
-.nezha/config.toml
 .tmp/bfzs-runlogs
 
 # Local feature worktrees
@@ -247,4 +246,8 @@ nul
 
 # Local agent memory/state
 .serena/memories/
+
+# Local tool state
 .codegraph/
+.nezha/
+>>>>>>> main
