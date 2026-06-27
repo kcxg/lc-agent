@@ -1,5 +1,5 @@
 workflow: full
-phase: verify
+phase: archive
 context_compression: off
 build_mode: subagent-driven-development
 build_command: bash scripts/verify-auth-change.sh
@@ -14,11 +14,11 @@ auto_transition: true
 base_ref: efcedbd332b72dd24d3fa4d07da5fa50e801050e
 design_doc: docs/superpowers/specs/2026-06-27-protect-app-with-login-design.md
 plan: docs/superpowers/plans/2026-06-27-protect-app-with-login.md
-verify_result: pending
+verify_result: pass
 verification_report: docs/superpowers/reports/2026-06-27-protect-app-with-login-verify.md
 branch_status: handled
 created_at: 2026-06-27
-verified_at: null
+verified_at: 2026-06-27
 archived: false
 handoff_context: openspec/changes/protect-app-with-login/.comet/handoff/design-context.json
 handoff_hash: 5b068822a58a151069cf0e18102451ff336d5a0f0178a44326f8998d0715c2f8
