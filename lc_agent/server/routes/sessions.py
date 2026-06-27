@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lc_agent.db.repository import ChatUiMessageRepository, SessionRepository
-from lc_agent.server.dependencies import get_db_session, get_engine
+from lc_agent.server.dependencies import get_db_session
 
 router = APIRouter(tags=["sessions"])
 

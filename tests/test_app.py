@@ -1,6 +1,3 @@
-# tests/test_app.py
-import pytest
-
 from lc_agent.app import LcAgentApp
 
 

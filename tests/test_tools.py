@@ -1,6 +1,3 @@
-# tests/test_tools.py
-import pytest
-
 from lc_agent.tools.registry import ToolRegistry, tool
 
 

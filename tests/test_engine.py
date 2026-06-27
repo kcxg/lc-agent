@@ -218,7 +218,6 @@ class TestCreateLlm:
         """When no base_url, should use init_chat_model for provider routing."""
         from lc_agent.core.engine import AgentEngine
         from lc_agent.core.models import ModelInfo
-        from langchain_openai import ChatOpenAI
 
         engine = AgentEngine(sample_config)
         model_info = ModelInfo(

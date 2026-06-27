@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 
 from lc_agent.core.engine import AgentEngine
 from lc_agent.server.dependencies import get_engine, get_registry

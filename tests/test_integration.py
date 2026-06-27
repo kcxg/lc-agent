@@ -3,7 +3,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from lc_agent import LcAgentApp, load_config, tool
+from lc_agent import LcAgentApp, tool
 from lc_agent.tools.registry import ToolRegistry
 
 

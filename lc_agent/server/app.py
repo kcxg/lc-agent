@@ -3,22 +3,22 @@ import mimetypes
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
-
-mimetypes.add_type("application/javascript", ".js")
-mimetypes.add_type("text/css", ".css")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from lc_agent import __version__
 from lc_agent.server.auth import get_auth_config, require_auth
+from lc_agent.server.routes.agents import router as agents_router
 from lc_agent.server.routes.auth import router as auth_router
 from lc_agent.server.routes.health import router as health_router
-from lc_agent.server.routes.tools import router as tools_router
+from lc_agent.server.routes.mcp import router as mcp_router
 from lc_agent.server.routes.models import router as models_router
-from lc_agent.server.routes.agents import router as agents_router
 from lc_agent.server.routes.sessions import router as sessions_router
 from lc_agent.server.routes.skills import router as skills_router
-from lc_agent.server.routes.mcp import router as mcp_router
+from lc_agent.server.routes.tools import router as tools_router
+
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 
 def create_app(config: dict, lifespan=None) -> FastAPI:

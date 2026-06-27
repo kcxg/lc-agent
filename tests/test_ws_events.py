@@ -201,7 +201,7 @@ async def test_handle_message_llm_error(handler):
 
     async def failing_stream(msg, tid, pid):
         raise RuntimeError("API key invalid")
-        yield  # noqa: unreachable - makes it a generator
+        yield  # pragma: no cover - makes it a generator
 
     handler.engine.chat_stream = failing_stream
 

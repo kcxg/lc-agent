@@ -2,7 +2,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from lc_agent.app import LcAgentApp
-from lc_agent.mcp.manager import McpServerStatus
 from lc_agent.tools import tool, ToolRegistry
 
 
