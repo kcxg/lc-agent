@@ -2,27 +2,26 @@
 
 ## Current Task
 
-- Plan task: **Task 2: Backend Auth Routes And HTTP Protection**
+- Plan task: **Task 3: WebSocket Authentication**
 - OpenSpec mapping:
-  - 1.3 Add login, logout, and auth-state HTTP endpoints.
-  - 1.4 Enforce authenticated sessions on protected API routers while keeping auth-flow endpoints reachable.
-  - 3.1 Add backend tests for valid login, invalid login, logout, protected API rejection, and authenticated API access.
-- Stage: done
+  - 1.5 Enforce authenticated sessions during WebSocket connection setup.
+  - 3.2 Add WebSocket authentication coverage for unauthenticated rejection and authenticated connection.
+- Stage: implementing
 - Review mode: thorough
 - TDD mode: tdd
 - Review/fix rounds: 0
 
 ## Dispatch
 
-- Task brief: `.superpowers/sdd/task-2-brief.md`
-- Report file: `.superpowers/sdd/task-2-report.md`
-- Base commit: `5f82ffaa`
-- Implementer status: DONE
+- Task brief: `.superpowers/sdd/task-3-brief.md`
+- Report file: `.superpowers/sdd/task-3-report.md`
+- Base commit: `9f7cc755`
+- Implementer status: dispatched
 
 ## Evidence
 
-- Implementation commits: `fd3fa9bd feat: add auth routes and api protection`
-- Changed files: `lc_agent/server/routes/auth.py`, `lc_agent/server/app.py`, `tests/test_auth.py`
-- RED: `uv run --extra dev python -m pytest tests/test_auth.py -q` failed with missing auth routes and unprotected business API entering DB dependency
-- GREEN: `uv run --extra dev python -m pytest tests/test_auth.py tests/test_server.py -q` passed with `9 passed, 3 warnings in 0.49s`
-- Reviewer feedback: Task 2 approved by review (`review-5f82ffaa..fd3fa9bd.diff`)
+- Implementation commits: pending
+- Changed files: pending
+- RED: pending
+- GREEN: pending
+- Reviewer feedback: pending
