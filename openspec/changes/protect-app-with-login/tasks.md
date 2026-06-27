@@ -19,3 +19,9 @@
 - [x] 3.2 Add WebSocket authentication coverage for unauthenticated rejection and authenticated connection.
 - [ ] 3.3 Add frontend contract/build coverage for login routing and auth-aware API behavior.
 - [ ] 3.4 Run the relevant backend and frontend verification commands and record results.
+
+Task 6 verification note (2026-06-27):
+- `uv run --extra dev python -m pytest tests/test_auth.py tests/test_server.py -q`: passed, 13 passed and 4 dependency deprecation warnings.
+- `ruff check lc_agent tests`: failed to start, `zsh:1: command not found: ruff`.
+- `frontend/ npm run test:auth`: passed, `认证前端契约测试通过`.
+- `frontend/ npm run build`: failed, `sh: vue-tsc: command not found`.
