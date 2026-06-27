@@ -1,37 +1,50 @@
 <template>
   <main class="login-view">
+    <canvas
+      ref="canvasRef"
+      class="login-canvas"
+      aria-hidden="true"
+    />
+
     <section class="login-panel" aria-labelledby="login-title">
       <div class="login-heading">
-        <h1 id="login-title">登录 lc-agent</h1>
-        <p>请输入账号密码继续使用。</p>
+        <p class="login-brand" id="login-title">→ sreagent</p>
+        <p class="login-subtitle">智能运维控制中心</p>
       </div>
 
-      <el-alert
+      <div
         v-if="errorMessage"
         class="login-error"
-        :title="errorMessage"
-        type="error"
-        :closable="false"
-        show-icon
-      />
+        role="alert"
+      >
+        <span class="login-error-text">{{ errorMessage }}</span>
+      </div>
 
       <el-form
         class="login-form"
         label-position="top"
         @submit.prevent="handleSubmit"
       >
-        <el-form-item label="用户名">
+        <el-form-item>
+          <template #label>
+            <span class="form-label">用户名</span>
+          </template>
           <el-input
             v-model.trim="username"
+            class="login-input"
             autocomplete="username"
             placeholder="请输入用户名"
             :disabled="isSubmitting"
           />
         </el-form-item>
 
-        <el-form-item label="密码">
+        <el-form-item>
+          <template #label>
+            <span class="form-label">密码</span>
+          </template>
           <el-input
             v-model="password"
+            class="login-input"
             type="password"
             autocomplete="current-password"
             placeholder="请输入密码"
@@ -42,11 +55,10 @@
 
         <el-button
           class="login-submit"
-          type="primary"
           native-type="submit"
           :loading="isSubmitting"
         >
-          登录
+          {{ isSubmitting ? '验证中...' : '登录' }}
         </el-button>
       </el-form>
     </section>
