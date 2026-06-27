@@ -30,5 +30,22 @@
 
   "skills": ["./skills"],
 
-  "mcp_servers": {}
+  "mcp_servers": {},
+      // ----- UI -----
+  "ui": {
+      // 网页左上角显示的应用名称，默认 "lc_agent"
+      "app_name": "运维助手"
+  },
+    // ----- 登录认证 -----
+  "auth": {
+      // 设为 true 后需要管理员账号密码登录。
+      // 启用时请填写真实值，或改用 {env:LC_AGENT_ADMIN_PASSWORD} / {env:LC_AGENT_SESSION_SECRET}
+      "enabled": false,
+      "admin_username": "admin",
+      "admin_password": "123",
+      "session_secret": "ASDQWE",
+      "cookie_name": "lc_agent_session",
+      "session_ttl_seconds": 28800,
+      "cookie_secure": true
+  },
 }
