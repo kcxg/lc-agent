@@ -757,7 +757,7 @@ git commit -m "feat: gate app shell behind login"
 - Consumes: all tasks.
 - Produces: checked OpenSpec task list and verification evidence.
 
-- [ ] **Step 1: Run focused backend tests**
+- [x] **Step 1: Run focused backend tests**
 
 Run:
 
@@ -767,7 +767,7 @@ uv run --extra dev python -m pytest tests/test_auth.py tests/test_server.py -q
 
 Expected: PASS.
 
-- [ ] **Step 2: Run Python lint**
+- [x] **Step 2: Run Python lint**
 
 Run:
 
@@ -777,7 +777,7 @@ ruff check lc_agent tests
 
 Expected: PASS.
 
-- [ ] **Step 3: Run frontend auth checks**
+- [x] **Step 3: Run frontend auth checks**
 
 Run from `frontend/`:
 
@@ -788,11 +788,11 @@ npm run build
 
 Expected: PASS.
 
-- [ ] **Step 4: Update OpenSpec task checklist**
+- [x] **Step 4: Update OpenSpec task checklist**
 
 Mark completed items in `openspec/changes/protect-app-with-login/tasks.md` only after the relevant tests pass. If automatic code review is skipped by user choice later, record the skip reason in a durable comment in `tasks.md`.
 
-- [ ] **Step 5: Commit final checklist update**
+- [x] **Step 5: Commit final checklist update**
 
 ```bash
 git add openspec/changes/protect-app-with-login/tasks.md
