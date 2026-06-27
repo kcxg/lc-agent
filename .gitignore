@@ -247,3 +247,4 @@ nul
 
 # Local agent memory/state
 .serena/memories/
+.codegraph/
