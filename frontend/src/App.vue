@@ -4,7 +4,6 @@
     <AppHeader
       :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
       :connected="chatStore.isConnected"
-      :app-name="appName"
       @edit-agent="editCurrentAgent"
       @new-agent="createNewAgent"
       @new-chat="handleNewChat"
@@ -59,7 +58,6 @@ import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore } from '@/stores/agents'
 import { useSessionsStore } from '@/stores/sessions'
-import { api } from '@/api/http'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import LeftSidebar from '@/components/layout/LeftSidebar.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'
@@ -77,18 +75,13 @@ const agentEditorRef = ref<InstanceType<typeof AgentEditorDialog>>()
 const sidebarCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
-const appName = ref('lc_agent')
 
 onMounted(async () => {
-  const [healthData] = await Promise.all([
-    api.health().catch(() => null),
+  await Promise.all([
     toolsStore.init(),
     agentsStore.init(),
     sessionsStore.init(),
   ])
-  if (healthData?.app_name) {
-    appName.value = healthData.app_name
-  }
 
   const sessionId = route.params.sessionId as string
   if (sessionId) {
