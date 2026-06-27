@@ -2,6 +2,8 @@
 comet_change: protect-app-with-login
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-06-27-protect-app-with-login
+status: final
 ---
 
 # Protect App With Login Design

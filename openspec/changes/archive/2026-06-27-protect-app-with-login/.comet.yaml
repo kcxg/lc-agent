@@ -19,6 +19,6 @@ verification_report: docs/superpowers/reports/2026-06-27-protect-app-with-login-
 branch_status: handled
 created_at: 2026-06-27
 verified_at: 2026-06-27
-archived: false
+archived: true
 handoff_context: openspec/changes/protect-app-with-login/.comet/handoff/design-context.json
 handoff_hash: 5b068822a58a151069cf0e18102451ff336d5a0f0178a44326f8998d0715c2f8

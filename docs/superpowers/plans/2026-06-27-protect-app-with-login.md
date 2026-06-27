@@ -2,6 +2,7 @@
 change: protect-app-with-login
 design-doc: docs/superpowers/specs/2026-06-27-protect-app-with-login-design.md
 base-ref: efcedbd332b72dd24d3fa4d07da5fa50e801050e
+archived-with: 2026-06-27-protect-app-with-login
 ---
 
 # Protect App With Login Implementation Plan
@@ -23,6 +24,7 @@ base-ref: efcedbd332b72dd24d3fa4d07da5fa50e801050e
 - Auth must fail loudly when enabled without required username, password, or session secret.
 - Keep changes aligned with existing file layout and tests.
 
+archived-with: 2026-06-27-protect-app-with-login
 ---
 
 ## File Structure
