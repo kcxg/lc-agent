@@ -1,6 +1,7 @@
 <template>
   <ConfigProvider :theme="isDark ? 'dark' : 'light'">
-  <div class="app-container">
+  <router-view v-if="route.name === 'login'" />
+  <div v-else-if="authStore.authenticated" class="app-container">
     <AppHeader
       :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
       :connected="chatStore.isConnected"
@@ -10,6 +11,7 @@
       @change-agent="handleAgentChange"
       @open-mobile-sidebar="openMobileLeft"
       @open-mobile-tools="openMobileRight"
+      @logout="handleLogout"
     />
 
     <div
@@ -60,6 +62,7 @@ import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore } from '@/stores/agents'
 import { useSessionsStore } from '@/stores/sessions'
+import { useAuthStore } from '@/stores/auth'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import LeftSidebar from '@/components/layout/LeftSidebar.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'
@@ -73,13 +76,32 @@ const chatStore = useChatStore()
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
 const sessionsStore = useSessionsStore()
+const authStore = useAuthStore()
 const agentEditorRef = ref<InstanceType<typeof AgentEditorDialog>>()
 const sidebarCollapsed = ref(false)
 const rightPanelCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
+const protectedStoresReady = ref(false)
 
 onMounted(async () => {
+  if (authStore.authenticated) {
+    await initializeProtectedStores()
+  }
+})
+
+watch(() => authStore.authenticated, async authenticated => {
+  if (authenticated) {
+    await initializeProtectedStores()
+  } else {
+    protectedStoresReady.value = false
+  }
+})
+
+async function initializeProtectedStores() {
+  if (protectedStoresReady.value) return
+  protectedStoresReady.value = true
+
   await Promise.all([
     toolsStore.init(),
     agentsStore.init(),
@@ -110,10 +132,10 @@ onMounted(async () => {
   if (agentQuery && agentsStore.agents.find(a => a.id === agentQuery)) {
     await agentsStore.selectAgent(agentQuery)
   }
-})
+}
 
 watch(() => route.params.sessionId, (newId) => {
-  if (newId && typeof newId === 'string') {
+  if (authStore.authenticated && newId && typeof newId === 'string') {
     restoreSession(newId)
   }
 })
@@ -203,6 +225,13 @@ async function handleAgentChange(agentId: string) {
   chatStore.disconnect()
   await router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: agentId } })
   closeMobileDrawers()
+}
+
+async function handleLogout() {
+  chatStore.disconnect()
+  closeMobileDrawers()
+  await authStore.logout()
+  await router.replace('/login')
 }
 
 function editCurrentAgent() {

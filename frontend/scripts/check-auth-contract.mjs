@@ -10,6 +10,8 @@ const files = {
   router: read('src/router/index.ts'),
   authStore: read('src/stores/auth.ts'),
   loginView: read('src/views/LoginView.vue'),
+  app: read('src/App.vue'),
+  header: read('src/components/layout/AppHeader.vue'),
 }
 
 const failures = []
@@ -31,6 +33,11 @@ expectIncludes('auth.ts', files.authStore, 'async function refreshAuth()')
 expectIncludes('auth.ts', files.authStore, 'async function login(')
 expectIncludes('auth.ts', files.authStore, 'async function logout()')
 expectMatch('LoginView.vue', files.loginView, /<el-form[\s\S]*@submit\.prevent=/, '应使用表单提交登录')
+expectIncludes('App.vue', files.app, 'useAuthStore')
+expectIncludes('App.vue', files.app, 'authStore.authenticated')
+expectIncludes('App.vue', files.app, 'async function handleLogout()')
+expectIncludes('AppHeader.vue', files.header, 'logout: []')
+expectIncludes('AppHeader.vue', files.header, '@click="$emit(\'logout\')"')
 
 if (failures.length > 0) {
   console.error('认证前端契约测试失败:')

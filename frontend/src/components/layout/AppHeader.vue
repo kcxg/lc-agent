@@ -51,6 +51,15 @@
         {{ connected ? '已连接' : '未连接' }}
       </span>
       <el-button :icon="isDark ? Sunny : Moon" circle size="small" @click="toggleDark()" />
+      <el-tooltip content="退出登录" placement="bottom">
+        <el-button
+          :icon="SwitchButton"
+          circle
+          size="small"
+          aria-label="退出登录"
+          @click="$emit('logout')"
+        />
+      </el-tooltip>
     </div>
   </header>
 </template>
@@ -58,7 +67,7 @@
 <script setup lang="ts">
 import { useAgentsStore } from '@/stores/agents'
 import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon, Menu, Setting } from '@element-plus/icons-vue'
+import { Sunny, Moon, Menu, Setting, SwitchButton } from '@element-plus/icons-vue'
 
 const agentsStore = useAgentsStore()
 const { isDark, toggleDark } = useTheme()
@@ -75,6 +84,7 @@ defineEmits<{
   changeAgent: [id: string]
   openMobileSidebar: []
   openMobileTools: []
+  logout: []
 }>()
 </script>
 
