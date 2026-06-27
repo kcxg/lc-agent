@@ -440,7 +440,7 @@ git commit -m "feat: add auth routes and api protection"
 - Consumes: `is_request_authenticated(request)` or a WebSocket-compatible cookie validator from Task 1.
 - Produces: `/ws/chat` and `/ws/chat/{thread_id}` reject unauthenticated connections when auth is enabled.
 
-- [ ] **Step 1: Write failing WebSocket tests**
+- [x] **Step 1: Write failing WebSocket tests**
 
 Add tests that connect without a cookie and expect rejection, then login and connect with the returned cookie.
 
@@ -470,13 +470,13 @@ def test_websocket_accepts_authenticated_client():
         assert connected["thread_id"]
 ```
 
-- [ ] **Step 2: Run tests and verify unauthenticated case fails**
+- [x] **Step 2: Run tests and verify unauthenticated case fails**
 
 Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
 Expected: unauthenticated WebSocket currently connects.
 
-- [ ] **Step 3: Implement WebSocket auth gate**
+- [x] **Step 3: Implement WebSocket auth gate**
 
 In `lc_agent/server/auth.py`, add:
 
@@ -503,13 +503,13 @@ if not is_websocket_authenticated(websocket):
 
 Apply this to both `/ws/chat/{thread_id}` and `/ws/chat`.
 
-- [ ] **Step 4: Run WebSocket tests**
+- [x] **Step 4: Run WebSocket tests**
 
 Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lc_agent/server/auth.py lc_agent/app.py tests/test_auth.py
