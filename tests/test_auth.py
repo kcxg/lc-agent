@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+from starlette.websockets import WebSocketDisconnect
 
 from lc_agent.app import LcAgentApp
 from lc_agent.server.app import create_app
@@ -113,3 +114,26 @@ def test_websocket_accepts_authenticated_client():
         connected = ws.receive_json()
         assert connected["type"] == "connected"
         assert connected["thread_id"]
+
+
+def test_thread_websocket_rejects_unauthenticated_client():
+    app = LcAgentApp(protected_config()).fastapi_app
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect("/ws/chat/existing-thread"):
+            pass
+
+    assert exc_info.value.code == 1008
+
+
+def test_thread_websocket_accepts_authenticated_client_with_same_thread_id():
+    app = LcAgentApp(protected_config()).fastapi_app
+    client = TestClient(app)
+
+    login = client.post("/api/auth/login", json={"username": "admin", "password": "secret"})
+    assert login.status_code == 200
+    with client.websocket_connect("/ws/chat/existing-thread") as ws:
+        connected = ws.receive_json()
+        assert connected["type"] == "connected"
+        assert connected["thread_id"] == "existing-thread"
