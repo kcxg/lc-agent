@@ -111,7 +111,7 @@ def test_signed_session_cookie_validates_until_expiry():
 
 - [ ] **Step 2: Run tests and verify they fail**
 
-Run: `pytest tests/test_auth.py -q`
+Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
 Expected: import errors for `lc_agent.server.auth` or missing functions.
 
@@ -262,7 +262,7 @@ Add an `auth` block to `config.example.jsonc` using `{env:LC_AGENT_ADMIN_PASSWOR
 
 - [ ] **Step 4: Run tests and verify they pass**
 
-Run: `pytest tests/test_auth.py -q`
+Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
 Expected: PASS.
 
@@ -336,15 +336,15 @@ async def test_protected_api_accepts_authenticated_requests():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         await client.post("/api/auth/login", json={"username": "admin", "password": "secret"})
-        resp = await client.get("/api/sessions")
+        resp = await client.get("/api/tools")
         assert resp.status_code == 200
 ```
 
 - [ ] **Step 2: Run tests and verify they fail**
 
-Run: `pytest tests/test_auth.py -q`
+Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
-Expected: failures for missing auth routes and unprotected `/api/sessions`.
+Expected: failures for missing auth routes, unprotected `/api/sessions`, and missing authenticated `/api/tools` access.
 
 - [ ] **Step 3: Add auth router**
 
@@ -419,7 +419,7 @@ Keep `/api/health` public so deployments can still perform health checks.
 
 - [ ] **Step 4: Run route tests**
 
-Run: `pytest tests/test_auth.py tests/test_server.py -q`
+Run: `uv run --extra dev python -m pytest tests/test_auth.py tests/test_server.py -q`
 
 Expected: PASS.
 
@@ -472,7 +472,7 @@ def test_websocket_accepts_authenticated_client():
 
 - [ ] **Step 2: Run tests and verify unauthenticated case fails**
 
-Run: `pytest tests/test_auth.py -q`
+Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
 Expected: unauthenticated WebSocket currently connects.
 
@@ -505,7 +505,7 @@ Apply this to both `/ws/chat/{thread_id}` and `/ws/chat`.
 
 - [ ] **Step 4: Run WebSocket tests**
 
-Run: `pytest tests/test_auth.py tests/test_ws_events.py -q`
+Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
 Expected: PASS.
 
@@ -762,7 +762,7 @@ git commit -m "feat: gate app shell behind login"
 Run:
 
 ```bash
-pytest tests/test_auth.py tests/test_server.py tests/test_routes_sessions.py tests/test_ws_events.py -q
+uv run --extra dev python -m pytest tests/test_auth.py tests/test_server.py -q
 ```
 
 Expected: PASS.
