@@ -239,3 +239,4 @@ nul
 .tmp_pytest/
 .tmp_pytest_run/
 .nezha/config.toml
+.tmp/bfzs-runlogs
