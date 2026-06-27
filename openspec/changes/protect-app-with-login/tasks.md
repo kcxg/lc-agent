@@ -1,7 +1,7 @@
 ## 1. Backend Authentication
 
-- [ ] 1.1 Add auth configuration fields and example config entries for administrator credentials, session secret, cookie name, and session TTL.
-- [ ] 1.2 Implement backend auth helpers for credential verification, signed HttpOnly session creation, session validation, and cookie clearing.
+- [x] 1.1 Add auth configuration fields and example config entries for administrator credentials, session secret, cookie name, and session TTL.
+- [x] 1.2 Implement backend auth helpers for credential verification, signed HttpOnly session creation, session validation, and cookie clearing.
 - [ ] 1.3 Add login, logout, and auth-state HTTP endpoints.
 - [ ] 1.4 Enforce authenticated sessions on protected API routers while keeping auth-flow endpoints reachable.
 - [ ] 1.5 Enforce authenticated sessions during WebSocket connection setup.

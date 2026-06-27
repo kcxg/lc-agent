@@ -57,7 +57,7 @@ base-ref: efcedbd332b72dd24d3fa4d07da5fa50e801050e
 - Produces: `AuthConfig`, `get_auth_config(config: dict) -> AuthSettings`, `create_session_cookie(settings, now=None) -> str`, `validate_session_cookie(settings, value, now=None) -> bool`, `set_auth_cookie(response, settings) -> None`, `clear_auth_cookie(response, settings) -> None`, `require_auth(request: Request) -> None`.
 - Consumes: existing `request.app.state.config`.
 
-- [ ] **Step 1: Write failing backend auth tests**
+- [x] **Step 1: Write failing backend auth tests**
 
 Add tests that prove enabled auth requires credentials and secrets, valid credentials create a valid cookie, wrong credentials fail, and expired cookies are invalid.
 
@@ -109,13 +109,13 @@ def test_signed_session_cookie_validates_until_expiry():
     assert validate_session_cookie(settings, cookie, now=now + timedelta(seconds=61)) is False
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
 Expected: import errors for `lc_agent.server.auth` or missing functions.
 
-- [ ] **Step 3: Implement minimal auth config and cookie helpers**
+- [x] **Step 3: Implement minimal auth config and cookie helpers**
 
 Create `lc_agent/server/auth.py` with:
 
@@ -258,15 +258,15 @@ class AppConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
 ```
 
-Add an `auth` block to `config.example.jsonc` using `{env:LC_AGENT_ADMIN_PASSWORD}` and `{env:LC_AGENT_SESSION_SECRET}`.
+Add an `auth` block to `config.example.jsonc`. Keep disabled-auth defaults loadable with empty sensitive values, and document that enabled auth can use `{env:LC_AGENT_ADMIN_PASSWORD}` and `{env:LC_AGENT_SESSION_SECRET}`.
 
-- [ ] **Step 4: Run tests and verify they pass**
+- [x] **Step 4: Run tests and verify they pass**
 
 Run: `uv run --extra dev python -m pytest tests/test_auth.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lc_agent/server/auth.py lc_agent/config/schema.py config.example.jsonc tests/test_auth.py
