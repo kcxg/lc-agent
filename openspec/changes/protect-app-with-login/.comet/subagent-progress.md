@@ -16,7 +16,7 @@
 
 - Task brief: `.superpowers/sdd/task-1-brief.md`
 - Report file: `.superpowers/sdd/task-1-report.md`
-- Base commit: `7b7ebdbc`
+- Base commit: `eaefae25`
 - Implementer status: dispatched
 
 ## Evidence
