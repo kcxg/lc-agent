@@ -2,26 +2,28 @@
 
 ## Current Task
 
-- Plan task: **Task 3: WebSocket Authentication**
+- Plan task: **Task 4: Frontend Auth API, Store, And Routing**
 - OpenSpec mapping:
-  - 1.5 Enforce authenticated sessions during WebSocket connection setup.
-  - 3.2 Add WebSocket authentication coverage for unauthenticated rejection and authenticated connection.
-- Stage: done
+  - 2.1 Add auth API methods and frontend auth state.
+  - 2.2 Add a login view that submits credentials and handles failures without exposing sensitive details.
+  - 2.3 Add router/app guards so unauthenticated users see login and protected stores initialize only after authentication. (partial: router guard only; app initialization is Task 5)
+  - 3.3 Add frontend contract/build coverage for login routing and auth-aware API behavior. (partial: contract only)
+- Stage: implementing
 - Review mode: thorough
 - TDD mode: tdd
-- Review/fix rounds: 1
+- Review/fix rounds: 0
 
 ## Dispatch
 
-- Task brief: `.superpowers/sdd/task-3-brief.md`
-- Report file: `.superpowers/sdd/task-3-report.md`
-- Base commit: `79d128ca`
-- Implementer status: DONE
+- Task brief: `.superpowers/sdd/task-4-brief.md`
+- Report file: `.superpowers/sdd/task-4-report.md`
+- Base commit: `3da3a539`
+- Implementer status: dispatched
 
 ## Evidence
 
-- Implementation commits: `a11aa2ec feat: protect chat websocket`
-- Changed files: `lc_agent/server/auth.py`, `lc_agent/app.py`, `tests/test_auth.py`
-- RED: `uv run --extra dev python -m pytest tests/test_auth.py -q` failed with unauthenticated WebSocket accepted (`1 failed, 7 passed`)
-- GREEN: `uv run --extra dev python -m pytest tests/test_auth.py -q` passed with `8 passed, 4 warnings`
-- Reviewer feedback: Task 3 approved after fix review. Important issue fixed by `4bcdfe9e test: cover thread websocket auth`.
+- Implementation commits: pending
+- Changed files: pending
+- RED: pending
+- GREEN: pending
+- Reviewer feedback: pending
