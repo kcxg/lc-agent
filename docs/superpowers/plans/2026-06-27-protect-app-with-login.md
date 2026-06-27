@@ -530,7 +530,7 @@ git commit -m "feat: protect chat websocket"
 - Produces: `useAuthStore()` with `initialized`, `authenticated`, `username`, `refreshAuth()`, `login(username, password)`, `logout()`.
 - Produces: `api.login`, `api.logout`, `api.getAuthState`.
 
-- [ ] **Step 1: Write failing frontend contract script**
+- [x] **Step 1: Write failing frontend contract script**
 
 Create `frontend/scripts/check-auth-contract.mjs`:
 
@@ -583,13 +583,13 @@ Add to `frontend/package.json`:
 "test:auth": "node scripts/check-auth-contract.mjs"
 ```
 
-- [ ] **Step 2: Run contract and verify it fails**
+- [x] **Step 2: Run contract and verify it fails**
 
 Run from `frontend/`: `npm run test:auth`
 
 Expected: missing files or missing auth API/router/store markers.
 
-- [ ] **Step 3: Implement auth API and store**
+- [x] **Step 3: Implement auth API and store**
 
 In `frontend/src/api/http.ts`, ensure fetch includes credentials:
 
@@ -662,19 +662,19 @@ export const useAuthStore = defineStore('auth', () => {
 })
 ```
 
-- [ ] **Step 4: Implement route guard and login view**
+- [x] **Step 4: Implement route guard and login view**
 
 Add `/login` route in `frontend/src/router/index.ts`; use a dynamic import for `LoginView.vue`. Add route meta and `beforeEach` guard that calls `useAuthStore().refreshAuth()` when uninitialized, then redirects unauthenticated users to login with `redirect` query.
 
 Create `frontend/src/views/LoginView.vue` with an Element Plus form for username/password, error message on failed login, and redirect-after-login behavior.
 
-- [ ] **Step 5: Run frontend contract**
+- [x] **Step 5: Run frontend contract**
 
 Run from `frontend/`: `npm run test:auth`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/api/http.ts frontend/src/stores/auth.ts frontend/src/router/index.ts frontend/src/views/LoginView.vue frontend/scripts/check-auth-contract.mjs frontend/package.json

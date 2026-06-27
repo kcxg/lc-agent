@@ -8,8 +8,8 @@
 
 ## 2. Frontend Login Flow
 
-- [ ] 2.1 Add auth API methods and frontend auth state.
-- [ ] 2.2 Add a login view that submits credentials and handles failures without exposing sensitive details.
+- [x] 2.1 Add auth API methods and frontend auth state.
+- [x] 2.2 Add a login view that submits credentials and handles failures without exposing sensitive details.
 - [ ] 2.3 Add router/app guards so unauthenticated users see login and protected stores initialize only after authentication.
 - [ ] 2.4 Add logout UI behavior that clears backend session state and returns to login.
 
