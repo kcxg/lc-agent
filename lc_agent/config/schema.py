@@ -20,6 +20,16 @@ class DatabaseConfig(BaseModel):
     checkpoint_path: str = "./lc_agent_checkpoints.db"
 
 
+class AuthConfig(BaseModel):
+    enabled: bool = False
+    admin_username: str = ""
+    admin_password: str = ""
+    session_secret: str = ""
+    cookie_name: str = "lc_agent_session"
+    session_ttl_seconds: int = 60 * 60 * 8
+    cookie_secure: bool = False
+
+
 class McpServerConfig(BaseModel):
     type: str = "local"  # "local", "sse", "http"
     command: str | list[str] = ""
@@ -40,6 +50,7 @@ class AppConfig(BaseModel):
         "recursion_limit": 100,
     })
     mcp: dict = Field(default_factory=dict)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     session: dict = Field(default_factory=lambda: {"db_path": ""})
     ui: dict = Field(default_factory=dict)

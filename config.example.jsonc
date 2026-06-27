@@ -9,6 +9,18 @@
         "app_name": "lc_agent"
     },
 
+    // ----- 登录认证 -----
+    "auth": {
+        // 设为 true 后需要管理员账号密码登录
+        "enabled": false,
+        "admin_username": "admin",
+        "admin_password": "{env:LC_AGENT_ADMIN_PASSWORD}",
+        "session_secret": "{env:LC_AGENT_SESSION_SECRET}",
+        "cookie_name": "lc_agent_session",
+        "session_ttl_seconds": 28800,
+        "cookie_secure": false
+    },
+
 
     // ----- LLM 供应商 -----
     // 支持配置多个供应商，每个供应商可配置多个模型
