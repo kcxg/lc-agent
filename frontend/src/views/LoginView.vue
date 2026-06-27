@@ -123,6 +123,7 @@ let mouseX = -9999
 let mouseY = -9999
 let canvasW = 0
 let canvasH = 0
+let isReducedMotion = false
 
 function createParticles(count: number): Particle[] {
   const ps: Particle[] = []
@@ -259,7 +260,30 @@ function onMouseMove(e: MouseEvent) {
   mouseY = e.clientY
 }
 
+function drawStaticFrame() {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.clearRect(0, 0, canvasW, canvasH)
+  drawGrid(ctx)
+  for (const p of particles) {
+    const px = p.x * canvasW
+    const py = p.y * canvasH
+    ctx.beginPath()
+    ctx.arc(px, py, p.r, 0, Math.PI * 2)
+    ctx.fillStyle = `hsla(${p.hue}, 70%, 70%, 0.4)`
+    ctx.fill()
+  }
+}
+
+function handleResizeReduced() {
+  resizeCanvas()
+  drawStaticFrame()
+}
+
 function handleVisibility() {
+  if (isReducedMotion) return
   if (document.hidden) {
     cancelAnimationFrame(animFrameId)
   } else {
@@ -269,37 +293,27 @@ function handleVisibility() {
 }
 
 function startCanvas() {
-  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  isReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   particles = createParticles(40)
   resizeCanvas()
-  window.addEventListener('resize', resizeCanvas)
-  window.addEventListener('mousemove', onMouseMove)
-  document.addEventListener('visibilitychange', handleVisibility)
 
-  if (prefersReduced) {
-    // Draw static frame only
-    const canvas = canvasRef.value
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    drawGrid(ctx)
-    for (const p of particles) {
-      const px = p.x * canvasW
-      const py = p.y * canvasH
-      ctx.beginPath()
-      ctx.arc(px, py, p.r, 0, Math.PI * 2)
-      ctx.fillStyle = `hsla(${p.hue}, 70%, 70%, 0.4)`
-      ctx.fill()
-    }
+  if (isReducedMotion) {
+    // Static frame + resize redraw; no animation, no mouse tracking
+    drawStaticFrame()
+    window.addEventListener('resize', handleResizeReduced)
     return
   }
 
+  window.addEventListener('resize', resizeCanvas)
+  window.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('visibilitychange', handleVisibility)
   animFrameId = requestAnimationFrame(animate)
 }
 
 function stopCanvas() {
   cancelAnimationFrame(animFrameId)
   window.removeEventListener('resize', resizeCanvas)
+  window.removeEventListener('resize', handleResizeReduced)
   window.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('visibilitychange', handleVisibility)
   particles = []
@@ -318,6 +332,8 @@ onUnmounted(stopCanvas)
   height: 100%;
   z-index: 0;
   pointer-events: none;
+  mask-image: radial-gradient(ellipse at center, black 50%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 50%, transparent 80%);
 }
 
 /* ── 主容器 ──────────────────────────────── */
