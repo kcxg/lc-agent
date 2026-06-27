@@ -1,5 +1,28 @@
 const BASE_URL = '/api'
 
+const AUTH_PATHS = ['/auth/me', '/auth/login', '/auth/logout']
+type UnauthorizedHandler = (path: string) => void | Promise<void>
+let unauthorizedHandler: UnauthorizedHandler | undefined
+
+export class ApiError extends Error {
+  status: number
+
+  constructor(response: Response) {
+    super(`API error: ${response.status} ${response.statusText}`)
+    this.name = 'ApiError'
+    this.status = response.status
+  }
+}
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler) {
+  unauthorizedHandler = handler
+}
+
+async function handleUnauthorized(path: string) {
+  if (AUTH_PATHS.includes(path)) return
+  await unauthorizedHandler?.(path)
+}
+
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     credentials: 'same-origin',
@@ -7,7 +30,10 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
     ...options,
   })
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`)
+    if (response.status === 401) {
+      await handleUnauthorized(path)
+    }
+    throw new ApiError(response)
   }
   if (response.status === 204) return undefined as T
   return response.json()

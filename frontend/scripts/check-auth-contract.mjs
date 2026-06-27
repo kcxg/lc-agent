@@ -30,6 +30,12 @@ function expectHandleLogoutAlwaysRoutesToLogin(content) {
 }
 
 expectIncludes('http.ts', files.http, "credentials: 'same-origin'")
+expectIncludes('http.ts', files.http, 'status: number')
+expectIncludes('http.ts', files.http, 'response.status')
+expectIncludes('http.ts', files.http, 'setUnauthorizedHandler')
+expectMatch('http.ts', files.http, /if\s*\(\s*response\.status\s*===\s*401\s*\)\s*\{[\s\S]*handleUnauthorized\(path\)[\s\S]*\}/, '应在 401 分支调用未授权处理')
+expectMatch('router/index.ts', files.router, /setUnauthorizedHandler\([\s\S]*markUnauthenticated\(\)[\s\S]*router\.replace\(\{[\s\S]*path:\s*'\/login'[\s\S]*redirect:/, '应在受保护 API 返回 401 时清理认证态并跳转登录')
+expectMatch('http.ts', files.http, /\/auth\/me[\s\S]*\/auth\/login[\s\S]*\/auth\/logout/, '应排除 auth 探测和登录登出端点，避免 401 递归跳转')
 expectIncludes('http.ts', files.http, 'login:')
 expectIncludes('http.ts', files.http, 'logout:')
 expectIncludes('http.ts', files.http, 'getAuthState:')

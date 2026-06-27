@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import ChatView from '@/views/ChatView.vue'
+import { setUnauthorizedHandler } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
@@ -28,6 +29,15 @@ const router = createRouter({
       component: () => import('@/views/TestSegments.vue'),
     },
   ],
+})
+
+setUnauthorizedHandler(async () => {
+  const authStore = useAuthStore()
+  authStore.markUnauthenticated()
+  await router.replace({
+    path: '/login',
+    query: { redirect: router.currentRoute.value.fullPath },
+  })
 })
 
 router.beforeEach(async to => {
