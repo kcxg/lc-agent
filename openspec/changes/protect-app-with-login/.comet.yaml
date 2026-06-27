@@ -9,13 +9,13 @@ subagent_dispatch: confirmed
 tdd_mode: tdd
 review_mode: thorough
 isolation: worktree
-verify_mode: null
+verify_mode: full
 auto_transition: true
 base_ref: efcedbd332b72dd24d3fa4d07da5fa50e801050e
 design_doc: docs/superpowers/specs/2026-06-27-protect-app-with-login-design.md
 plan: docs/superpowers/plans/2026-06-27-protect-app-with-login.md
 verify_result: pending
-verification_report: null
+verification_report: docs/superpowers/reports/2026-06-27-protect-app-with-login-verify.md
 branch_status: pending
 created_at: 2026-06-27
 verified_at: null
