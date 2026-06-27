@@ -13,6 +13,7 @@ from lc_agent.core.engine import AgentEngine
 from lc_agent.db.engine import init_db
 from lc_agent.mcp.manager import McpManager
 from lc_agent.server.app import create_app, mount_static_files
+from lc_agent.server.auth import is_websocket_authenticated
 from lc_agent.server.websocket import ChatWebSocketHandler
 from lc_agent.skills.filtered_loader import FilteredSkillLoader
 
@@ -132,11 +133,17 @@ class LcAgentApp:
 
         @self.fastapi_app.websocket("/ws/chat/{thread_id}")
         async def websocket_chat(websocket: WebSocket, thread_id: str):
+            if not is_websocket_authenticated(websocket):
+                await websocket.close(code=1008)
+                return
             tid = await self._ws_handler.connect(websocket, thread_id)
             await _ws_loop(websocket, tid)
 
         @self.fastapi_app.websocket("/ws/chat")
         async def websocket_chat_auto(websocket: WebSocket):
+            if not is_websocket_authenticated(websocket):
+                await websocket.close(code=1008)
+                return
             tid = await self._ws_handler.connect(websocket)
             await _ws_loop(websocket, tid)
 

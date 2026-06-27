@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
+from lc_agent.app import LcAgentApp
 from lc_agent.server.app import create_app
 from lc_agent.server.auth import (
     AuthConfigError,
@@ -90,3 +92,24 @@ async def test_protected_api_accepts_authenticated_requests():
         await client.post("/api/auth/login", json={"username": "admin", "password": "secret"})
         resp = await client.get("/api/tools")
         assert resp.status_code == 200
+
+
+def test_websocket_rejects_unauthenticated_client():
+    app = LcAgentApp(protected_config()).fastapi_app
+    client = TestClient(app)
+
+    with pytest.raises(Exception):
+        with client.websocket_connect("/ws/chat"):
+            pass
+
+
+def test_websocket_accepts_authenticated_client():
+    app = LcAgentApp(protected_config()).fastapi_app
+    client = TestClient(app)
+
+    login = client.post("/api/auth/login", json={"username": "admin", "password": "secret"})
+    assert login.status_code == 200
+    with client.websocket_connect("/ws/chat") as ws:
+        connected = ws.receive_json()
+        assert connected["type"] == "connected"
+        assert connected["thread_id"]

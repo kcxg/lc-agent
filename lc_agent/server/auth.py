@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import HTTPException, Request, Response, status
+from fastapi import HTTPException, Request, Response, WebSocket, status
 
 
 class AuthConfigError(RuntimeError):
@@ -115,6 +115,13 @@ def is_request_authenticated(request: Request) -> bool:
     if not settings.enabled:
         return True
     return validate_session_cookie(settings, request.cookies.get(settings.cookie_name))
+
+
+def is_websocket_authenticated(websocket: WebSocket) -> bool:
+    settings = get_auth_config(websocket.app.state.config)
+    if not settings.enabled:
+        return True
+    return validate_session_cookie(settings, websocket.cookies.get(settings.cookie_name))
 
 
 async def require_auth(request: Request) -> None:
