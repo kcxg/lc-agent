@@ -25,7 +25,7 @@
           :value="agent.id"
         >
           <div class="agent-option">
-            <span>{{ agent.name }}</span>
+            <span class="agent-option-name">{{ agent.name }}</span>
             <span v-if="agent.source === 'builtin'" class="source-badge badge-builtin">内置</span>
             <span v-else-if="agent.source === 'code'" class="source-badge badge-code">代码</span>
             <span v-else class="source-badge badge-user">自建</span>
@@ -37,6 +37,7 @@
       <button class="header-btn btn-new-chat" @click="$emit('newChat')">+ 新对话</button>
     </div>
     <div class="header-right">
+      <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">新对话</button>
       <el-button
         class="mobile-tools-btn"
         :icon="Setting"
@@ -120,12 +121,27 @@ defineEmits<{
 }
 
 .mobile-sidebar-btn,
-.mobile-tools-btn {
+.mobile-tools-btn,
+.mobile-new-chat-btn {
   display: none;
 }
 
 .agent-select {
   width: 240px;
+}
+
+.agent-select :deep(.el-select__wrapper) {
+  min-width: 0;
+  padding-right: 28px;
+}
+
+.agent-select :deep(.el-select__selected-item) {
+  min-width: 0;
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-badge {
@@ -161,7 +177,16 @@ defineEmits<{
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   width: 100%;
+}
+
+.agent-option-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .source-badge {
@@ -169,6 +194,7 @@ defineEmits<{
   padding: 1px 6px;
   border-radius: 4px;
   font-weight: 500;
+  flex-shrink: 0;
 }
 
 .badge-builtin {
@@ -214,13 +240,15 @@ defineEmits<{
 }
 
 .btn-new-agent,
-.btn-new-chat {
+.btn-new-chat,
+.mobile-new-chat-btn {
   background: var(--el-color-primary);
   color: white;
 }
 
 .btn-new-agent:hover,
-.btn-new-chat:hover {
+.btn-new-chat:hover,
+.mobile-new-chat-btn:hover {
   background: var(--el-color-primary-dark-2);
 }
 
@@ -231,14 +259,23 @@ defineEmits<{
 
 @media (max-width: 900px) {
   .app-header {
-    padding: 8px 12px;
-    gap: 8px;
+    padding: 8px 10px;
+    gap: 6px;
   }
 
   .mobile-sidebar-btn,
-  .mobile-tools-btn {
+  .mobile-tools-btn,
+  .mobile-new-chat-btn {
     display: inline-flex;
     flex-shrink: 0;
+  }
+
+  .header-left {
+    flex-shrink: 0;
+  }
+
+  .logo {
+    display: none;
   }
 
   .header-center {
@@ -247,10 +284,23 @@ defineEmits<{
   }
 
   .header-right {
-    gap: 6px;
+    gap: 4px;
   }
 
-  .agent-select,
+  .agent-select {
+    display: inline-flex;
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .agent-select :deep(.el-select__wrapper) {
+    width: 100%;
+    min-width: 0;
+    padding-right: 24px;
+  }
+
   .header-btn,
   .model-badge,
   .status-dot,
@@ -258,8 +308,14 @@ defineEmits<{
     display: none;
   }
 
-  .logo {
-    font-size: 14px;
+  .mobile-new-chat-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 8px;
+    white-space: nowrap;
+    font-size: 12px;
+    flex-shrink: 0;
   }
 }
 </style>

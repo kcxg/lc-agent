@@ -62,7 +62,7 @@
                 <details
                   v-else-if="seg.type === 'thinking' && seg.text"
                   class="thinking-block"
-                  open
+                  :open="isThinkingExpanded(item)"
                 >
                   <summary class="thinking-summary">
                     <el-icon><Cpu /></el-icon>
@@ -155,7 +155,7 @@ import { BubbleList, Thinking, Welcome } from 'vue-element-plus-x'
 import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
 import { Cpu, User } from '@element-plus/icons-vue'
 import { useChatStore } from '@/stores/chat'
-import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ChatMessage } from '@/stores/chat'
+import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
 import { renderMarkdown } from '@/utils/markdown'
@@ -186,6 +186,7 @@ type ChatBubbleItem = BubbleListItemProps & {
   hasToolCalls?: boolean
   hasAnswer?: boolean
   httpTraces?: HttpTrace[]
+  isStreamingMessage?: boolean
 }
 
 const chatStore = useChatStore()
@@ -209,6 +210,10 @@ const bubbleList = computed((): ChatBubbleItem[] =>
       const segs = msg.role === 'assistant' && hasStructuredSegments(msg.content || '', msg.toolCalls)
         ? parseSegments(msg.content || '', msg.toolCalls)
         : undefined
+      const isStreamingMessage =
+        msg.role === 'assistant'
+        && idx === arr.length - 1
+        && isStreaming.value
       return {
         key: msg.id,
         messageId: msg.id,
@@ -225,10 +230,9 @@ const bubbleList = computed((): ChatBubbleItem[] =>
         hasThinking: segs?.some(s => s.type === 'thinking' && s.text?.trim()) ?? false,
         hasToolCalls: segs?.some(s => s.type === 'tool') ?? false,
         hasAnswer: segs?.some(s => s.type === 'text' && s.text?.trim()) ?? false,
+        isStreamingMessage,
         loading:
-          msg.role === 'assistant'
-          && idx === arr.length - 1
-          && isStreaming.value
+          isStreamingMessage
           && !msg.content,
         avatarSize: '28px',
         avatarGap: '8px',
@@ -255,6 +259,10 @@ function getModelLabel(): string {
   if (!model) return '模型未选择'
   const parts = model.split('/')
   return parts[parts.length - 1] || model
+}
+
+function isThinkingExpanded(item: ChatBubbleItem): boolean {
+  return item.isStreamingMessage === true
 }
 
 function canEditMessage(item: ChatBubbleItem) {
@@ -478,6 +486,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   overflow: hidden;
   height: 100%;
+  min-height: 0;
 }
 
 .messages-container {
@@ -490,6 +499,7 @@ onBeforeUnmount(() => {
   padding: 16px;
   background: var(--el-bg-color-page);
   min-width: 0;
+  min-height: 0;
 }
 
 .chat-actions-bar {
@@ -501,6 +511,15 @@ onBeforeUnmount(() => {
 
 .messages-container :deep(.elx-bubble-list) {
   width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.messages-container :deep(.elx-bubble-list__content) {
+  min-height: 100%;
 }
 
 .messages-container :deep(.elx-bubble) {
@@ -778,62 +797,71 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-primary) !important;
 }
 
-.messages-container :deep(.elx-welcome__description) {
-  color: var(--el-text-color-secondary) !important;
-}
-
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .messages-container {
-    --chat-assistant-bubble-width: 100%;
-    --chat-user-bubble-max-width: min(86%, 680px);
-    padding: 12px;
-  }
-
-  .messages-container :deep(.elx-bubble) {
-    max-width: 100% !important;
-  }
-}
-
-@media (max-width: 520px) {
-  .messages-container {
-    --chat-user-bubble-max-width: 86%;
-    padding: 6px 6px 8px 0;
-  }
-
-  .messages-container :deep(.elx-bubble) {
-    max-width: 100% !important;
-  }
-
-  .messages-container :deep(.elx-bubble--start .elx-bubble__avatar) {
-    display: none;
+    padding: 12px 10px;
+    overscroll-behavior-y: contain;
   }
 
   .messages-container :deep(.elx-bubble--start) {
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-
-  .messages-container :deep(.elx-bubble--end) {
-    width: 100% !important;
-    max-width: 100% !important;
-    justify-content: flex-end;
+    width: min(100%, 100%) !important;
+    max-width: min(100%, 100%) !important;
   }
 
   .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
-    width: fit-content;
-    max-width: var(--chat-user-bubble-max-width) !important;
+    max-width: min(88%, 100%) !important;
   }
 
-  .messages-container :deep(.elx-bubble__content) {
-    padding: 8px 10px;
+  .messages-container :deep(.elx-bubble__avatar) {
+    display: none !important;
   }
 
   .role-header {
-    margin-left: 4px;
+    gap: 6px;
+    margin-bottom: 5px;
   }
 
   .role-header-icon {
     display: inline-flex;
+  }
+
+  .role-model {
+    max-width: 38vw;
+  }
+}
+
+@media (max-width: 560px) {
+  .messages-container {
+    padding: 10px 8px;
+  }
+
+  .messages-container :deep(.elx-bubble-list) {
+    overscroll-behavior: contain;
+  }
+
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
+    max-width: min(92%, 100%) !important;
+  }
+
+  .role-model {
+    max-width: 44vw;
+  }
+
+  .role-header {
+    font-size: 11px;
+  }
+
+  .message-edit-btn {
+    opacity: 1;
+    transform: none;
+    padding: 4px 8px;
+  }
+
+  .thinking-summary,
+  .thinking-body,
+  .thinking-unavailable,
+  .thinking-unavailable-text strong {
+    font-size: 12px;
   }
 }
 </style>
