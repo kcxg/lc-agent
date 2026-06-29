@@ -6,7 +6,6 @@
       :app-name="appName"
       :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
       :connected="chatStore.isConnected"
-      :app-name="appName"
       @edit-agent="editCurrentAgent"
       @new-agent="createNewAgent"
       @new-chat="handleNewChat"
@@ -66,7 +65,6 @@ import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore } from '@/stores/agents'
 import { useSessionsStore } from '@/stores/sessions'
 import { useAuthStore } from '@/stores/auth'
-import { api } from '@/api/http'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import LeftSidebar from '@/components/layout/LeftSidebar.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'

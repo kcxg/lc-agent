@@ -77,7 +77,6 @@ defineProps<{
   appName: string
   modelName: string
   connected: boolean
-  appName: string
 }>()
 
 defineEmits<{
