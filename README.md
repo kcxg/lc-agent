@@ -313,7 +313,7 @@ nb-agent 通过 tui 使用agent的能力 [https://github.com/ydf0509/nb_agent](h
 #### 既然如此（不做多用户隔离），为什么要做成bs架构？
 另外一个项目是 nb-agent是tui，也是本人项目。不通过浏览器提供agent操作，天然不会让用户有误解懵逼。
 但是tui的天花板很低，tui通过终端字符渲染实现界面，难以实现复杂的ui交互，2025年tui吃香，2026年gui更吃香。
-现在ai coding的tui太多了，只做tui类，似小米的mimocode没啥诚意，像codex zcode 这种gui才有诚意，所以codex客户端现在很吃香。
+现在ai coding的tui太多了，只做tui类似小米的mimocode没有诚意，像codex zcode 这种gui才有诚意，所以codex客户端现在很吃香。
 lc-agent 的浏览器相当于充当tui gui的作用 ，web开发比gui客户端的开发更灵活更轻，视觉渲染和交互天花板比tui和gui都更高，所以选择bs架构，不是cs架构。
 
 
