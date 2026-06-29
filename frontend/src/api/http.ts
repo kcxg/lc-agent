@@ -40,7 +40,7 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
 }
 
 export const api = {
-  health: () => fetchApi<{ status: string; version: string; app_name?: string }>('/health'),
+  health: () => fetchApi<{ status: string; version: string; app_name?: string; config_loaded: boolean }>('/health'),
   getAuthState: () => fetchApi<{ authenticated: boolean; username: string }>('/auth/me'),
   login: (data: { username: string; password: string }) =>
     fetchApi<{ authenticated: boolean; username: string }>('/auth/login', { method: 'POST', body: JSON.stringify(data) }),

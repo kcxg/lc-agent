@@ -3,6 +3,7 @@
   <router-view v-if="route.name === 'login'" />
   <div v-else-if="authStore.authenticated" class="app-container">
     <AppHeader
+      :app-name="appName"
       :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
       :connected="chatStore.isConnected"
       :app-name="appName"
@@ -59,6 +60,7 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ConfigProvider } from 'vue-element-plus-x'
 import { useTheme } from '@/composables/useTheme'
+import { api } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore } from '@/stores/agents'
@@ -116,6 +118,16 @@ async function initializeProtectedStores() {
     agentsStore.init(),
     sessionsStore.init(),
   ])
+
+  try {
+    const health = await api.health()
+    if (health.app_name?.trim()) {
+      appName.value = health.app_name.trim()
+      document.title = health.app_name.trim()
+    }
+  } catch (e) {
+    console.error('[App] Failed to fetch app name:', e)
+  }
 
   const sessionId = route.params.sessionId as string
   if (sessionId) {
