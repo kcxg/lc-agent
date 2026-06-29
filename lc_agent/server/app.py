@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, HTMLResponse
 
 from lc_agent import __version__
 from lc_agent.server.auth import get_auth_config, require_auth
@@ -57,7 +58,31 @@ def create_app(config: dict, lifespan=None) -> FastAPI:
 
 
 def mount_static_files(app: FastAPI):
-    """Mount static files AFTER WebSocket routes are registered."""
+    """Mount static files with SPA fallback that does NOT intercept API routes."""
     web_dist = Path(__file__).parent.parent / "web" / "dist"
-    if web_dist.exists():
-        app.mount("/", StaticFiles(directory=str(web_dist), html=True), name="frontend")
+    if not web_dist.exists():
+        return
+
+    # Serve /assets/* directly (no html=True)
+    assets_dir = web_dist / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    index_html = web_dist / "index.html"
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    async def favicon():
+        favicon_path = web_dist / "favicon.svg"
+        if favicon_path.exists():
+            return FileResponse(str(favicon_path))
+        return HTMLResponse(status_code=404)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        # Never serve index.html for API paths — let them 404 normally
+        if full_path == "api" or full_path.startswith("api/"):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        if index_html.exists():
+            return FileResponse(str(index_html))
+        return HTMLResponse(status_code=404)
