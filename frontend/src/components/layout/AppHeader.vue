@@ -32,12 +32,12 @@
           </div>
         </el-option>
       </el-select>
-      <button class="header-btn btn-edit" @click="$emit('editAgent')" :disabled="agentsStore.isBuiltin">编辑</button>
-      <button class="header-btn btn-new-agent" @click="$emit('newAgent')">+ 新Agent</button>
-      <button class="header-btn btn-new-chat" @click="$emit('newChat')">+ 新对话</button>
-      <span class="desktop-only">
+      <div class="header-actions desktop-only">
+        <button class="header-btn btn-edit" @click="$emit('editAgent')" :disabled="agentsStore.isBuiltin">编辑</button>
+        <button class="header-btn btn-new-agent" @click="$emit('newAgent')">+ 新Agent</button>
+        <button class="header-btn btn-new-chat" @click="$emit('newChat')">+ 新对话</button>
         <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
-      </span>
+      </div>
     </div>
     <div class="header-right">
       <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">新对话</button>
@@ -129,7 +129,7 @@ defineEmits<{
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
   flex: 1;
 }
@@ -149,6 +149,14 @@ defineEmits<{
 
 .desktop-only {
   display: inline-flex;
+}
+
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .agent-select {
@@ -241,42 +249,104 @@ defineEmits<{
 }
 
 .header-btn {
-  border: none;
-  border-radius: 8px;
-  padding: 6px 12px;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.header-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.header-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 5px 14px rgba(15, 23, 42, 0.10);
+}
+
+.header-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent), 0 8px 20px rgba(15, 23, 42, 0.12);
 }
 
 .btn-edit {
-  background: color-mix(in srgb, var(--el-color-success) 18%, transparent);
-  color: var(--el-color-success);
-  border: 1px solid color-mix(in srgb, var(--el-color-success) 36%, transparent);
+  color: #334155;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.94));
+  border-color: rgba(148, 163, 184, 0.34);
 }
 
 .btn-edit:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--el-color-success) 28%, transparent);
-  border-color: color-mix(in srgb, var(--el-color-success) 50%, transparent);
+  background: linear-gradient(180deg, rgba(241, 245, 249, 1), rgba(226, 232, 240, 0.96));
 }
 
 .btn-edit:disabled {
-  opacity: 0.5;
+  opacity: 0.48;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
-.btn-new-agent,
+.btn-new-agent {
+  color: #ffffff;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+  border-color: rgba(37, 99, 235, 0.42);
+}
+
+.btn-new-agent:hover {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+}
+
 .btn-new-chat,
 .mobile-new-chat-btn {
-  background: var(--el-color-primary);
-  color: white;
+  color: #ffffff;
+  background: linear-gradient(135deg, #059669, #10b981);
+  border-color: rgba(5, 150, 105, 0.36);
 }
 
-.btn-new-agent:hover,
 .btn-new-chat:hover,
 .mobile-new-chat-btn:hover {
-  background: var(--el-color-primary-dark-2);
+  background: linear-gradient(135deg, #047857, #059669);
+}
+
+:deep(.copy-rounds-trigger) {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  background: linear-gradient(135deg, #ea580c, #f59e0b);
+  color: #ffffff;
+  border: 1px solid rgba(234, 88, 12, 0.34);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+:deep(.copy-rounds-trigger:hover) {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #c2410c, #ea580c);
+  border-color: rgba(194, 65, 12, 0.4);
+}
+
+:global(html.dark) .header-btn,
+:global(html.dark) .copy-rounds-trigger {
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.34);
+}
+
+:global(html.dark) .btn-edit {
+  color: #e2e8f0;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.94));
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+:global(html.dark) .btn-edit:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(51, 65, 85, 0.98), rgba(30, 41, 59, 0.96));
 }
 
 @keyframes pulse {
@@ -344,10 +414,17 @@ defineEmits<{
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 6px 8px;
+    min-height: 34px;
+    padding: 0 10px;
     white-space: nowrap;
     font-size: 12px;
     flex-shrink: 0;
+    border-radius: 999px;
+  }
+
+  :deep(.copy-rounds-trigger) {
+    min-height: 34px;
+    padding: 0 10px;
   }
 }
 </style>

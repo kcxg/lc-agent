@@ -17,6 +17,7 @@ from lc_agent.server.routes.agents import router as agents_router
 from lc_agent.server.routes.sessions import router as sessions_router
 from lc_agent.server.routes.skills import router as skills_router
 from lc_agent.server.routes.mcp import router as mcp_router
+from lc_agent.server.routes.settings import router as settings_router
 
 
 def create_app(config: dict, lifespan=None) -> FastAPI:
@@ -46,6 +47,7 @@ def create_app(config: dict, lifespan=None) -> FastAPI:
     app.include_router(sessions_router, prefix="/api")
     app.include_router(skills_router, prefix="/api")
     app.include_router(mcp_router, prefix="/api")
+    app.include_router(settings_router, prefix="/api")
 
     return app
 

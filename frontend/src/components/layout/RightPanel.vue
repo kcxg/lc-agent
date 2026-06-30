@@ -10,6 +10,36 @@
         />
       </div>
 
+      <div class="panel-section summarization-section">
+        <div class="section-header">
+          <h4>上下文摘要</h4>
+          <el-switch
+            :model-value="summEnabled"
+            size="small"
+            @change="(val: boolean) => { summEnabled = val; updateSummarization({ enabled: val }) }"
+          />
+        </div>
+        <div v-if="summEnabled" class="summ-model-select">
+          <span class="summ-label">摘要模型</span>
+          <el-select
+            v-model="summModel"
+            placeholder="默认同主模型"
+            size="small"
+            filterable
+            clearable
+            style="width: 100%"
+            @change="updateSummarization({ default_model: $event || '' })"
+          >
+            <el-option
+              v-for="model in toolsStore.models"
+              :key="model.id"
+              :label="model.id"
+              :value="model.id"
+            />
+          </el-select>
+        </div>
+      </div>
+
       <div v-if="chatStore.todos.length > 0" class="panel-section">
         <TodoList :todos="chatStore.todos" />
       </div>
@@ -141,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { useToolsStore } from '@/stores/tools'
 import { api } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
@@ -154,6 +184,25 @@ import TodoList from '@/components/panels/TodoList.vue'
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
+
+const summEnabled = ref(true)
+const summModel = ref('')
+
+onMounted(async () => {
+  try {
+    const conf = await api.getSummarization()
+    summEnabled.value = conf.enabled
+    summModel.value = conf.default_model || ''
+  } catch { /* ignore */ }
+})
+
+async function updateSummarization(data: { enabled?: boolean; default_model?: string }) {
+  try {
+    const res = await api.updateSummarization(data)
+    summEnabled.value = res.enabled
+    summModel.value = res.default_model || ''
+  } catch { /* ignore */ }
+}
 
 const detailModal = reactive<{
   visible: boolean
@@ -385,6 +434,23 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   font-weight: 500;
   color: var(--el-color-primary);
   transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.summarization-section .section-header {
+  margin-bottom: 6px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.summ-model-select {
+  margin-top: 8px;
+}
+
+.summ-label {
+  display: block;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 4px;
 }
 
 @keyframes spin {
