@@ -35,15 +35,9 @@
       <button class="header-btn btn-edit" @click="$emit('editAgent')" :disabled="agentsStore.isBuiltin">编辑</button>
       <button class="header-btn btn-new-agent" @click="$emit('newAgent')">+ 新Agent</button>
       <button class="header-btn btn-new-chat" @click="$emit('newChat')">+ 新对话</button>
-      <span class="desktop-only">
-        <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
-      </span>
     </div>
     <div class="header-right">
       <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">新对话</button>
-      <span class="mobile-only">
-        <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
-      </span>
       <el-button
         class="mobile-tools-btn"
         :icon="Setting"
@@ -72,26 +66,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
-import { useChatStore } from '@/stores/chat'
-import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
 import { Sunny, Moon, Menu, Setting, SwitchButton } from '@element-plus/icons-vue'
-import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
 
 const agentsStore = useAgentsStore()
-const chatStore = useChatStore()
-const toolsStore = useToolsStore()
 const { isDark, toggleDark } = useTheme()
-
-const hasMessages = computed(() => chatStore.messages.length > 0)
-const sessionModel = computed(() => {
-  const model = toolsStore.currentModel || agentsStore.currentAgent?.default_model || ''
-  if (!model) return ''
-  const parts = model.split('/')
-  return parts[parts.length - 1] || model
-})
 
 defineProps<{
   appName: string
@@ -152,13 +132,8 @@ defineEmits<{
 
 .mobile-sidebar-btn,
 .mobile-tools-btn,
-.mobile-new-chat-btn,
-.mobile-only {
+.mobile-new-chat-btn {
   display: none;
-}
-
-.desktop-only {
-  display: inline-flex;
 }
 
 .agent-select {
@@ -302,14 +277,9 @@ defineEmits<{
 
   .mobile-sidebar-btn,
   .mobile-tools-btn,
-  .mobile-new-chat-btn,
-  .mobile-only {
+  .mobile-new-chat-btn {
     display: inline-flex;
     flex-shrink: 0;
-  }
-
-  .desktop-only {
-    display: none;
   }
 
   .header-left {
