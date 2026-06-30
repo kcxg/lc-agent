@@ -426,6 +426,12 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
+.chat-actions-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
 .messages-container {
   --chat-assistant-bubble-width: min(85%, 920px);
   --chat-user-bubble-max-width: min(78%, 720px);
