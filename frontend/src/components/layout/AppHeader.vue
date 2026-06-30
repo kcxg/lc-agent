@@ -160,12 +160,28 @@ defineEmits<{
 }
 
 .agent-select {
-  width: 240px;
+  width: 280px;
 }
 
 .agent-select :deep(.el-select__wrapper) {
   min-width: 0;
-  padding-right: 28px;
+  min-height: 38px;
+  padding: 0 36px 0 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 24%, var(--el-border-color));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--el-bg-color-overlay) 96%, white 4%), color-mix(in srgb, var(--el-fill-color-light) 92%, var(--el-bg-color-overlay)));
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.agent-select :deep(.el-select__wrapper:hover) {
+  border-color: color-mix(in srgb, var(--el-color-primary) 38%, var(--el-border-color));
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+}
+
+.agent-select :deep(.el-select__wrapper.is-focused) {
+  border-color: color-mix(in srgb, var(--el-color-primary) 58%, var(--el-border-color));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-primary) 14%, transparent), 0 12px 28px rgba(15, 23, 42, 0.12);
 }
 
 .agent-select :deep(.el-select__selected-item) {
@@ -175,6 +191,29 @@ defineEmits<{
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.agent-select :deep(.el-select__caret) {
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+}
+
+:global(html.dark) .agent-select :deep(.el-select__wrapper) {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.94));
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.34);
+}
+
+:global(html.dark) .agent-select :deep(.el-select__wrapper:hover) {
+  border-color: color-mix(in srgb, var(--el-color-primary) 50%, rgba(148, 163, 184, 0.22));
+}
+
+:global(html.dark) .agent-select :deep(.el-select__wrapper.is-focused) {
+  border-color: color-mix(in srgb, var(--el-color-primary) 64%, rgba(148, 163, 184, 0.22));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-primary) 18%, transparent), 0 14px 30px rgba(2, 6, 23, 0.38);
 }
 
 .model-badge {
