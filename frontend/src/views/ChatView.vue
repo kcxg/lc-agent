@@ -83,12 +83,12 @@
                     :collapsed="item.toolCalls[seg.toolIndex!]?.status === 'done'"
                   />
                 </div>
-                <HttpTraceBlock
-                  v-else-if="seg.type === 'http' && seg.httpIndex != null && item.httpTraces?.[seg.httpIndex]"
-                  :trace="item.httpTraces[seg.httpIndex]"
-                  :usage-round="item.usage?.rounds?.[seg.httpIndex]"
-                />
               </template>
+              <HttpTracesGroup
+                v-if="item.httpTraces?.length"
+                :traces="item.httpTraces"
+                :rounds="item.usage?.rounds"
+              />
             </template>
             <template v-else>
               <div
@@ -147,6 +147,13 @@
       :interrupt="interrupt"
       @decide="handleInterruptDecide"
     />
+
+    <CodeBlockModal
+      :visible="codeModalVisible"
+      :code="codeModalSource"
+      :language="codeModalLanguage"
+      @close="codeModalVisible = false"
+    />
   </div>
 </template>
 
@@ -167,10 +174,10 @@ import ChatInput from '@/components/chat/ChatInput.vue'
 import InterruptDialog from '@/components/chat/InterruptDialog.vue'
 import ToolCallCard from '@/components/chat/ToolCallCard.vue'
 import TodoProgressCard from '@/components/chat/TodoProgressCard.vue'
-import HttpTraceBlock from '@/components/chat/HttpTraceBlock.vue'
+import HttpTracesGroup from '@/components/chat/HttpTracesGroup.vue'
 import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
 import MessageToolbar from '@/components/chat/MessageToolbar.vue'
-import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
+import CodeBlockModal from '@/components/chat/CodeBlockModal.vue'
 
 type ChatBubbleItem = BubbleListItemProps & {
   role: 'user' | 'ai'
@@ -191,6 +198,9 @@ const toolsStore = useToolsStore()
 const { messages, isStreaming, interrupt } = storeToRefs(chatStore)
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
+const codeModalVisible = ref(false)
+const codeModalSource = ref('')
+const codeModalLanguage = ref('')
 
 const isLoading = computed(() => {
   const msgs = messages.value
@@ -368,6 +378,22 @@ async function copyMarkdownCode(button: HTMLButtonElement) {
 
 function handleMarkdownClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null
+
+  const expandBtn = target?.closest?.('.markdown-code-expand') as HTMLButtonElement | null
+  if (expandBtn) {
+    event.preventDefault()
+    const encoded = expandBtn.dataset.code || ''
+    const lang = expandBtn.dataset.lang || 'text'
+    try {
+      codeModalSource.value = decodeURIComponent(encoded)
+    } catch {
+      codeModalSource.value = encoded
+    }
+    codeModalLanguage.value = lang
+    codeModalVisible.value = true
+    return
+  }
+
   const button = target?.closest?.('.markdown-code-copy') as HTMLButtonElement | null
   if (!button) return
   event.preventDefault()
@@ -410,13 +436,6 @@ onBeforeUnmount(() => {
   padding: 16px;
   background: var(--el-bg-color-page);
   min-width: 0;
-}
-
-.chat-actions-bar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0 4px 4px;
-  flex-shrink: 0;
 }
 
 .messages-container :deep(.elx-bubble-list) {
@@ -835,6 +854,106 @@ onBeforeUnmount(() => {
 
   .role-header-icon {
     display: inline-flex;
+  }
+
+  .role-model {
+    max-width: 42vw;
+  }
+}
+
+@media (max-width: 560px) {
+  .messages-container {
+    padding: 4px 0;
+  }
+
+  .messages-container :deep(.elx-bubble-list__content) {
+    gap: 0 !important;
+  }
+
+  .messages-container :deep(.elx-bubble-list) {
+    overscroll-behavior: contain;
+  }
+
+  .messages-container :deep(.elx-bubble--start),
+  .messages-container :deep(.elx-bubble--end) {
+    padding-inline: 0 !important;
+    margin-inline: 0 !important;
+  }
+
+  .messages-container :deep(.elx-bubble__content) {
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+
+  .messages-container :deep(.elx-bubble) {
+    gap: 0 !important;
+  }
+
+  .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper),
+  .messages-container :deep(.elx-bubble--start .elx-bubble__content),
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper),
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content),
+  .messages-container :deep(.elx-bubble__content),
+  .messages-container :deep(.markdown-body),
+  .messages-container :deep(.tool-call-card) {
+    width: 100%;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .messages-container :deep(.markdown-code-block),
+  .messages-container :deep(.markdown-body pre),
+  .messages-container :deep(.markdown-body table) {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .messages-container :deep(.markdown-body > p),
+  .messages-container :deep(.markdown-body > ul),
+  .messages-container :deep(.markdown-body > ol),
+  .messages-container :deep(.markdown-body > blockquote),
+  .messages-container :deep(.markdown-body > h1),
+  .messages-container :deep(.markdown-body > h2),
+  .messages-container :deep(.markdown-body > h3),
+  .messages-container :deep(.markdown-body > h4),
+  .messages-container :deep(.markdown-body > h5),
+  .messages-container :deep(.markdown-body > h6) {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .thinking-summary {
+    padding: 7px 6px;
+  }
+
+  .thinking-body {
+    padding: 0 6px 9px;
+  }
+
+  .thinking-unavailable {
+    padding: 7px 6px;
+  }
+
+  .role-model {
+    max-width: 46vw;
+  }
+
+  .role-header {
+    font-size: 11px;
+  }
+
+  .message-edit-btn {
+    opacity: 1;
+    transform: none;
+    padding: 4px 8px;
+  }
+
+  .thinking-summary,
+  .thinking-body,
+  .thinking-unavailable,
+  .thinking-unavailable-text strong {
+    font-size: 12px;
   }
 }
 </style>
