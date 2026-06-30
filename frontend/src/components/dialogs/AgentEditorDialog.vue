@@ -15,7 +15,7 @@
       </el-form-item>
 
       <el-form-item label="模型">
-        <el-select v-model="form.default_model" :disabled="isCodeAgent" style="width:100%" placeholder="选择默认模型">
+        <el-select v-model="form.default_model" :disabled="isCodeAgent" filterable style="width:100%" placeholder="选择默认模型">
           <el-option
             v-for="model in toolsStore.models"
             :key="model.id"
