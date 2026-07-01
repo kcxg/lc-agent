@@ -57,6 +57,7 @@
       <span class="status-text" :title="connected ? 'WebSocket 已连接' : 'WebSocket 未连接'">
         {{ connected ? '已连接' : '未连接' }}
       </span>
+      <el-button :icon="RefreshRight" circle size="small" title="刷新页面" @click="reloadPage" />
       <el-button :icon="isDark ? Sunny : Moon" circle size="small" @click="toggleDark()" />
     </div>
   </header>
@@ -68,13 +69,17 @@ import { useAgentsStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon, Menu, Setting } from '@element-plus/icons-vue'
+import { Sunny, Moon, Menu, Setting, RefreshRight } from '@element-plus/icons-vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
 
 const agentsStore = useAgentsStore()
 const chatStore = useChatStore()
 const toolsStore = useToolsStore()
 const { isDark, toggleDark } = useTheme()
+
+function reloadPage() {
+  window.location.reload()
+}
 
 const hasMessages = computed(() => chatStore.messages.length > 0)
 const sessionModel = computed(() => {
@@ -316,13 +321,14 @@ defineEmits<{
 }
 
 .btn-edit {
-  color: #334155;
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.94));
-  border-color: rgba(148, 163, 184, 0.34);
+  color: #f5f3ff;
+  background: linear-gradient(135deg, #5b4b8a, #475569);
+  border-color: rgba(109, 91, 163, 0.42);
 }
 
 .btn-edit:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(241, 245, 249, 1), rgba(226, 232, 240, 0.96));
+  background: linear-gradient(135deg, #6d5fa8, #52627a);
+  border-color: rgba(129, 111, 181, 0.5);
 }
 
 .btn-edit:disabled {
@@ -379,13 +385,14 @@ defineEmits<{
 }
 
 :global(html.dark) .btn-edit {
-  color: #e2e8f0;
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.94));
-  border-color: rgba(148, 163, 184, 0.24);
+  color: #f5f3ff;
+  background: linear-gradient(135deg, rgba(88, 70, 139, 0.98), rgba(51, 65, 85, 0.96));
+  border-color: rgba(129, 111, 181, 0.3);
 }
 
 :global(html.dark) .btn-edit:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(51, 65, 85, 0.98), rgba(30, 41, 59, 0.96));
+  background: linear-gradient(135deg, rgba(109, 95, 168, 0.98), rgba(71, 85, 105, 0.98));
+  border-color: rgba(167, 139, 250, 0.42);
 }
 
 @keyframes pulse {

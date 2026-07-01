@@ -97,7 +97,7 @@ $proc = Start-Process `
     -FilePath $Python `
     -ArgumentList $arguments `
     -WorkingDirectory $BfzsDir `
-    -WindowStyle Minimized `
+    -WindowStyle Hidden `
     -RedirectStandardOutput $stdoutLog `
     -RedirectStandardError $stderrLog `
     -PassThru

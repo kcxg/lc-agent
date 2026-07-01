@@ -3,6 +3,7 @@
 基于 LangChain / LangGraph 的 AI Agent 框架，内置 Web UI。
 
 **lc-agent 既是框架又是产品。** 用户可以在自己项目中 `import lc_agent` 开发自定义 Agent 应用；也可以零代码，直接在页面创建配置智能体。
+可以通过`LcAgentApp.add_agent`接管用户原有的任意langchain的agent对象(CompiledStateGraph),用户无需再造前端。
 
 > [lc-agent-bfzs](https://github.com/ydf0509/lc-agent-bfzs) 是基于 lc-agent 框架开发的演示项目。
 
@@ -142,7 +143,17 @@ app = LcAgentApp(config, host="127.0.0.1", port=8001)
 from my_agents import build_my_agent
 app.add_agent("my_agent", build_my_agent(config), description="自定义Agent")
 
-app.run() # 启动web服务，如果app.run(desktop=True) ，则同时启动一个桌面客户端，无需打开浏览器。
+app.run()  # 启动 web 服务。桌面客户端需单独启动（见 lc_agent/desktop.py）。
+```
+
+## 启动客户端
+
+说明：可以使用`launch_desktop`打开一个专门的客户端，也可以使用浏览器打开网址，都是渲染网页的作用。
+
+```python
+from lc_agent.desktop import launch_desktop
+
+launch_desktop(host='127.0.0.1', port=8001, title="心有灵犀")
 ```
 
 ## CLI 参数

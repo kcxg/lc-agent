@@ -220,7 +220,7 @@ class AgentEngine:
         if not summ_conf.get("enabled", True):
             return []
 
-        summ_model_id = summ_conf.get("default_model", "") or summ_conf.get("model", "") or preset.default_model
+        summ_model_id = summ_conf.get("default_model", "") or preset.default_model
         model_info = self._find_model(summ_model_id)
         llm = self._create_llm(model_info, summ_model_id)
 

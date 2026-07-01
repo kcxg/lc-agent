@@ -20,7 +20,7 @@ def get_summarization(engine: AgentEngine = Depends(get_engine)):
     conf = engine.config.get("agent", {}).get("summarization", {})
     return {
         "enabled": conf.get("enabled", True),
-        "default_model": conf.get("default_model", "") or conf.get("model", ""),
+        "default_model": conf.get("default_model", ""),
         "trigger": conf.get("trigger"),
         "keep": conf.get("keep"),
     }
@@ -34,7 +34,6 @@ def update_summarization(body: SummarizationConfig, engine: AgentEngine = Depend
 
     summ_conf["enabled"] = body.enabled
     summ_conf["default_model"] = body.default_model
-    summ_conf.pop("model", None)
     if body.trigger is not None:
         summ_conf["trigger"] = body.trigger
     if body.keep is not None:
