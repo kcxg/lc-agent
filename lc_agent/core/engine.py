@@ -76,7 +76,7 @@ class AgentEngine:
                 default_model=default_model,
                 allowed_tool_groups=None,
                 allowed_mcp_servers=None,
-                allowed_skills=None,
+                allowed_skills=[],
                 source="builtin",
                 default_enabled=False,
             ),

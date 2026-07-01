@@ -141,6 +141,7 @@
     <InterruptDialog
       :interrupt="interrupt"
       @decide="handleInterruptDecide"
+      @resume="handleInterruptResume"
     />
 
     <CodeBlockModal
@@ -416,6 +417,10 @@ function handleStop() {
 
 function handleInterruptDecide(decision: { type: string }) {
   chatStore.respondToInterrupt(decision.type === 'approve', agentsStore.currentAgentId)
+}
+
+function handleInterruptResume(value: any) {
+  chatStore.resumeInterrupt(value, agentsStore.currentAgentId, toolsStore.currentModel)
 }
 
 function getCodeToCopy(button: HTMLButtonElement): string {

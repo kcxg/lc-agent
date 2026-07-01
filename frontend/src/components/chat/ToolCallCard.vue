@@ -200,8 +200,15 @@ function formatSize(len: number): string {
 
 function formatArgs(args: Record<string, any>): { key: string; value: string }[] {
   return Object.entries(args).map(([k, v]) => {
-    let val = typeof v === 'string' ? v : JSON.stringify(v)
-    if (val.length > 100) val = val.slice(0, 100) + '...'
+    let val: string
+    if (Array.isArray(v)) {
+      val = v.map((item, i) => `${String.fromCharCode(65 + i)}. ${item}`).join('\n')
+    } else if (typeof v === 'string') {
+      val = v
+    } else {
+      val = JSON.stringify(v)
+    }
+    if (val.length > 200) val = val.slice(0, 200) + '...'
     return { key: k, value: val }
   })
 }
@@ -338,6 +345,7 @@ const statusLabel = computed(() => {
 .arg-value {
   color: var(--el-text-color-regular);
   word-break: break-all;
+  white-space: pre-wrap;
 }
 
 .tool-result {

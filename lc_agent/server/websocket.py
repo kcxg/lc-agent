@@ -114,11 +114,36 @@ class ChatWebSocketHandler:
                     assistant_content_parts.append("<!--THINK_END-->")
                     assistant_in_thinking = False
 
+                # Check for pending interrupts via graph state
+                # (astream_events v2 does NOT surface __interrupt__ in on_chain_end)
+                interrupt_sent = False
+                try:
+                    agent = self.engine._get_or_build_agent(preset_id, model_id)
+                    state_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.engine.recursion_limit}
+                    graph_state = await agent.aget_state(state_config)
+                    if graph_state.tasks:
+                        all_interrupts = []
+                        for task in graph_state.tasks:
+                            for intr in (task.interrupts or ()):
+                                all_interrupts.append({
+                                    "value": intr.value,
+                                    "id": getattr(intr, "id", None),
+                                })
+                        if all_interrupts:
+                            await websocket.send_json({
+                                "type": "interrupt",
+                                "message": "Tool requires approval",
+                                "data": all_interrupts,
+                            })
+                            interrupt_sent = True
+                except Exception as e:
+                    print(f"[WS] Failed to check interrupt state: {e}")
+
                 has_text = any(
                     p for p in assistant_content_parts
                     if p and not p.startswith("<!--") and not p.endswith("-->")
                 )
-                if not has_text and (assistant_tool_calls or usage_rounds):
+                if not has_text and (assistant_tool_calls or usage_rounds) and not interrupt_sent:
                     print(
                         f"[WS] Warning: stream ended with {len(usage_rounds)} LLM rounds, "
                         f"{len(assistant_tool_calls)} tool calls, but no final text answer. "
@@ -126,7 +151,6 @@ class ChatWebSocketHandler:
                     )
 
                 http_traces = trace_collector.snapshot()
-                # Inject HTTP trace markers into assistant content for inline block rendering
                 if http_traces:
                     for i in range(len(http_traces)):
                         marker = f"\n<!--HTTP:{i}-->\n"
@@ -184,7 +208,11 @@ class ChatWebSocketHandler:
                     return
 
                 config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.engine.recursion_limit}
-                resume_value = {"approved": approved}
+
+                if "resume_value" in data:
+                    resume_value = data["resume_value"]
+                else:
+                    resume_value = {"approved": approved}
 
                 async for event in agent.astream_events(
                     Command(resume=resume_value),
@@ -195,6 +223,27 @@ class ChatWebSocketHandler:
                         await websocket.send_json({"type": "cancelled"})
                         return
                     await self._send_event(websocket, event)
+
+                # Check for new interrupts after resume
+                try:
+                    graph_state = await agent.aget_state(config)
+                    if graph_state.tasks:
+                        all_interrupts = []
+                        for task in graph_state.tasks:
+                            for intr in (task.interrupts or ()):
+                                all_interrupts.append({
+                                    "value": intr.value,
+                                    "id": getattr(intr, "id", None),
+                                })
+                        if all_interrupts:
+                            await websocket.send_json({
+                                "type": "interrupt",
+                                "message": "Tool requires approval",
+                                "data": all_interrupts,
+                            })
+                except Exception as e:
+                    print(f"[WS] Failed to check interrupt state after resume: {e}")
+
                 await websocket.send_json({"type": "done"})
             except Exception as e:
                 await websocket.send_json({"type": "error", "message": str(e)})
@@ -506,19 +555,5 @@ class ChatWebSocketHandler:
                 "result": result_str,
             })
 
-        elif kind == "on_chain_end":
-            data_output = event.get("data", {}).get("output", {})
-            if isinstance(data_output, dict) and "__interrupt__" in data_output:
-                interrupt_data = data_output["__interrupt__"]
-                try:
-                    serializable = [
-                        {"value": getattr(i, "value", str(i)), "id": getattr(i, "id", None)}
-                        for i in (interrupt_data if isinstance(interrupt_data, (list, tuple)) else [interrupt_data])
-                    ]
-                except Exception:
-                    serializable = [{"value": str(interrupt_data)}]
-                await websocket.send_json({
-                    "type": "interrupt",
-                    "message": "Tool requires approval",
-                    "data": serializable,
-                })
+        # NOTE: interrupt detection is handled post-stream via aget_state(),
+        # since astream_events(v2) does not surface __interrupt__ in on_chain_end.

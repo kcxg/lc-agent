@@ -10,6 +10,7 @@ export interface WsMessage {
   args?: Record<string, any>
   action_requests?: any[]
   review_configs?: any[]
+  data?: any[]
   input_tokens?: number
   output_tokens?: number
   total_tokens?: number
@@ -81,6 +82,15 @@ export class ChatWebSocket {
       type: 'interrupt_response',
       approved,
       preset_id: presetId,
+    })
+  }
+
+  sendInterruptResume(resumeValue: any, presetId: string, model?: string) {
+    this.send({
+      type: 'interrupt_response',
+      resume_value: resumeValue,
+      preset_id: presetId,
+      model: model || '',
     })
   }
 
