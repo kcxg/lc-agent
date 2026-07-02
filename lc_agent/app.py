@@ -202,26 +202,11 @@ class LcAgentApp:
         )
         self.engine._custom_presets[name] = preset
 
-    def _resolve_desktop_title(self, title: str | None) -> str:
-        if title:
-            return title
-        app_name = self.config.get("ui", {}).get("app_name")
-        if isinstance(app_name, str) and app_name.strip():
-            return app_name.strip()
-        return "lc-agent"
-
-    def run(self, desktop: bool = False, title: str | None = None):
+    def run(self):
         """Start the server (blocking)."""
         from lc_agent import __version__
 
         print(f"\n  lc_agent v{__version__}")
         print(f"  Web UI: http://{self.host}:{self.port}")
-        print(f"  API Docs: http://{self.host}:{self.port}/api/docs")
-        if desktop:
-            print("  Desktop UI: enabled\n")
-            from lc_agent.desktop import run_desktop
-
-            run_desktop(self, host=self.host, port=self.port, title=self._resolve_desktop_title(title))
-            return
-        print()
+        print(f"  API Docs: http://{self.host}:{self.port}/api/docs\n")
         uvicorn.run(self.fastapi_app, host=self.host, port=self.port)

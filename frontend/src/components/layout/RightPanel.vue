@@ -20,6 +20,62 @@
         />
       </div>
 
+      <div class="panel-section window-trim-section">
+        <div class="window-trim-control">
+          <h4>窗口裁剪模型</h4>
+          <el-switch
+            :model-value="summEnabled"
+            size="small"
+            @change="(val: boolean) => { summEnabled = val; updateSummarization({ enabled: val }) }"
+          />
+        </div>
+        <el-select
+          v-if="summEnabled"
+          v-model="summModel"
+          placeholder="默认同主模型"
+          size="small"
+          filterable
+          clearable
+          class="window-trim-select"
+          @change="updateSummarization({ default_model: $event || '' })"
+        >
+          <el-option
+            v-for="model in toolsStore.models"
+            :key="model.id"
+            :label="model.id"
+            :value="model.id"
+          />
+        </el-select>
+      </div>
+
+      <div class="panel-section markdown-theme-section">
+        <div class="section-header compact-section-header">
+          <h4>Markdown 风格</h4>
+          <span class="theme-current">{{ currentOption.label }}</span>
+        </div>
+        <el-select
+          v-model="markdownTheme"
+          size="small"
+          class="markdown-theme-select"
+          @change="(value: MarkdownThemeId) => setMarkdownTheme(value)"
+        >
+          <el-option
+            v-for="option in MARKDOWN_THEME_OPTIONS"
+            :key="option.id"
+            :label="option.label"
+            :value="option.id"
+          >
+            <div class="theme-option-row">
+              <span class="theme-option-dot" :style="{ background: option.accent }"></span>
+              <div class="theme-option-copy">
+                <span class="theme-option-name">{{ option.label }}</span>
+                <span class="theme-option-desc">{{ option.description }}</span>
+              </div>
+            </div>
+          </el-option>
+        </el-select>
+      </div>
+
       <div v-if="chatStore.todos.length > 0" class="panel-section">
         <TodoList :todos="chatStore.todos" />
       </div>
@@ -152,11 +208,12 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { useToolsStore } from '@/stores/tools'
 import { api } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
+import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '@/composables/useMarkdownTheme'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
 import DetailModal from '@/components/panels/DetailModal.vue'
@@ -168,6 +225,26 @@ const emit = defineEmits<{ toggleCollapse: [] }>()
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
+const { markdownTheme, currentOption, setMarkdownTheme } = useMarkdownTheme()
+
+const summEnabled = ref(true)
+const summModel = ref('')
+
+onMounted(async () => {
+  try {
+    const conf = await api.getSummarization()
+    summEnabled.value = conf.enabled
+    summModel.value = conf.default_model || ''
+  } catch { /* ignore */ }
+})
+
+async function updateSummarization(data: { enabled?: boolean; default_model?: string }) {
+  try {
+    const res = await api.updateSummarization(data)
+    summEnabled.value = res.enabled
+    summModel.value = res.default_model || ''
+  } catch { /* ignore */ }
+}
 
 const detailModal = reactive<{
   visible: boolean
@@ -296,8 +373,85 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   margin-bottom: 16px;
   padding: 12px;
   background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
+}
+
+.markdown-theme-section {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--el-fill-color-light) 88%, var(--el-color-primary) 4%), var(--el-fill-color-light));
+}
+
+.window-trim-section,
+.markdown-theme-section {
+  margin-bottom: 14px;
+}
+
+.window-trim-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.window-trim-select {
+  width: 100%;
+}
+
+.compact-section-header {
+  margin-bottom: 8px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.theme-current {
+  max-width: 132px;
+  overflow: hidden;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-theme-select {
+  width: 100%;
+}
+
+.theme-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.theme-option-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+  flex-shrink: 0;
+}
+
+.theme-option-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.theme-option-name {
+  color: var(--el-text-color-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.theme-option-desc {
+  overflow: hidden;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel-section h4 {

@@ -72,36 +72,53 @@ class ToolRegistry:
                 groups[g] = self._group_descriptions.get(g, g)
         return [{"id": gid, "description": desc} for gid, desc in sorted(groups.items())]
 
-    def register(self, func: Callable, group: str = "", group_description: str = "") -> BaseTool:
+    def register(self, func: Callable, group: str = "", group_description: str = "", name: str = "") -> BaseTool:
         """Register a function as a tool.
 
         Args:
             func: The function to register as a tool.
-            group: ASCII group identifier, used as prefix in tool name.
+            group: ASCII group identifier for filtering/categorization.
+                   Used as name prefix (group__func_name) only when `name` is not set.
                    Must match ^[a-zA-Z0-9_-]+$ if provided.
             group_description: Human-readable group description for UI display.
                    If not provided, defaults to the group value.
+            name: Explicit tool name. Takes highest priority over group+func naming.
+                  Must match ^[a-zA-Z0-9_-]+$ if provided.
         """
         if group and not _TOOL_NAME_PATTERN.match(group):
             raise ValueError(
                 f"Tool group '{group}' must match ^[a-zA-Z0-9_-]+$. "
                 f"Use ASCII for 'group' and put display name in 'group_description'."
             )
+        if name and not _TOOL_NAME_PATTERN.match(name):
+            raise ValueError(
+                f"Tool name '{name}' must match ^[a-zA-Z0-9_-]+$."
+            )
 
-        if group:
-            name = f"{group}__{func.__name__}"
+        if name:
+            resolved_name = name
+        elif group:
+            resolved_name = f"{group}__{func.__name__}"
         else:
-            name = func.__name__
+            resolved_name = func.__name__
+
+        if resolved_name in self._global_tools:
+            existing = self._global_tools[resolved_name]["func"]
+            raise ValueError(
+                f"Tool name '{resolved_name}' already registered by "
+                f"{existing.__module__}.{existing.__qualname__}. "
+                f"Use a different name or group to avoid collision."
+            )
 
         if group and group_description:
             self._group_descriptions[group] = group_description
 
         lc_tool = StructuredTool.from_function(
             func=func,
-            name=name,
-            description=func.__doc__ or f"Tool: {name}",
+            name=resolved_name,
+            description=func.__doc__ or f"Tool: {resolved_name}",
         )
-        self._global_tools[name] = {"tool": lc_tool, "group": group, "func": func}
+        self._global_tools[resolved_name] = {"tool": lc_tool, "group": group, "func": func}
         return lc_tool
 
 
@@ -110,15 +127,20 @@ def tool(func: Callable) -> Callable: ...
 
 
 @overload
-def tool(*, group: str = "", group_description: str = "") -> Callable[[Callable], Callable]: ...
+def tool(*, name: str = "", group: str = "", group_description: str = "") -> Callable[[Callable], Callable]: ...
 
 
-def tool(func: Callable | None = None, *, group: str = "", group_description: str = ""):
+def tool(func: Callable | None = None, *, name: str = "", group: str = "", group_description: str = ""):
     """Decorator to register a function as an agent tool.
+
+    Name resolution priority: name > group__func_name > func_name.
 
     Usage:
         @tool
         def my_func(...): ...
+
+        @tool(name="ask_user")
+        def ask_user_impl(...): ...
 
         @tool(group="file_mgmt", group_description="文件管理")
         def my_func(...): ...
@@ -126,7 +148,7 @@ def tool(func: Callable | None = None, *, group: str = "", group_description: st
     registry = ToolRegistry()
 
     def decorator(fn: Callable) -> Callable:
-        registry.register(fn, group=group, group_description=group_description)
+        registry.register(fn, group=group, group_description=group_description, name=name)
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):

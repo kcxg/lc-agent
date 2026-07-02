@@ -81,6 +81,7 @@ export interface ToolCall {
 export interface InterruptInfo {
   actionRequests: any[]
   reviewConfigs: any[]
+  data: any[]
 }
 
 export interface ReplayMessage {
@@ -360,6 +361,16 @@ export const useChatStore = defineStore('chat', () => {
           last.content += '<!--THINK_END-->'
         }
         if (!last.toolCalls) last.toolCalls = []
+
+        // If resuming from interrupt, reuse existing running tool card instead of creating duplicate
+        const existingRunning = last.toolCalls.find(
+          t => t.name === msg.name && t.status === 'running',
+        )
+        if (existingRunning) {
+          existingRunning.startTime = Date.now()
+          return
+        }
+
         const tcIdx = last.toolCalls.length
         const tc: ToolCall = {
           name: msg.name || '',
@@ -396,6 +407,7 @@ export const useChatStore = defineStore('chat', () => {
       interrupt.value = {
         actionRequests: msg.action_requests || [],
         reviewConfigs: msg.review_configs || [],
+        data: msg.data || [],
       }
     })
 
@@ -404,16 +416,21 @@ export const useChatStore = defineStore('chat', () => {
       const last = messages.value[messages.value.length - 1]
       if (last) {
         last.isStreaming = false
-        if (last.usage && streamStartTime) {
-          last.usage.totalDuration = Date.now() - streamStartTime
-        }
         const usageData = (msg as any).usage as any[] | undefined
-        if (usageData && usageData.length > 0 && last.usage) {
-          mergeFinalUsageRounds(last.usage.rounds, usageData)
+        if (usageData && usageData.length > 0) {
+          if (last.usage && streamStartTime) {
+            last.usage.totalDuration = Date.now() - streamStartTime
+          }
+          if (last.usage) {
+            mergeFinalUsageRounds(last.usage.rounds, usageData)
+          }
         }
-        last.httpTraces = normalizeHttpTraces((msg as any).http_traces || (msg as any).httpTraces)
-        if (last.httpTraces?.length) {
-          last.content = ensureHttpMarkers(last.content, last.httpTraces.length)
+        const rawTraces = (msg as any).http_traces || (msg as any).httpTraces
+        if (rawTraces) {
+          last.httpTraces = normalizeHttpTraces(rawTraces)
+          if (last.httpTraces?.length) {
+            last.content = ensureHttpMarkers(last.content, last.httpTraces.length)
+          }
         }
       }
     })
@@ -508,6 +525,16 @@ export const useChatStore = defineStore('chat', () => {
     interrupt.value = null
   }
 
+  function resumeInterrupt(resumeValue: any, presetId: string = '__chat__', model?: string) {
+    ws.value?.sendInterruptResume(resumeValue, presetId, model)
+    interrupt.value = null
+    isStreaming.value = true
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant') {
+      last.isStreaming = true
+    }
+  }
+
   async function loadMessages(sessionId: string) {
     try {
       const rawMessages = await api.getSessionMessages(sessionId)
@@ -557,6 +584,7 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     stopGeneration,
     respondToInterrupt,
+    resumeInterrupt,
     clearMessages,
     truncateAfterMessage,
     disconnect,

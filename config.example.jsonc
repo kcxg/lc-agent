@@ -82,7 +82,7 @@
             "enabled": true,
             // 用于生成摘要的模型 ID（留空则使用当前 agent 的模型）
             // 建议使用便宜/快速的模型，如 deepseek-chat
-            "model": "",
+            "default_model": "",
             // 触发阈值：达到此阈值时开始压缩
             // 格式: ["fraction", 0.85] — 达到上下文窗口的 85% 时触发
             //       ["tokens", 50000]  — 达到 50000 tokens 时触发

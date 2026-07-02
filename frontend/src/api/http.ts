@@ -73,4 +73,8 @@ export const api = {
     fetchApi<void>(`/sessions/${id}`, { method: 'DELETE' }),
   getSessionMessages: (id: string) =>
     fetchApi<any[]>(`/sessions/${id}/messages`),
+
+  getSummarization: () => fetchApi<{ enabled: boolean; default_model: string; trigger: any; keep: any }>('/settings/summarization'),
+  updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>
+    fetchApi<any>('/settings/summarization', { method: 'PUT', body: JSON.stringify(data) }),
 }

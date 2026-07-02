@@ -55,6 +55,9 @@ expectIncludes('AppHeader.vue', files.header, 'aria-label="打开工具和状态
 expectIncludes('AppHeader.vue', files.header, 'mobile-sidebar-btn')
 expectIncludes('AppHeader.vue', files.header, 'mobile-tools-btn')
 expectIncludes('AppHeader.vue', files.header, 'agent-select')
+expectMatch('AppHeader.vue', files.header, /\.agent-select\s*\{[\s\S]*width:\s*280px/, '顶部智能体选择框应放大到更舒展的桌面宽度')
+expectMatch('AppHeader.vue', files.header, /\.agent-select :deep\(\.el-select__wrapper\)\s*\{[\s\S]*min-height:\s*38px[\s\S]*border-radius:\s*14px/, '顶部智能体选择框应具备更高的胶囊高度和圆角')
+expectMatch('AppHeader.vue', files.header, /\.agent-select :deep\(\.el-select__wrapper\)[\s\S]*box-shadow:/, '顶部智能体选择框应具备更明显的层次阴影')
 expectMatch('AppHeader.vue', files.header, /@media\s*\(max-width:\s*900px\)/, '缺少顶部栏移动端断点')
 expectMatch('AppHeader.vue', files.header, /\.app-header\s*\{[\s\S]*flex-shrink:\s*0/, '顶部栏应固定占位，不能被主内容滚动挤出')
 

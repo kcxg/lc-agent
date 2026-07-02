@@ -78,7 +78,7 @@ class AgentEngine:
                 default_model=default_model,
                 allowed_tool_groups=None,
                 allowed_mcp_servers=None,
-                allowed_skills=None,
+                allowed_skills=[],
                 source="builtin",
                 default_enabled=False,
             ),
@@ -222,7 +222,7 @@ class AgentEngine:
         if not summ_conf.get("enabled", True):
             return []
 
-        summ_model_id = summ_conf.get("model", "") or preset.default_model
+        summ_model_id = summ_conf.get("default_model", "") or preset.default_model
         model_info = self._find_model(summ_model_id)
         llm = self._create_llm(model_info, summ_model_id)
 
@@ -282,6 +282,11 @@ class AgentEngine:
         for key in keys:
             self._agents.pop(key, None)
             self._agent_mcp_gen.pop(key, None)
+
+    def invalidate_all_agents(self) -> None:
+        """Remove all cached agents, forcing rebuild on next use."""
+        self._agents.clear()
+        self._agent_mcp_gen.clear()
 
     def _resolve_preset_for_model(self, preset_id: str, model_id: str = "") -> AgentPreset:
         preset = self._resolve_preset(preset_id)

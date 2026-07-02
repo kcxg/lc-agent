@@ -45,7 +45,7 @@ lc_agent/
 ├── __init__.py          # 公开 API: LcAgentApp, load_config, tool, ToolRegistry
 ├── app.py               # LcAgentApp 主编排器
 ├── main.py              # CLI 入口 (lc-agent 命令)
-├── desktop.py           # pywebview 桌面模式
+├── desktop.py           # pywebview 桌面客户端（独立启动）
 ├── config/
 │   ├── loader.py        # JSONC 配置加载 + {env:VAR} 替换
 │   └── schema.py        # Pydantic 配置 schema
@@ -270,8 +270,14 @@ import bfzs.tools.file_tools  # 导入 = 注册
 - `{env:VAR}` 环境变量替换
 - `.env` 文件加载
 
-**重要：** 框架新增任何配置项，必须同步更新 `D:\codes\lc-agent\config.example.jsonc`。
-这是用户复制配置的唯一参考，不更新则用户不知道怎么配置新功能。
+**重要：** 修改或新增配置项时，必须同时更新以下两个文件：
+1. `D:\codes\lc-agent\config.example.jsonc` — 框架示例配置，用户复制的唯一参考
+2. `D:\codes\lc-agent-bfzs\config.jsonc` — 演示项目的实际配置
+
+改了一个漏了另一个会导致不一致。字段重命名、删除、新增都要两边同步。
+
+**模型字段命名规范：** 如果该模型可以在网页 UI 中动态切换/覆盖，配置中应命名为 `default_model`（表示"默认值，可被用户在运行时覆盖"）。
+例如 `agent.default_model`、`agent.summarization.default_model` 都可以在右侧面板修改，所以叫 `default_model`。
 
 ### 6.3 三值权限过滤
 
@@ -427,7 +433,7 @@ from lc_agent import LcAgentApp, load_config, tool, ToolRegistry
 config = load_config(config_path="./config.jsonc")
 app = LcAgentApp(config, host="127.0.0.1", port=8001)
 app.add_agent(name, graph, description)
-app.run(desktop=True)
+app.run()
 
 # 工具注册
 @tool(group="ascii_group_name", group_description="中文显示名")

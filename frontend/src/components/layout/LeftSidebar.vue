@@ -256,41 +256,42 @@ function toggleSessionMenu(id: string) {
   openMenuSessionId.value = openMenuSessionId.value === id ? null : id
 }
 
-async function handleTogglePinned(session: Session) {
-  await sessionsStore.setPinned(session.id, !session.is_pinned)
+async function handleRename(id: string, title: string) {
   openMenuSessionId.value = null
-}
+  const result = await ElMessageBox.prompt('输入新的会话标题', '重命名会话', {
+    inputValue: title,
+    confirmButtonText: '保存',
+    cancelButtonText: '取消',
+  }).catch(() => null)
 
-async function handleRename(id: string, currentTitle: string) {
-  try {
-    const { value } = await ElMessageBox.prompt('输入新标题', '重命名', {
-      inputValue: currentTitle,
-      inputValidator: (v) => !!v?.trim() || '标题不能为空',
-    })
-    if (value?.trim()) {
-      await sessionsStore.updateTitle(id, value.trim())
-    }
-  } catch {
-  } finally {
-    openMenuSessionId.value = null
-  }
+  if (!result) return
+  const nextTitle = result.value.trim()
+  if (!nextTitle) return
+  await sessionsStore.updateTitle(id, nextTitle)
 }
 
 async function handleDelete(id: string) {
-  const wasCurrent = id === sessionsStore.currentSessionId
-  await sessionsStore.deleteSession(id)
   openMenuSessionId.value = null
-  if (wasCurrent) {
-    if (sessionsStore.sessions.length > 0) {
-      emit('switchSession', sessionsStore.sessions[0].id)
-    } else {
-      emit('newChat')
-    }
-  }
+  const confirmed = await ElMessageBox.confirm('确认删除该会话吗？', '删除会话', {
+    type: 'warning',
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+  }).catch(() => null)
+
+  if (!confirmed) return
+  await sessionsStore.deleteSession(id)
 }
 
-function handleDocumentClick() {
+async function handleTogglePinned(session: Session) {
   openMenuSessionId.value = null
+  await sessionsStore.setPinned(session.id, !session.is_pinned)
+}
+
+function handleDocumentClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  if (!target?.closest('.session-item-meta')) {
+    openMenuSessionId.value = null
+  }
 }
 
 onMounted(() => {
