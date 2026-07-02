@@ -262,6 +262,7 @@ async function handleRename(id: string, title: string) {
     inputValue: title,
     confirmButtonText: '保存',
     cancelButtonText: '取消',
+    appendTo: document.body,
   }).catch(() => null)
 
   if (!result) return
