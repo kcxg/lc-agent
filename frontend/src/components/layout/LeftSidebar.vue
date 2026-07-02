@@ -257,13 +257,12 @@ function toggleSessionMenu(id: string) {
 }
 
 async function handleRename(id: string, title: string) {
-  openMenuSessionId.value = null
   const result = await ElMessageBox.prompt('输入新的会话标题', '重命名会话', {
     inputValue: title,
     confirmButtonText: '保存',
     cancelButtonText: '取消',
-    appendTo: document.body,
   }).catch(() => null)
+  openMenuSessionId.value = null
 
   if (!result) return
   const nextTitle = result.value.trim()
@@ -272,13 +271,12 @@ async function handleRename(id: string, title: string) {
 }
 
 async function handleDelete(id: string) {
-  openMenuSessionId.value = null
   const confirmed = await ElMessageBox.confirm('确认删除该会话吗？', '删除会话', {
     type: 'warning',
     confirmButtonText: '删除',
     cancelButtonText: '取消',
-    appendTo: document.body,
   }).catch(() => null)
+  openMenuSessionId.value = null
 
   if (!confirmed) return
   await sessionsStore.deleteSession(id)
