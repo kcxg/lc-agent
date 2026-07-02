@@ -276,6 +276,7 @@ async function handleDelete(id: string) {
     type: 'warning',
     confirmButtonText: '删除',
     cancelButtonText: '取消',
+    appendTo: document.body,
   }).catch(() => null)
 
   if (!confirmed) return
