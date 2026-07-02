@@ -96,11 +96,27 @@
       </div>
     </div>
   </aside>
+
+  <el-dialog v-model="deleteDialogVisible" title="删除会话" width="400px" :close-on-click-modal="false">
+    <p>确认删除该会话吗？</p>
+    <template #footer>
+      <el-button @click="deleteDialogVisible = false">取消</el-button>
+      <el-button type="danger" @click="confirmDelete">删除</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="renameDialogVisible" title="重命名会话" width="400px" :close-on-click-modal="false" @opened="onRenameDialogOpened">
+    <el-input ref="renameInputRef" v-model="renameValue" placeholder="输入新的会话标题" @keyup.enter="confirmRename" />
+    <template #footer>
+      <el-button @click="renameDialogVisible = false">取消</el-button>
+      <el-button type="primary" @click="confirmRename">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { InputInstance } from 'element-plus'
 import { useSessionsStore, type Session } from '@/stores/sessions'
 import { useAgentsStore } from '@/stores/agents'
 
@@ -108,6 +124,14 @@ const props = defineProps<{ collapsed: boolean }>()
 
 const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()
+
+const deleteDialogVisible = ref(false)
+const deleteTargetId = ref<string | null>(null)
+
+const renameDialogVisible = ref(false)
+const renameTargetId = ref<string | null>(null)
+const renameValue = ref('')
+const renameInputRef = ref<InputInstance | null>(null)
 const emit = defineEmits<{ newChat: []; switchSession: [id: string]; toggleCollapse: [] }>()
 
 const DEFAULT_VISIBLE_COUNT = 5
@@ -256,29 +280,37 @@ function toggleSessionMenu(id: string) {
   openMenuSessionId.value = openMenuSessionId.value === id ? null : id
 }
 
-async function handleRename(id: string, title: string) {
-  const result = await ElMessageBox.prompt('输入新的会话标题', '重命名会话', {
-    inputValue: title,
-    confirmButtonText: '保存',
-    cancelButtonText: '取消',
-  }).catch(() => null)
-  openMenuSessionId.value = null
+function handleRename(id: string, title: string) {
+  renameTargetId.value = id
+  renameValue.value = title
+  renameDialogVisible.value = true
+}
 
-  if (!result) return
-  const nextTitle = result.value.trim()
-  if (!nextTitle) return
+async function confirmRename() {
+  const id = renameTargetId.value
+  const nextTitle = renameValue.value.trim()
+  renameDialogVisible.value = false
+  openMenuSessionId.value = null
+  if (!id || !nextTitle) return
   await sessionsStore.updateTitle(id, nextTitle)
 }
 
-async function handleDelete(id: string) {
-  const confirmed = await ElMessageBox.confirm('确认删除该会话吗？', '删除会话', {
-    type: 'warning',
-    confirmButtonText: '删除',
-    cancelButtonText: '取消',
-  }).catch(() => null)
-  openMenuSessionId.value = null
+function onRenameDialogOpened() {
+  nextTick(() => {
+    renameInputRef.value?.focus()
+  })
+}
 
-  if (!confirmed) return
+function handleDelete(id: string) {
+  deleteTargetId.value = id
+  deleteDialogVisible.value = true
+}
+
+async function confirmDelete() {
+  const id = deleteTargetId.value
+  deleteDialogVisible.value = false
+  openMenuSessionId.value = null
+  if (!id) return
   await sessionsStore.deleteSession(id)
 }
 
