@@ -1,9 +1,6 @@
 <template>
   <div class="chat-view">
     <div class="messages-container">
-      <div v-if="messages.length > 0" class="chat-actions-bar">
-        <CopyRoundsButton :messages="messages" :model-name="sessionModel" />
-      </div>
       <div v-if="messages.length === 0 && !isLoading" class="chat-empty-state">
         <div class="chat-empty-accent" aria-hidden="true" />
         <Welcome
@@ -429,12 +426,6 @@ onBeforeUnmount(() => {
   flex-direction: column;
   overflow: hidden;
   height: 100%;
-}
-
-.chat-actions-bar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 4px;
 }
 
 .messages-container {
