@@ -276,6 +276,22 @@ def categorize_error(error: Exception) -> dict:
             "error_code": "CONTENT_FILTERED",
         }
 
+    if any(k in msg_lower for k in ("insufficient", "quota", "balance", "billing", "payment")):
+        return {
+            "title": "账户配额不足",
+            "detail": "API 账户配额或余额不足，无法继续请求。",
+            "suggestions": ["检查 API 账户余额", "联系服务商增加配额"],
+            "error_code": "INSUFFICIENT_QUOTA",
+        }
+
+    if any(k in msg_lower for k in ("500", "502", "503", "504", "service unavailable", "internal server error")):
+        return {
+            "title": "AI 模型服务暂时不可用",
+            "detail": "AI 模型服务端返回错误，可能是服务负载过高或正在维护。",
+            "suggestions": ["等待几秒后重试", "如持续不可用，联系服务商或管理员"],
+            "error_code": "SERVER_UNAVAILABLE",
+        }
+
     return {
         "title": "AI 模型接口请求失败",
         "detail": msg,

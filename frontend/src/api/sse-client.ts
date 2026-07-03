@@ -97,6 +97,8 @@ export class ChatSseClient {
     this._abortController = null
     this._streaming = false
 
+    this.emit('cancelled', { type: 'cancelled' })
+
     try {
       await fetch(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`, {
         method: 'POST',
@@ -144,7 +146,8 @@ export class ChatSseClient {
       this._abortController?.abort()
     }
 
-    this._abortController = new AbortController()
+    const controller = new AbortController()
+    this._abortController = controller
     this._streaming = true
 
     const url = `${this.baseUrl}/api/threads/${this._threadId}/runs/stream`
@@ -154,7 +157,7 @@ export class ChatSseClient {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: this._abortController.signal,
+        signal: controller.signal,
       })
 
       if (!response.ok) {
@@ -165,11 +168,13 @@ export class ChatSseClient {
           detail: text,
           error_code: 'HTTP_ERROR',
         })
-        this._streaming = false
         return
       }
 
-      await this._consumeStream(response)
+      const receivedTerminal = await this._consumeStream(response)
+      if (!receivedTerminal && this._abortController === controller) {
+        this.emit('done', { type: 'done' })
+      }
     } catch (e: any) {
       if (e.name === 'AbortError') {
         return
@@ -181,15 +186,19 @@ export class ChatSseClient {
         error_code: 'NETWORK_ERROR',
       })
     } finally {
-      this._streaming = false
-      this._abortController = null
+      if (this._abortController === controller) {
+        this._streaming = false
+        this._abortController = null
+      }
     }
   }
 
-  private async _consumeStream(response: Response): Promise<void> {
+  private async _consumeStream(response: Response): Promise<boolean> {
     const reader = response.body!.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let receivedTerminal = false
+    const terminalTypes = new Set(['done', 'error', 'cancelled'])
 
     try {
       while (true) {
@@ -203,14 +212,15 @@ export class ChatSseClient {
 
         for (const evt of events.parsed) {
           this.emit(evt.type, evt)
+          if (terminalTypes.has(evt.type)) receivedTerminal = true
         }
       }
 
-      // Process any remaining buffer
       if (buffer.trim()) {
         const events = this._parseSSE(buffer + '\n\n')
         for (const evt of events.parsed) {
           this.emit(evt.type, evt)
+          if (terminalTypes.has(evt.type)) receivedTerminal = true
         }
       }
     } catch (e: any) {
@@ -218,6 +228,8 @@ export class ChatSseClient {
         throw e
       }
     }
+
+    return receivedTerminal
   }
 
   private _parseSSE(buffer: string): { parsed: SseMessage[]; remaining: string } {

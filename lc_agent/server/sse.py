@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/threads", tags=["chat-sse"])
 
 _cancel_flags: dict[str, bool] = {}
 _message_counts: dict[str, int] = {}
+_run_locks: dict[str, asyncio.Lock] = {}
 
 _engine: AgentEngine | None = None
 _db_url: str = "sqlite+aiosqlite:///./lc_agent_data.db"
@@ -58,9 +59,21 @@ class RunStreamRequest(BaseModel):
 # --- Endpoints ---
 
 
+def _get_lock(thread_id: str) -> asyncio.Lock:
+    if thread_id not in _run_locks:
+        _run_locks[thread_id] = asyncio.Lock()
+    return _run_locks[thread_id]
+
+
 @router.post("/{thread_id}/runs/stream")
 async def run_stream(thread_id: str, req: RunStreamRequest, request: Request):
     """Unified entry: send message or resume interrupt, returning SSE stream."""
+    lock = _get_lock(thread_id)
+    if lock.locked():
+        _cancel_flags[thread_id] = True
+        await asyncio.wait_for(lock.acquire(), timeout=10)
+        lock.release()
+
     if req.command is not None:
         return await _resume_stream(thread_id, req, request)
     return await _send_stream(thread_id, req, request)
@@ -106,6 +119,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
     content = req.input or ""
     preset_id = req.preset_id
     model_id = req.model
+    lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
 
     is_first = _message_counts.get(thread_id, 0) == 0
@@ -121,22 +135,23 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
     async def event_stream():
         nonlocal is_first
-        usage_rounds: list[dict] = []
-        round_start_time = time.time()
-        stream_start_time = time.time()
-        content_parts: list[str] = []
-        tool_calls: list[dict[str, Any]] = []
-        in_thinking = False
-        last_event_time = time.time()
-
-        if is_first:
-            preliminary_title = content[:30].strip()
-            yield stream_utils.format_sse_event("title_update", {
-                "thread_id": thread_id,
-                "title": preliminary_title,
-            })
-
+        await lock.acquire()
         try:
+            usage_rounds: list[dict] = []
+            round_start_time = time.time()
+            stream_start_time = time.time()
+            content_parts: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
+            in_thinking = False
+            last_event_time = time.time()
+
+            if is_first:
+                preliminary_title = content[:30].strip()
+                yield stream_utils.format_sse_event("title_update", {
+                    "thread_id": thread_id,
+                    "title": preliminary_title,
+                })
+
             stream_kwargs: dict[str, Any] = {}
             if model_id:
                 stream_kwargs["model_id"] = model_id
@@ -243,7 +258,11 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             traceback.print_exc()
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
+            error_info["message"] = str(e)
             yield stream_utils.format_sse_event("error", error_info)
+        finally:
+            lock.release()
+            _cancel_flags.pop(thread_id, None)
 
     return StreamingResponse(
         event_stream(),
@@ -261,22 +280,23 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     engine = _get_engine()
     preset_id = req.preset_id
     model_id = req.model
+    lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
 
     resume_value = req.command.get("resume", {}) if req.command else {}
 
     async def event_stream():
-        usage_rounds: list[dict] = []
-        round_start_time = time.time()
-        stream_start_time = time.time()
-        content_parts: list[str] = []
-        in_thinking = False
-        last_event_time = time.time()
-
-        existing_tool_calls, existing_trace_count = await persistence.load_resume_context(_db_url, thread_id)
-        tool_calls: list[dict[str, Any]] = list(existing_tool_calls)
-
+        await lock.acquire()
         try:
+            usage_rounds: list[dict] = []
+            round_start_time = time.time()
+            stream_start_time = time.time()
+            content_parts: list[str] = []
+            in_thinking = False
+            last_event_time = time.time()
+
+            existing_tool_calls, existing_trace_count = await persistence.load_resume_context(_db_url, thread_id)
+            tool_calls: list[dict[str, Any]] = list(existing_tool_calls)
             from langgraph.types import Command
 
             agent = engine._get_or_build_agent(preset_id, model_id)
@@ -380,7 +400,11 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             traceback.print_exc()
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
+            error_info["message"] = str(e)
             yield stream_utils.format_sse_event("error", error_info)
+        finally:
+            lock.release()
+            _cancel_flags.pop(thread_id, None)
 
     return StreamingResponse(
         event_stream(),
