@@ -70,8 +70,25 @@ async def run_stream(thread_id: str, req: RunStreamRequest, request: Request):
     lock = _get_lock(thread_id)
     if lock.locked():
         _cancel_flags[thread_id] = True
-        await asyncio.wait_for(lock.acquire(), timeout=10)
-        lock.release()
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=10)
+            lock.release()
+        except asyncio.TimeoutError:
+            async def timeout_stream():
+                yield stream_utils.format_sse_event("error", {
+                    "title": "请求超时",
+                    "detail": "等待前一个请求完成超时，请稍后重试。",
+                    "suggestions": ["稍后再次发送消息"],
+                    "error_code": "LOCK_TIMEOUT",
+                    "tech_detail": "Timed out waiting for previous run to complete",
+                    "message": "Timed out waiting for previous run to complete",
+                })
+
+            return StreamingResponse(
+                timeout_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+            )
 
     if req.command is not None:
         return await _resume_stream(thread_id, req, request)
@@ -121,17 +138,32 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
     lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
 
-    msg_count = await persistence.get_session_message_count(_db_url, thread_id)
-    is_first = msg_count == 0
-    if is_first:
-        preliminary_title = content[:30].strip()
-        await persistence.ensure_session(_db_url, thread_id, preliminary_title, preset_id, model_id)
+    try:
+        msg_count = await persistence.get_session_message_count(_db_url, thread_id)
+        is_first = msg_count == 0
+        if is_first:
+            preliminary_title = content[:30].strip()
+            await persistence.ensure_session(_db_url, thread_id, preliminary_title, preset_id, model_id)
 
-    if req.replace_from_message_id:
-        await persistence.truncate_from_message(_db_url, thread_id, req.replace_from_message_id)
-        await engine.reset_thread(thread_id)
+        if req.replace_from_message_id:
+            await persistence.truncate_from_message(_db_url, thread_id, req.replace_from_message_id)
+            await engine.reset_thread(thread_id)
 
-    await persistence.save_ui_message(_db_url, thread_id, "user", content)
+        await persistence.save_ui_message(_db_url, thread_id, "user", content)
+    except Exception as e:
+        traceback.print_exc()
+
+        async def error_stream():
+            error_info = stream_utils.categorize_error(e)
+            error_info["tech_detail"] = str(e)
+            error_info["message"] = str(e)
+            yield stream_utils.format_sse_event("error", error_info)
+
+        return StreamingResponse(
+            error_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
 
     async def event_stream():
         nonlocal is_first

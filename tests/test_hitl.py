@@ -2,7 +2,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.models import AgentPreset
-from lc_agent.server.websocket import ChatWebSocketHandler
 from lc_agent.tools.registry import ToolRegistry, tool
 
 
@@ -63,32 +62,3 @@ def test_build_agent_without_dangerous_tools(hitl_engine):
     assert agent is not None
 
 
-@pytest.fixture
-def ws_handler():
-    engine = MagicMock()
-    return ChatWebSocketHandler(engine)
-
-
-@pytest.mark.asyncio
-async def test_interrupt_response_resumes_agent(ws_handler):
-    """interrupt_response should invoke graph with Command(resume=...)."""
-    ws = AsyncMock()
-
-    mock_agent = AsyncMock()
-    mock_agent.ainvoke = AsyncMock(return_value={"messages": []})
-
-    async def fake_stream_after_resume(*a, **kw):
-        yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="Approved!")}}
-
-    mock_agent.astream_events = fake_stream_after_resume
-    ws_handler.engine._agents = {"test-preset": mock_agent}
-
-    data = {
-        "type": "interrupt_response",
-        "approved": True,
-        "thread_id": "thread-1",
-        "preset_id": "test-preset",
-    }
-    await ws_handler.handle_message(ws, "thread-1", data)
-
-    assert ws.send_json.called

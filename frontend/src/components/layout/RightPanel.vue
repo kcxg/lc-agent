@@ -172,15 +172,9 @@
         </div>
       </div>
 
-      <div class="panel-section status-section">
-        <h4>状态</h4>
+      <div v-if="chatStore.threadId" class="panel-section status-section">
+        <h4>会话</h4>
         <div class="status-item">
-          <span>连接:</span>
-          <el-tag :type="chatStore.isConnected ? 'success' : 'warning'" size="small">
-            {{ chatStore.isConnected ? '已连接' : '待连接' }}
-          </el-tag>
-        </div>
-        <div v-if="chatStore.threadId" class="status-item">
           <span>Thread:</span>
           <code>{{ chatStore.threadId.slice(0, 8) }}...</code>
         </div>

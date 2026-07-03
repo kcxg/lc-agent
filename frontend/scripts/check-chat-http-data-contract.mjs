@@ -6,7 +6,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (relativePath) => readFileSync(join(root, relativePath), 'utf8')
 
 const chatStore = read('src/stores/chat.ts')
-const websocket = read('src/api/websocket.ts')
+const sseClient = read('src/api/sse-client.ts')
 const chatView = read('src/views/ChatView.vue')
 const failures = []
 
@@ -19,8 +19,8 @@ expectIncludes('chat.ts', chatStore, 'httpTraces?: HttpTrace[]')
 expectIncludes('chat.ts', chatStore, 'function normalizeHttpTrace')
 expectIncludes('chat.ts', chatStore, 'function normalizeHttpTraces')
 expectIncludes('chat.ts', chatStore, 'normalizeHttpTraces(msg.http_traces || msg.httpTraces)')
-expectIncludes('chat.ts', chatStore, 'last.httpTraces = normalizeHttpTraces((msg as any).http_traces || (msg as any).httpTraces)')
-expectIncludes('websocket.ts', websocket, 'http_traces?: any[]')
+expectIncludes('chat.ts', chatStore, '(msg as any).http_traces || (msg as any).httpTraces')
+expectIncludes('sse-client.ts', sseClient, 'http_traces?: any[]')
 
 if (chatView.includes('buildRoundHttpTraceMap')) {
   failures.push('ChatView.vue 不应再包含 buildRoundHttpTraceMap（已改为 inline block）')

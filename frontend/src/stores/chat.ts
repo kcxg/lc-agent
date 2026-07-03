@@ -461,7 +461,7 @@ export const useChatStore = defineStore('chat', () => {
             }
           }
         }
-        const rawTraces = msg.http_traces
+        const rawTraces = (msg as any).http_traces || (msg as any).httpTraces
         if (rawTraces) {
           const newTraces = normalizeHttpTraces(rawTraces) || []
           if (isResume && newTraces.length) {
