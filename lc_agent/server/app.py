@@ -18,6 +18,7 @@ from lc_agent.server.routes.sessions import router as sessions_router
 from lc_agent.server.routes.skills import router as skills_router
 from lc_agent.server.routes.mcp import router as mcp_router
 from lc_agent.server.routes.settings import router as settings_router
+from lc_agent.server.sse import router as sse_router
 
 
 def create_app(config: dict, lifespan=None) -> FastAPI:
@@ -48,12 +49,13 @@ def create_app(config: dict, lifespan=None) -> FastAPI:
     app.include_router(skills_router, prefix="/api")
     app.include_router(mcp_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")
+    app.include_router(sse_router)
 
     return app
 
 
 def mount_static_files(app: FastAPI):
-    """Mount static files AFTER WebSocket routes are registered."""
+    """Mount static files AFTER API routes are registered."""
     web_dist = Path(__file__).parent.parent / "web" / "dist"
     if web_dist.exists():
         app.mount("/", StaticFiles(directory=str(web_dist), html=True), name="frontend")

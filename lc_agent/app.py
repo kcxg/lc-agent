@@ -13,6 +13,7 @@ from lc_agent.core.engine import AgentEngine
 from lc_agent.db.engine import init_db
 from lc_agent.mcp.manager import McpManager
 from lc_agent.server.app import create_app, mount_static_files
+from lc_agent.server import sse as sse_module
 from lc_agent.server.websocket import ChatWebSocketHandler
 from lc_agent.skills.filtered_loader import FilteredSkillLoader
 
@@ -46,6 +47,7 @@ class LcAgentApp:
         self.engine._skills_toolkit = self.skills_toolkit
         self.engine._mcp_manager = self.mcp_manager
         self.fastapi_app.state.engine = self.engine
+        sse_module.configure(self.engine, self._db_url)
         self._ws_handler = ChatWebSocketHandler(self.engine, db_url=self._db_url)
         self._setup_websocket_route()
         mount_static_files(self.fastapi_app)
