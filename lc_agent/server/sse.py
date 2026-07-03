@@ -24,7 +24,6 @@ from lc_agent.server import persistence, stream_utils
 router = APIRouter(prefix="/api/threads", tags=["chat-sse"])
 
 _cancel_flags: dict[str, bool] = {}
-_message_counts: dict[str, int] = {}
 _run_locks: dict[str, asyncio.Lock] = {}
 
 _engine: AgentEngine | None = None
@@ -122,7 +121,8 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
     lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
 
-    is_first = _message_counts.get(thread_id, 0) == 0
+    msg_count = await persistence.get_session_message_count(_db_url, thread_id)
+    is_first = msg_count == 0
     if is_first:
         preliminary_title = content[:30].strip()
         await persistence.ensure_session(_db_url, thread_id, preliminary_title, preset_id, model_id)
@@ -248,7 +248,6 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
             yield stream_utils.format_sse_event("done", done_payload)
 
-            _message_counts[thread_id] = _message_counts.get(thread_id, 0) + 1
             asyncio.create_task(persistence.increment_session_message_count(_db_url, thread_id))
 
             if is_first:

@@ -261,7 +261,7 @@ export interface TodoItem {
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
   const isStreaming = ref(false)
-  const isConnected = ref(true)
+  const isConnected = computed(() => !!threadId.value)
   const threadId = ref<string | null>(null)
   const interrupt = ref<InterruptInfo | null>(null)
   let sseClient: ChatSseClient | null = null
@@ -474,6 +474,12 @@ export const useChatStore = defineStore('chat', () => {
           }
         }
       }
+      if (threadId.value) {
+        setTimeout(() => {
+          const sessionsStore = useSessionsStore()
+          sessionsStore.refreshSessionTitle(threadId.value!)
+        }, 3000)
+      }
     })
 
     client.on('cancelled', () => {
@@ -530,7 +536,6 @@ export const useChatStore = defineStore('chat', () => {
       client.setThreadId(existingThreadId)
       threadId.value = existingThreadId
     }
-    isConnected.value = true
   }
 
   async function sendMessage(
@@ -621,7 +626,6 @@ export const useChatStore = defineStore('chat', () => {
     sseClient?.disconnect()
     sseClient = null
     errorMessage.value = null
-    isConnected.value = false
     isStreaming.value = false
     threadId.value = null
     todos.value = []

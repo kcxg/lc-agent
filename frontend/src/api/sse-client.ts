@@ -144,6 +144,13 @@ export class ChatSseClient {
     if (this._streaming) {
       console.warn('[SSE] Already streaming, aborting previous')
       this._abortController?.abort()
+      if (this._threadId) {
+        fetch(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }).catch(() => {})
+      }
     }
 
     const controller = new AbortController()

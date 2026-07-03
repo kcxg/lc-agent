@@ -7,6 +7,25 @@ no dependency on the WebSocket handler class.
 from typing import Any
 
 
+async def get_session_message_count(db_url: str, thread_id: str) -> int:
+    """Get the current message count for a session. Returns 0 if not found."""
+    try:
+        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.repository import SessionRepository
+
+        session = get_async_session(db_url)
+        try:
+            repo = SessionRepository(session)
+            existing = await repo.get_by_id(thread_id)
+            if existing is None:
+                return 0
+            return existing.message_count or 0
+        finally:
+            await session.close()
+    except Exception:
+        return 0
+
+
 async def ensure_session(
     db_url: str,
     thread_id: str,

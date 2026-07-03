@@ -139,6 +139,19 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (sess) sess.title = title
   }
 
+  async function refreshSessionTitle(id: string) {
+    try {
+      const allSessions = await api.getSessions()
+      const fresh = allSessions.find((s: any) => s.id === id)
+      if (fresh) {
+        const sess = sessions.value.find(s => s.id === id)
+        if (sess && fresh.title && fresh.title !== sess.title) {
+          sess.title = fresh.title
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
   async function updateModel(id: string, model: string) {
     const sess = sessions.value.find(s => s.id === id)
     if (sess) sess.model = model
@@ -196,5 +209,5 @@ export const useSessionsStore = defineStore('sessions', () => {
     currentSessionId.value = id
   }
 
-  return { sessions, currentSessionId, currentSession, groupedByAgent, init, createSession, createLocalSession, ensureLocalSession, persistSession, isLocalSession, deleteSession, updateTitle, updateTitleLocal, updateModel, updateModelLocal, setPinned, selectSession }
+  return { sessions, currentSessionId, currentSession, groupedByAgent, init, createSession, createLocalSession, ensureLocalSession, persistSession, isLocalSession, deleteSession, updateTitle, updateTitleLocal, refreshSessionTitle, updateModel, updateModelLocal, setPinned, selectSession }
 })
