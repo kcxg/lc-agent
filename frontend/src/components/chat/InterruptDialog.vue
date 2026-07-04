@@ -36,10 +36,18 @@
 
     <!-- 标准工具审批模式 -->
     <template v-else>
-      <div v-for="(action, idx) in interrupt?.actionRequests ?? []" :key="idx" class="action-item">
+      <div v-for="(action, idx) in allActions" :key="idx" class="action-item" :class="{ compact: !showDetails }">
         <p><strong>工具:</strong> {{ action.name }}</p>
-        <pre class="action-args">{{ JSON.stringify(action.args ?? action.arguments, null, 2) }}</pre>
+        <pre v-if="showDetails" class="action-args">{{ JSON.stringify(action.args ?? action.arguments, null, 2) }}</pre>
       </div>
+      <el-button
+        link
+        :type="showDetails ? 'info' : 'primary'"
+        class="expand-btn"
+        @click="showDetails = !showDetails"
+      >
+        {{ showDetails ? '收起详情' : `展开详情（${allActions.length} 个工具调用）` }}
+      </el-button>
     </template>
 
     <template #footer>
@@ -84,7 +92,9 @@ const visible = computed({
 const freeInput = ref('')
 const selectedOption = ref<string | null>(null)
 const selectedOptions = ref<string[]>([])
+const showDetails = ref(false)
 
+const allActions = computed(() => props.interrupt?.actionRequests ?? [])
 const askPayload = computed<AskUserPayload | null>(() => {
   if (!props.interrupt) return null
   const data = props.interrupt.data
@@ -123,6 +133,7 @@ watch(() => props.interrupt, () => {
   freeInput.value = ''
   selectedOption.value = null
   selectedOptions.value = []
+  showDetails.value = false
 })
 
 function isOptionSelected(label: string): boolean {
@@ -237,6 +248,11 @@ function reject() {
   border-radius: 8px;
 }
 
+.action-item.compact {
+  margin-bottom: 6px;
+  padding: 8px 12px;
+}
+
 .action-args {
   background: var(--el-fill-color);
   padding: 10px;
@@ -246,5 +262,9 @@ function reject() {
   margin-top: 8px;
   border: 1px solid var(--el-border-color);
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.expand-btn {
+  margin-top: 4px;
 }
 </style>
