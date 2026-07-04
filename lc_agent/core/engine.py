@@ -303,8 +303,16 @@ class AgentEngine:
         return preset
 
     def _get_or_build_agent(self, preset_id: str, model_id: str = ""):
-        """Get cached agent or build a new one. Rebuilds if MCP state changed."""
-        preset = self._resolve_preset_for_model(preset_id, model_id)
+        """Get cached agent or build a new one. Rebuilds preset agents if MCP state changed."""
+        preset = self._resolve_preset(preset_id)
+        if preset.source == "code" or preset_id in self._custom_presets:
+            agent = self._agents.get(preset_id)
+            if agent is None:
+                raise ValueError(f"Code agent '{preset_id}' is registered without a graph")
+            return agent
+
+        if model_id and self._find_model(model_id):
+            preset = preset.model_copy(update={"default_model": model_id})
         cache_key = self._get_agent_cache_key(preset_id, model_id if preset.default_model == model_id else "")
         mcp_gen = getattr(self, '_mcp_generation', 0)
         cached = self._agents.get(cache_key)

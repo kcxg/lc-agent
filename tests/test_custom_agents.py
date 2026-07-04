@@ -140,3 +140,30 @@ def test_add_agent_marks_code_agent_as_self_contained():
     assert preset.allowed_mcp_servers == []
     assert preset.allowed_skills == []
     assert preset.default_enabled is False
+
+
+def test_code_agent_resolution_returns_registered_graph_without_rebuild(monkeypatch):
+    from lc_agent.app import LcAgentApp
+
+    class DummyGraph:
+        async def ainvoke(self, *args, **kwargs):
+            return {"messages": []}
+
+        async def astream_events(self, *args, **kwargs):
+            if False:
+                yield {}
+
+    app = LcAgentApp({"agent": {"default_model": "model-a"}})
+    graph = DummyGraph()
+    app.add_agent("research", graph, "Research graph")
+    app.engine._mcp_generation = 99
+
+    def fail_build_agent(*args, **kwargs):
+        raise AssertionError("code agents must not be rebuilt through build_agent")
+
+    monkeypatch.setattr(app.engine, "build_agent", fail_build_agent)
+
+    resolved = app.engine._get_or_build_agent("research", model_id="some-ui-model")
+
+    assert resolved is graph
+    assert "research::model::some-ui-model" not in app.engine._agents
