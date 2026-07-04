@@ -106,8 +106,12 @@ export const useToolsStore = defineStore('tools', () => {
 
   function syncModelWithAgentDefault() {
     const agentsStore = useAgentsStore()
+    if (agentsStore.currentAgent?.source === 'code') {
+      currentModel.value = ''
+      return
+    }
     const defaultModel = agentsStore.currentAgent?.default_model
-    if (defaultModel) {
+    if (defaultModel && defaultModel !== 'custom') {
       currentModel.value = defaultModel
       return
     }

@@ -28,6 +28,8 @@ export const useAgentsStore = defineStore('agents', () => {
 
   const isChatAgent = computed(() => currentAgentId.value === '__chat__')
 
+  const isCodeAgent = computed(() => currentAgent.value?.source === 'code')
+
   async function init() {
     try {
       agents.value = await api.getAgents()
@@ -80,6 +82,7 @@ export const useAgentsStore = defineStore('agents', () => {
     currentAgent,
     isBuiltin,
     isChatAgent,
+    isCodeAgent,
     init,
     createAgent,
     updateAgent,
