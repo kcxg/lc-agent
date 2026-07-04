@@ -244,10 +244,17 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                                 "id": getattr(intr, "id", None),
                             })
                     if all_interrupts:
-                        yield stream_utils.format_sse_event("interrupt", {
+                        interrupt_payload: dict[str, Any] = {
                             "message": "Tool requires approval",
                             "data": all_interrupts,
-                        })
+                        }
+                        first_value = all_interrupts[0].get("value")
+                        if isinstance(first_value, dict):
+                            if "action_requests" in first_value:
+                                interrupt_payload["action_requests"] = first_value["action_requests"]
+                            if "review_configs" in first_value:
+                                interrupt_payload["review_configs"] = first_value["review_configs"]
+                        yield stream_utils.format_sse_event("interrupt", interrupt_payload)
                         interrupt_sent = True
             except Exception as e:
                 print(f"[SSE] Failed to check interrupt state: {e}")
@@ -400,13 +407,25 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                                 "id": getattr(intr, "id", None),
                             })
                     if all_interrupts:
-                        yield stream_utils.format_sse_event("interrupt", {
+                        interrupt_payload: dict[str, Any] = {
                             "message": "Tool requires approval",
                             "data": all_interrupts,
-                        })
+                        }
+                        first_value = all_interrupts[0].get("value")
+                        if isinstance(first_value, dict):
+                            if "action_requests" in first_value:
+                                interrupt_payload["action_requests"] = first_value["action_requests"]
+                            if "review_configs" in first_value:
+                                interrupt_payload["review_configs"] = first_value["review_configs"]
+                        yield stream_utils.format_sse_event("interrupt", interrupt_payload)
                         interrupt_sent = True
             except Exception as e:
                 print(f"[SSE] Failed to check interrupt state after resume: {e}")
+
+            if isinstance(resume_value, dict):
+                permanently_allow = resume_value.get("permanently_allow")
+                if permanently_allow and hasattr(request.app.state, "permissions"):
+                    request.app.state.permissions.allow_tool(permanently_allow)
 
             http_traces = trace_collector.snapshot()
             done_payload: dict[str, Any] = {"is_resume": True}

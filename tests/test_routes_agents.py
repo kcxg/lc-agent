@@ -49,7 +49,6 @@ async def test_create_agent(app):
             "system_prompt": "You are a coding expert.",
             "default_model": "gpt-4",
             "allowed_tool_groups": ["filesystem"],
-            "dangerous_tools": ["filesystem__delete_file"],
         }
         resp = await client.post("/api/agents", json=payload)
         assert resp.status_code == 201

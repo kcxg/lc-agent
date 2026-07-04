@@ -142,6 +142,7 @@
       :interrupt="interrupt"
       @decide="handleInterruptDecide"
       @resume="handleInterruptResume"
+      @allow-permanently="handleAllowPermanently"
     />
 
     <CodeBlockModal
@@ -464,6 +465,10 @@ watch(errorMessage, (newError) => {
     showErrorNotification(newError)
   }
 })
+
+function handleAllowPermanently(toolName: string) {
+  chatStore.respondToInterrupt(true, agentsStore.currentAgentId, toolName)
+}
 
 function handleInterruptDecide(decision: { type: string }) {
   chatStore.respondToInterrupt(decision.type === 'approve', agentsStore.currentAgentId)

@@ -162,6 +162,10 @@
           </div>
           <p v-if="!toolsStore.skills.length" class="empty-hint">暂无 Skills</p>
         </div>
+
+        <div class="panel-section">
+          <PermissionsPanel />
+        </div>
       </template>
 
       <div v-if="agentsStore.isChatAgent" class="panel-section chat-only-hint">
@@ -201,6 +205,7 @@ import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
 import DetailModal from '@/components/panels/DetailModal.vue'
 import TodoList from '@/components/panels/TodoList.vue'
+import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()

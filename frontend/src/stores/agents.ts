@@ -10,7 +10,6 @@ export interface AgentPreset {
   allowed_tool_groups: string[] | null
   allowed_mcp_servers: string[] | null
   allowed_skills: string[] | null
-  dangerous_tools: string[]
   source: 'builtin' | 'code' | 'user'
   default_enabled: boolean
 }
