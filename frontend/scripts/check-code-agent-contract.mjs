@@ -94,4 +94,30 @@ assertNotContains(
   "editor must not claim code-agent runtime framework config is editable",
 )
 
+assertContains(
+  "src/views/ChatView.vue",
+  "const modelOverride = agentsStore.isCodeAgent ? '' : toolsStore.currentModel",
+  "chat send must clear model override for code agents",
+)
+assertContains(
+  "src/views/ChatView.vue",
+  "chatStore.sendMessage(content, agentsStore.currentAgentId, modelOverride, {",
+  "chat send must use code-agent-aware model override",
+)
+assertContains(
+  "src/App.vue",
+  "function getSessionModelForAgent(agentId: string): string {",
+  "app must centralize code-agent-aware session model selection",
+)
+assertContains(
+  "src/App.vue",
+  "if (agent?.source === 'code') return ''",
+  "app session model helper must return empty model for code agents",
+)
+assertContains(
+  "src/App.vue",
+  "const sessionModel = getSessionModelForAgent(agentId)",
+  "new chats must use code-agent-aware session model",
+)
+
 console.log('[code-agent-contract] store checks passed')

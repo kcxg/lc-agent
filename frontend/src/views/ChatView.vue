@@ -419,11 +419,12 @@ function parseSegments(content: string, toolCalls?: ToolCall[]): ContentSegment[
 function handleSend(content: string) {
   const editMessageId = editingMessageId.value
   const history = editMessageId ? getReplayHistory(editMessageId) : undefined
+  const modelOverride = agentsStore.isCodeAgent ? '' : toolsStore.currentModel
   if (editingMessageId.value) {
     chatStore.truncateAfterMessage(editingMessageId.value)
     cancelEdit()
   }
-  chatStore.sendMessage(content, agentsStore.currentAgentId, toolsStore.currentModel, {
+  chatStore.sendMessage(content, agentsStore.currentAgentId, modelOverride, {
     replaceFromMessageId: editMessageId || undefined,
     history,
   })

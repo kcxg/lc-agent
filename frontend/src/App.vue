@@ -111,20 +111,31 @@ async function initApp() {
   const routeSessionId = typeof sessionId === 'string' ? sessionId : ''
   const agentQuery = route.query.agent as string
   if (routeSessionId && agentQuery && agentsStore.agents.find(a => a.id === agentQuery)) {
-    const defaultModel = agentsStore.agents.find(a => a.id === agentQuery)?.default_model || ''
-    sessionsStore.ensureLocalSession(routeSessionId, agentQuery, defaultModel)
+    const sessionModel = getSessionModelForAgent(agentQuery)
+    sessionsStore.ensureLocalSession(routeSessionId, agentQuery, sessionModel)
     sessionsStore.selectSession(routeSessionId)
     if (agentQuery !== agentsStore.currentAgentId) {
       await agentsStore.selectAgent(agentQuery)
     }
-    if (defaultModel) {
-      toolsStore.setModel(defaultModel)
-    }
+    applySessionModel(sessionModel)
     return
   }
 
   if (agentQuery && agentsStore.agents.find(a => a.id === agentQuery)) {
     await agentsStore.selectAgent(agentQuery)
+  }
+}
+
+
+function getSessionModelForAgent(agentId: string): string {
+  const agent = agentsStore.agents.find(a => a.id === agentId)
+  if (agent?.source === 'code') return ''
+  return agent?.default_model || toolsStore.currentModel || ''
+}
+
+function applySessionModel(model: string) {
+  if (model) {
+    toolsStore.setModel(model)
   }
 }
 
@@ -165,22 +176,21 @@ async function restoreSession(sessionId: string) {
 
   const agentQuery = route.query.agent as string
   if (agentQuery && agentsStore.agents.find(a => a.id === agentQuery)) {
-    const defaultModel = agentsStore.agents.find(a => a.id === agentQuery)?.default_model || ''
-    sessionsStore.ensureLocalSession(sessionId, agentQuery, defaultModel)
+    const sessionModel = getSessionModelForAgent(agentQuery)
+    sessionsStore.ensureLocalSession(sessionId, agentQuery, sessionModel)
     sessionsStore.selectSession(sessionId)
     if (agentQuery !== agentsStore.currentAgentId) {
       await agentsStore.selectAgent(agentQuery)
     }
-    if (defaultModel) {
-      toolsStore.setModel(defaultModel)
-    }
+    applySessionModel(sessionModel)
     chatStore.clearMessages()
     chatStore.disconnect()
   }
 }
 
 async function handleNewChat() {
-  const session = sessionsStore.createLocalSession(agentsStore.currentAgentId, toolsStore.currentModel)
+  const sessionModel = getSessionModelForAgent(agentsStore.currentAgentId)
+  const session = sessionsStore.createLocalSession(agentsStore.currentAgentId, sessionModel)
   const sameRouteSession = route.params.sessionId === session.id
   chatStore.clearMessages()
   chatStore.disconnect()
@@ -221,11 +231,9 @@ async function handleSwitchSession(sessionId: string) {
 
 async function handleAgentChange(agentId: string) {
   await agentsStore.selectAgent(agentId)
-  const defaultModel = agentsStore.currentAgent?.default_model
-  if (defaultModel) {
-    toolsStore.setModel(defaultModel)
-  }
-  const session = sessionsStore.createLocalSession(agentId, toolsStore.currentModel)
+  const sessionModel = getSessionModelForAgent(agentId)
+  applySessionModel(sessionModel)
+  const session = sessionsStore.createLocalSession(agentId, sessionModel)
   chatStore.clearMessages()
   chatStore.disconnect()
   await router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: agentId } })
