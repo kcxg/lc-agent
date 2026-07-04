@@ -44,6 +44,18 @@ class AgentUpdateRequest(BaseModel):
 
 
 def _preset_to_dict(p: AgentPreset) -> dict:
+    if p.source == "code":
+        return {
+            "id": p.id,
+            "name": p.name,
+            "system_prompt": p.system_prompt,
+            "default_model": "custom",
+            "allowed_tool_groups": [],
+            "allowed_mcp_servers": [],
+            "allowed_skills": [],
+            "source": "code",
+            "default_enabled": False,
+        }
     return {
         "id": p.id,
         "name": p.name,
@@ -149,18 +161,10 @@ async def update_agent(
     update_data = body.model_dump(exclude_unset=True)
 
     if agent_id in engine._custom_presets:
-        allowed_fields = {"allowed_tool_groups", "allowed_mcp_servers", "allowed_skills"}
-        invalid_fields = set(update_data.keys()) - allowed_fields
-        if invalid_fields:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Code agent only allows modifying: {', '.join(allowed_fields)}. Got: {', '.join(invalid_fields)}"
-            )
-        existing = engine._custom_presets[agent_id]
-        updated = existing.model_copy(update=update_data)
-        engine._custom_presets[agent_id] = updated
-        engine.invalidate_agent_cache(agent_id, keep_exact=True)
-        return {**updated.model_dump(), "source": "code"}
+        raise HTTPException(
+            status_code=403,
+            detail="Code agents are defined by their registered graph and cannot be edited from the UI",
+        )
 
     stmt = select(AgentPresetDB).where(AgentPresetDB.id == agent_id)
     result = await db.execute(stmt)
@@ -233,6 +237,12 @@ def activate_agent(
     from lc_agent.tools.registry import ToolRegistry
 
     preset = engine._resolve_preset(agent_id)
+    if preset.source == "code" or agent_id in engine._custom_presets:
+        return {
+            "agent_id": agent_id,
+            "action": "none",
+            "reason": "code agent is controlled by its registered graph",
+        }
     manager = getattr(request.app.state, "mcp_manager", None)
     registry = ToolRegistry()
 

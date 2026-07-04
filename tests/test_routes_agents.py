@@ -117,7 +117,7 @@ async def test_update_agent_invalidates_model_variant_cache(app_and_headers):
 
 
 @pytest.mark.asyncio
-async def test_update_code_agent_invalidates_model_variant_cache(app_and_headers):
+async def test_update_code_agent_rejects_ui_framework_config_changes(app_and_headers):
     app, headers = app_and_headers
     graph = object()
     app.add_agent("code_agent_cache", graph)
@@ -130,10 +130,10 @@ async def test_update_code_agent_invalidates_model_variant_cache(app_and_headers
             "allowed_skills": [],
         }, headers=headers)
 
-    assert resp.status_code == 200
-    assert "code_agent_cache::model::gpt-4" not in app.engine._agents
-    assert "code_agent_cache::model::gpt-4" not in app.engine._agent_mcp_gen
-    assert app.engine._agents["code_agent_cache"] is graph
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Code agents are defined by their registered graph and cannot be edited from the UI"
+    assert "code_agent_cache" in app.engine._custom_presets
+    assert "code_agent_cache::model::gpt-4" in app.engine._agents
 
 
 @pytest.mark.asyncio
@@ -162,3 +162,61 @@ async def test_cannot_delete_default(app_and_headers):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.delete("/api/agents/__chat__", headers=headers)
         assert resp.status_code == 400
+
+
+def test_preset_to_dict_normalizes_code_agent_capabilities():
+    from lc_agent.core.models import AgentPreset
+    from lc_agent.server.routes.agents import _preset_to_dict
+
+    preset = AgentPreset(
+        id="research",
+        name="research",
+        system_prompt="Research graph",
+        default_model="custom",
+        source="code",
+        allowed_tool_groups=None,
+        allowed_mcp_servers=None,
+        allowed_skills=None,
+        default_enabled=True,
+    )
+
+    data = _preset_to_dict(preset)
+
+    assert data["source"] == "code"
+    assert data["default_model"] == "custom"
+    assert data["allowed_tool_groups"] == []
+    assert data["allowed_mcp_servers"] == []
+    assert data["allowed_skills"] == []
+    assert data["default_enabled"] is False
+
+
+def test_activate_code_agent_is_noop():
+    from types import SimpleNamespace
+    from lc_agent.core.engine import AgentEngine
+    from lc_agent.core.models import AgentPreset
+    from lc_agent.server.routes.agents import activate_agent
+
+    engine = AgentEngine({"agent": {"default_model": "model-a"}})
+    engine._custom_presets["research"] = AgentPreset(
+        id="research",
+        name="research",
+        system_prompt="Research graph",
+        default_model="custom",
+        source="code",
+        allowed_tool_groups=[],
+        allowed_mcp_servers=[],
+        allowed_skills=[],
+        default_enabled=False,
+    )
+    engine._agents["research"] = object()
+    engine._mcp_generation = 7
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(mcp_manager=None)))
+
+    result = activate_agent("research", request, engine, admin=SimpleNamespace(role="admin"))
+
+    assert result == {
+        "agent_id": "research",
+        "action": "none",
+        "reason": "code agent is controlled by its registered graph",
+    }
+    assert engine._mcp_generation == 7
