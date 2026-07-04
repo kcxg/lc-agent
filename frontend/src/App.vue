@@ -134,6 +134,7 @@ onMounted(async () => {
 
 watch(isPublicRoute, async (isPublic) => {
   if (!isPublic) {
+    appInitialized.value = false
     await initApp()
   }
 })

@@ -73,6 +73,7 @@ export interface ChatMessage {
   isStreaming?: boolean
   usage?: MessageUsage
   httpTraces?: HttpTrace[]
+  httpTracesCount?: number
 }
 
 export interface ToolCall {
@@ -196,9 +197,10 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
   }
 
   const httpTraces = normalizeHttpTraces(msg.http_traces || msg.httpTraces)
+  const httpTracesCount = msg.http_traces_count ?? msg.httpTracesCount ?? httpTraces?.length ?? 0
   let content = role === 'assistant' ? ensureToolMarkers(msg.content || '', toolCalls) : msg.content || ''
-  if (role === 'assistant' && httpTraces?.length) {
-    content = ensureHttpMarkers(content, httpTraces.length)
+  if (role === 'assistant' && httpTracesCount > 0) {
+    content = ensureHttpMarkers(content, httpTracesCount)
   }
 
   return {
@@ -209,6 +211,7 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     usage,
     httpTraces,
+    httpTracesCount,
   }
 }
 
@@ -608,14 +611,51 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  const totalMessageCount = ref(0)
+  const hasOlderMessages = computed(() => {
+    const loaded = messages.value.length
+    return totalMessageCount.value > loaded
+  })
+  const loadingOlder = ref(false)
+  let _currentOffset = 0
+
   async function loadMessages(sessionId: string) {
     try {
-      const rawMessages = await api.getSessionMessages(sessionId)
+      const resp = await api.getSessionMessages(sessionId)
+      const total = resp?.total ?? 0
+      const rawMessages = resp?.messages ?? resp
+      totalMessageCount.value = total
+      _currentOffset = resp?.offset ?? 0
+
       if (!rawMessages || rawMessages.length === 0) return
 
-      messages.value = normalizeHistoryMessages(rawMessages)
+      messages.value = normalizeHistoryMessages(
+        Array.isArray(rawMessages) ? rawMessages : []
+      )
     } catch (e) {
       console.error('[Chat] Failed to load messages:', e)
+    }
+  }
+
+  async function loadOlderMessages(sessionId: string) {
+    if (!hasOlderMessages.value || loadingOlder.value || _currentOffset <= 0) return
+    loadingOlder.value = true
+    try {
+      const newOffset = Math.max(0, _currentOffset - 50)
+      const newLimit = _currentOffset - newOffset
+      if (newLimit <= 0) return
+
+      const resp = await api.getSessionMessages(sessionId, { limit: newLimit, offset: newOffset })
+      const olderRaw = resp?.messages ?? []
+      if (olderRaw.length === 0) return
+
+      _currentOffset = newOffset
+      const olderNormalized = normalizeHistoryMessages(olderRaw)
+      messages.value = [...olderNormalized, ...messages.value]
+    } catch (e) {
+      console.error('[Chat] Failed to load older messages:', e)
+    } finally {
+      loadingOlder.value = false
     }
   }
 
@@ -655,8 +695,12 @@ export const useChatStore = defineStore('chat', () => {
     lastMessage,
     todos,
     errorMessage,
+    totalMessageCount,
+    hasOlderMessages,
+    loadingOlder,
     connect,
     loadMessages,
+    loadOlderMessages,
     sendMessage,
     stopGeneration,
     respondToInterrupt,

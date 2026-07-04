@@ -163,8 +163,10 @@ async def test_get_session_messages_returns_persisted_ui_metadata(app_and_header
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data[0]["role"] == "user"
-    assert data[1]["role"] == "assistant"
-    assert data[1]["content"] == "不错。\n<!--TOOL:0-->\n适合任务队列。"
-    assert data[1]["tool_calls"][0]["runId"] == "run-1"
-    assert data[1]["usage"]["rounds"][0]["total_tokens"] == 15
+    msgs = data["messages"]
+    assert data["total"] == 2
+    assert msgs[0]["role"] == "user"
+    assert msgs[1]["role"] == "assistant"
+    assert msgs[1]["content"] == "不错。\n<!--TOOL:0-->\n适合任务队列。"
+    assert msgs[1]["tool_calls"][0]["runId"] == "run-1"
+    assert msgs[1]["usage"]["rounds"][0]["total_tokens"] == 15

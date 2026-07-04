@@ -46,7 +46,10 @@
       </div>
     </div>
     <div class="header-right">
-      <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">新对话</button>
+      <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">
+        <el-icon class="mobile-btn-icon"><Plus /></el-icon>
+        <span class="mobile-btn-text">新对话</span>
+      </button>
       <span class="mobile-only">
         <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
       </span>
@@ -89,7 +92,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon, Menu, Setting, RefreshRight, MagicStick, UserFilled, ArrowDown } from '@element-plus/icons-vue'
+import { Sunny, Moon, Menu, Setting, RefreshRight, MagicStick, UserFilled, ArrowDown, Plus } from '@element-plus/icons-vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
 import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
 
@@ -535,7 +538,7 @@ defineEmits<{
   }
 
   .header-right {
-    gap: 4px;
+    gap: 0;
   }
 
   .agent-select {
@@ -563,17 +566,57 @@ defineEmits<{
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 34px;
-    padding: 0 10px;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    min-width: 28px;
+    padding: 0;
     white-space: nowrap;
     font-size: 12px;
     flex-shrink: 0;
-    border-radius: 999px;
+    border-radius: 50%;
+  }
+  .mobile-new-chat-btn .mobile-btn-text {
+    display: none;
+  }
+  .mobile-new-chat-btn .mobile-btn-icon {
+    font-size: 14px;
+  }
+
+  .user-dropdown-trigger .username-text,
+  .user-dropdown-trigger .dropdown-arrow {
+    display: none;
+  }
+  .user-dropdown-trigger {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .header-right :deep(.el-button.is-circle) {
+    width: 28px;
+    height: 28px;
+    --el-button-size: 28px;
+    margin: 0;
+  }
+
+  .header-right :deep(.el-button + .el-button) {
+    margin-left: 0;
   }
 
   :deep(.copy-rounds-trigger) {
-    min-height: 34px;
-    padding: 0 10px;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
   }
 }
 </style>

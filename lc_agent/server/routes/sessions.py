@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,39 +128,59 @@ async def get_session_messages(
     request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int | None = Query(default=None, ge=0),
 ):
-    """Retrieve message history for a session."""
+    """Retrieve message history for a session (paginated, without http_traces body).
+
+    When offset is not provided, returns the LATEST `limit` messages (most recent).
+    When offset is explicitly 0 or positive, returns from that position (oldest first).
+    """
     repo = SessionRepository(db)
     sess = await repo.get_by_id(session_id)
     if sess is None:
         raise HTTPException(status_code=404, detail="Session not found")
     _check_session_access(sess, user)
 
-    ui_messages = await ChatUiMessageRepository(db).list_by_session(session_id)
+    msg_repo = ChatUiMessageRepository(db)
+    total = await msg_repo.count_by_session(session_id)
+
+    if offset is None:
+        effective_offset = max(0, total - limit)
+    else:
+        effective_offset = offset
+
+    ui_messages = await msg_repo.list_by_session(session_id, limit=limit, offset=effective_offset)
+
     if ui_messages:
-        return [
-            {
-                "id": msg.id,
-                "role": msg.role,
-                "content": msg.content,
-                "tool_calls": msg.tool_calls or [],
-                "usage": msg.usage,
-                "http_traces": msg.http_traces or [],
-                "created_at": msg.created_at.isoformat(),
-            }
-            for msg in ui_messages
-        ]
+        return {
+            "total": total,
+            "offset": effective_offset,
+            "limit": limit,
+            "messages": [
+                {
+                    "id": msg.id,
+                    "role": msg.role,
+                    "content": msg.content,
+                    "tool_calls": msg.tool_calls or [],
+                    "usage": msg.usage,
+                    "http_traces_count": len(msg.http_traces) if msg.http_traces else 0,
+                    "created_at": msg.created_at.isoformat(),
+                }
+                for msg in ui_messages
+            ],
+        }
 
     engine = request.app.state.engine
     checkpointer = engine._checkpointer
     if checkpointer is None:
-        return []
+        return {"total": 0, "offset": effective_offset, "limit": limit, "messages": []}
 
     try:
         config = {"configurable": {"thread_id": session_id}}
         checkpoint_tuple = await checkpointer.aget_tuple(config)
         if checkpoint_tuple is None:
-            return []
+            return {"total": 0, "offset": effective_offset, "limit": limit, "messages": []}
 
         checkpoint = checkpoint_tuple.checkpoint
         channel_values = checkpoint.get("channel_values", {})
@@ -192,7 +212,31 @@ async def get_session_messages(
 
             result.append(item)
 
-        return result
+        checkpoint_offset = effective_offset if effective_offset < len(result) else max(0, len(result) - limit)
+        paginated = result[checkpoint_offset:checkpoint_offset + limit]
+        return {"total": len(result), "offset": checkpoint_offset, "limit": limit, "messages": paginated}
     except Exception as e:
         print(f"[Sessions] Failed to load messages for {session_id}: {e}")
-        return []
+        return {"total": 0, "offset": effective_offset, "limit": limit, "messages": []}
+
+
+@router.get("/sessions/{session_id}/messages/{message_id}/traces")
+async def get_message_traces(
+    session_id: str,
+    message_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Retrieve http_traces for a specific message (on-demand loading)."""
+    repo = SessionRepository(db)
+    sess = await repo.get_by_id(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _check_session_access(sess, user)
+
+    msg_repo = ChatUiMessageRepository(db)
+    msg = await msg_repo.get_by_id(message_id)
+    if msg is None or msg.session_id != session_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    return {"traces": msg.http_traces or []}

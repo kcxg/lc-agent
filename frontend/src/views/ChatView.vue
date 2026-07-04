@@ -7,8 +7,18 @@
         description="Ask me anything"
         variant="borderless"
       />
-      <BubbleList
-        v-else
+      <template v-else>
+        <div v-if="hasOlderMessages" class="load-older-messages">
+          <el-button
+            :loading="loadingOlder"
+            size="small"
+            text
+            @click="chatStore.loadOlderMessages(chatStore.threadId!)"
+          >
+            {{ loadingOlder ? '加载中...' : '加载更早的消息' }}
+          </el-button>
+        </div>
+        <BubbleList
         :list="bubbleList"
         max-height="100%"
         :auto-scroll="isStreaming"
@@ -80,8 +90,11 @@
                 </div>
               </template>
               <HttpTracesGroup
-                v-if="item.httpTraces?.length"
+                v-if="item.httpTraces?.length || item.httpTracesCount"
                 :traces="item.httpTraces"
+                :traces-count="item.httpTracesCount"
+                :session-id="chatStore.threadId || undefined"
+                :message-id="item.messageId"
                 :rounds="item.usage?.rounds"
               />
             </template>
@@ -122,6 +135,7 @@
           </div>
         </template>
       </BubbleList>
+      </template>
       <Thinking
         v-if="isLoading && !isStreaming && !errorMessage"
         status="thinking"
@@ -193,13 +207,14 @@ type ChatBubbleItem = BubbleListItemProps & {
   hasToolCalls?: boolean
   hasAnswer?: boolean
   httpTraces?: HttpTrace[]
+  httpTracesCount?: number
   isStreamingMessage?: boolean
 }
 
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
 const toolsStore = useToolsStore()
-const { messages, isStreaming, interrupt, errorMessage } = storeToRefs(chatStore)
+const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder } = storeToRefs(chatStore)
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
 const codeModalVisible = ref(false)
@@ -237,6 +252,7 @@ const bubbleList = computed((): ChatBubbleItem[] =>
         usage: msg.usage,
         segments: segs,
         httpTraces: msg.role === 'assistant' ? msg.httpTraces : undefined,
+        httpTracesCount: msg.role === 'assistant' ? (msg.httpTracesCount || 0) : 0,
         hasThinking: segs?.some(s => s.type === 'thinking' && s.text?.trim()) ?? false,
         hasToolCalls: segs?.some(s => s.type === 'tool') ?? false,
         hasAnswer: segs?.some(s => s.type === 'text' && s.text?.trim()) ?? false,
@@ -596,6 +612,12 @@ onBeforeUnmount(() => {
 
 .messages-container :deep(.elx-bubble-list__content) {
   min-height: 100%;
+}
+
+.load-older-messages {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
 }
 
 .messages-container :deep(.elx-bubble) {

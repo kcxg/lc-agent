@@ -54,8 +54,17 @@ export const api = {
     fetchApi<any>(`/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSession: (id: string) =>
     fetchApi<void>(`/sessions/${id}`, { method: 'DELETE' }),
-  getSessionMessages: (id: string) =>
-    fetchApi<any[]>(`/sessions/${id}/messages`),
+  getSessionMessages: (id: string, params?: { limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.limit) qs.set('limit', String(params.limit))
+    if (params?.offset) qs.set('offset', String(params.offset))
+    const query = qs.toString()
+    return fetchApi<{ total: number; offset: number; limit: number; messages: any[] }>(
+      `/sessions/${id}/messages${query ? '?' + query : ''}`
+    )
+  },
+  getMessageTraces: (sessionId: string, messageId: string) =>
+    fetchApi<{ traces: any[] }>(`/sessions/${sessionId}/messages/${messageId}/traces`),
 
   getSummarization: () => fetchApi<{ enabled: boolean; default_model: string; trigger: any; keep: any }>('/settings/summarization'),
   updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>
