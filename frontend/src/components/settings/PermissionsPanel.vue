@@ -1,14 +1,17 @@
 <template>
   <div class="permissions-panel">
-    <h3>工具权限白名单</h3>
+    <div class="panel-header">
+      <h3>工具权限白名单</h3>
+      <el-button link type="primary" @click="dialogVisible = true">
+        详情（{{ allowlist.length }}）
+      </el-button>
+    </div>
     <p class="desc">白名单中的工具将跳过人工审批，自动执行。</p>
 
     <div class="allowlist">
       <el-tag
         v-for="tool in allowlist"
         :key="tool"
-        closable
-        @close="handleRemove(tool)"
         class="tool-tag"
       >
         {{ tool }}
@@ -16,28 +19,55 @@
       <el-tag v-if="allowlist.length === 0" type="info">（空 — 所有工具需要审批）</el-tag>
     </div>
 
-    <div class="actions">
+    <el-dialog v-model="dialogVisible" title="工具权限白名单详情" width="600px">
       <el-input
-        v-model="newTool"
-        placeholder="输入工具名添加到白名单"
-        style="width: 280px"
-        @keyup.enter="handleAdd"
+        v-model="searchQuery"
+        placeholder="搜索已添加的工具..."
+        clearable
+        class="dialog-search"
       />
-      <el-button type="primary" :disabled="!newTool.trim()" @click="handleAdd">添加</el-button>
-      <el-button v-if="allowlist.length > 0" type="danger" plain @click="handleClearAll">清空全部</el-button>
-    </div>
+      <el-table :data="filteredTableData" style="width: 100%" max-height="300">
+        <el-table-column prop="name" label="工具名称" />
+        <el-table-column label="操作" width="80" align="center">
+          <template #default="{ row }">
+            <el-button link type="danger" @click="handleRemove(row.name)">移除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="dialog-add-row">
+        <el-input
+          v-model="newTool"
+          placeholder="输入工具名添加到白名单"
+          @keyup.enter="handleAdd"
+        />
+        <el-button type="primary" :disabled="!newTool.trim()" @click="handleAdd">添加</el-button>
+      </div>
+      <template #footer>
+        <el-button @click="dialogVisible = false">关闭</el-button>
+        <el-button v-if="allowlist.length > 0" type="danger" plain @click="handleClearAll">清空全部</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { getPermissions, allowTool, removeTool, setPermissions } from '@/api/permissions'
 import { useChatStore } from '@/stores/chat'
 import { ElMessage } from 'element-plus'
 
 const allowlist = ref<string[]>([])
 const newTool = ref('')
+const dialogVisible = ref(false)
+const searchQuery = ref('')
 const chatStore = useChatStore()
+
+const tableData = computed(() => allowlist.value.map(name => ({ name })))
+const filteredTableData = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return tableData.value
+  return tableData.value.filter(row => row.name.toLowerCase().includes(q))
+})
 
 async function fetchList() {
   try {
@@ -94,6 +124,14 @@ async function handleClearAll() {
 .permissions-panel {
   padding: 16px 0;
 }
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.panel-header h3 {
+  margin: 0;
+}
 .desc {
   color: var(--el-text-color-secondary);
   font-size: 13px;
@@ -109,9 +147,12 @@ async function handleClearAll() {
 .tool-tag {
   font-family: 'JetBrains Mono', monospace;
 }
-.actions {
+.dialog-search {
+  margin-bottom: 12px;
+}
+.dialog-add-row {
   display: flex;
   gap: 8px;
-  align-items: center;
+  margin-top: 16px;
 }
 </style>
