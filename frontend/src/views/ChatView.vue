@@ -174,7 +174,6 @@ import HttpTracesGroup from '@/components/chat/HttpTracesGroup.vue'
 import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
 import MessageToolbar from '@/components/chat/MessageToolbar.vue'
 import CodeBlockModal from '@/components/chat/CodeBlockModal.vue'
-import { allowTool } from '@/api/permissions'
 
 interface ContentSegment {
   type: 'text' | 'thinking' | 'tool' | 'http'
@@ -467,13 +466,8 @@ watch(errorMessage, (newError) => {
   }
 })
 
-async function handleAllowPermanently(toolName: string) {
-  try {
-    await allowTool(toolName)
-    chatStore.respondToInterrupt(true, agentsStore.currentAgentId)
-  } catch (e) {
-    console.error('Failed to permanently allow tool:', e)
-  }
+function handleAllowPermanently(toolName: string) {
+  chatStore.respondToInterrupt(true, agentsStore.currentAgentId, toolName)
 }
 
 function handleInterruptDecide(decision: { type: string }) {

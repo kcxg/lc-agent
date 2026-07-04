@@ -422,6 +422,11 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             except Exception as e:
                 print(f"[SSE] Failed to check interrupt state after resume: {e}")
 
+            if isinstance(resume_value, dict):
+                permanently_allow = resume_value.get("permanently_allow")
+                if permanently_allow and hasattr(request.app.state, "permissions"):
+                    request.app.state.permissions.allow_tool(permanently_allow)
+
             http_traces = trace_collector.snapshot()
             done_payload: dict[str, Any] = {"is_resume": True}
             if usage_rounds:

@@ -576,13 +576,17 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  function respondToInterrupt(approved: boolean, presetId: string = '__chat__') {
+  function respondToInterrupt(approved: boolean, presetId: string = '__chat__', permanentlyAllow?: string) {
     const client = _ensureClient()
     const count = interrupt.value?.actionRequests?.length || 1
     const decisions = Array.from({ length: count }, () => ({
       type: approved ? 'approve' : 'reject',
     }))
-    client.sendInterruptResume({ decisions }, presetId)
+    const resumePayload: Record<string, any> = { decisions }
+    if (permanentlyAllow) {
+      resumePayload.permanently_allow = permanentlyAllow
+    }
+    client.sendInterruptResume(resumePayload, presetId)
     interrupt.value = null
     isStreaming.value = true
     currentRoundStart = Date.now()
