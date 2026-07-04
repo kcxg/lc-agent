@@ -49,10 +49,12 @@ class SessionRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def list_all(self, limit: int = 50) -> list[SessionMeta]:
-        result = await self.session.execute(
-            select(SessionMeta).order_by(SessionMeta.updated_at.desc()).limit(limit)
-        )
+    async def list_all(self, limit: int = 50, user_id: str | None = None) -> list[SessionMeta]:
+        stmt = select(SessionMeta)
+        if user_id:
+            stmt = stmt.where(SessionMeta.user_id == user_id)
+        stmt = stmt.order_by(SessionMeta.updated_at.desc()).limit(limit)
+        result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_by_id(self, session_id: str) -> SessionMeta | None:

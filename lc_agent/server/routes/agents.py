@@ -9,6 +9,8 @@ from lc_agent.core.engine import AgentEngine
 from lc_agent.core.models import AgentPreset
 from lc_agent.db.engine import get_async_session as _get_db_session
 from lc_agent.db.models import AgentPresetDB
+from lc_agent.db.models_auth import User, UserAgentAccess
+from lc_agent.server.auth_middleware import get_current_user, require_admin
 from lc_agent.server.dependencies import get_engine
 
 router = APIRouter(tags=["agents"])
@@ -56,7 +58,11 @@ def _preset_to_dict(p: AgentPreset) -> dict:
 
 
 @router.get("/agents")
-async def list_agents(engine: AgentEngine = Depends(get_engine), db=Depends(get_db)):
+async def list_agents(
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """List all agent presets (builtin + code + DB-persisted)."""
     result = []
 
@@ -81,11 +87,22 @@ async def list_agents(engine: AgentEngine = Depends(get_engine), db=Depends(get_
             "default_enabled": True,
         })
 
+    if user.role != "admin":
+        access_stmt = select(UserAgentAccess.agent_id).where(UserAgentAccess.user_id == user.id)
+        access_rows = await db.execute(access_stmt)
+        allowed_ids = set(access_rows.scalars().all())
+        result = [a for a in result if a["id"] in allowed_ids]
+
     return result
 
 
 @router.post("/agents", status_code=201)
-async def create_agent(body: AgentCreateRequest, engine: AgentEngine = Depends(get_engine), db=Depends(get_db)):
+async def create_agent(
+    body: AgentCreateRequest,
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     """Create a new agent preset (persisted to DB)."""
     preset_db = AgentPresetDB(
         id=str(uuid.uuid4()),
@@ -118,7 +135,13 @@ async def create_agent(body: AgentCreateRequest, engine: AgentEngine = Depends(g
 
 
 @router.put("/agents/{agent_id}")
-async def update_agent(agent_id: str, body: AgentUpdateRequest, engine: AgentEngine = Depends(get_engine), db=Depends(get_db)):
+async def update_agent(
+    agent_id: str,
+    body: AgentUpdateRequest,
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     """Update an agent preset."""
     if agent_id in engine.BUILTIN_IDS:
         raise HTTPException(status_code=400, detail="Cannot edit builtin agent")
@@ -167,7 +190,12 @@ async def update_agent(agent_id: str, body: AgentUpdateRequest, engine: AgentEng
 
 
 @router.delete("/agents/{agent_id}", status_code=204)
-async def delete_agent(agent_id: str, engine: AgentEngine = Depends(get_engine), db=Depends(get_db)):
+async def delete_agent(
+    agent_id: str,
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     """Delete an agent preset."""
     if agent_id in engine.BUILTIN_IDS:
         raise HTTPException(status_code=400, detail="Cannot delete builtin agent")
@@ -190,7 +218,12 @@ async def delete_agent(agent_id: str, engine: AgentEngine = Depends(get_engine),
 
 
 @router.post("/agents/{agent_id}/activate")
-def activate_agent(agent_id: str, request: Request, engine: AgentEngine = Depends(get_engine)):
+def activate_agent(
+    agent_id: str,
+    request: Request,
+    engine: AgentEngine = Depends(get_engine),
+    admin: User = Depends(require_admin),
+):
     """Apply an agent's default toggle state to MCP servers and tool groups.
 
     - Agents with default_enabled=False (Empty): disable all MCP + tool groups

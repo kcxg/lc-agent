@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from lc_agent.db.models_auth import User
 from lc_agent.db.repository import ChatUiMessageRepository, SessionRepository
-from lc_agent.server.dependencies import get_db_session, get_engine
+from lc_agent.server.auth_middleware import get_current_user
+from lc_agent.server.dependencies import get_db_session
 
 router = APIRouter(tags=["sessions"])
 
@@ -34,23 +36,50 @@ def serialize_session(s):
     }
 
 
+def _check_session_access(sess, user: User) -> None:
+    if sess.user_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="权限不足")
+
+
 @router.get("/sessions")
-async def list_sessions(db: AsyncSession = Depends(get_db_session)):
+async def list_sessions(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
     repo = SessionRepository(db)
-    sessions = await repo.list_all()
+    sessions = await repo.list_all(user_id=user.id)
     return [serialize_session(s) for s in sessions]
 
 
 @router.post("/sessions", status_code=201)
-async def create_session(body: SessionCreateRequest, db: AsyncSession = Depends(get_db_session)):
+async def create_session(
+    body: SessionCreateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
     repo = SessionRepository(db)
-    session = await repo.create(title=body.title, agent_id=body.agent_id, model=body.model)
+    session = await repo.create(
+        title=body.title,
+        agent_id=body.agent_id,
+        model=body.model,
+        user_id=user.id,
+    )
     return {"id": session.id, "title": session.title}
 
 
 @router.put("/sessions/{session_id}")
-async def update_session(session_id: str, body: SessionUpdateRequest, db: AsyncSession = Depends(get_db_session)):
+async def update_session(
+    session_id: str,
+    body: SessionUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
     repo = SessionRepository(db)
+    sess = await repo.get_by_id(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _check_session_access(sess, user)
+
     update_data = body.model_dump(exclude_unset=True)
     result = await repo.update(session_id, **update_data)
     if result is None:
@@ -59,8 +88,17 @@ async def update_session(session_id: str, body: SessionUpdateRequest, db: AsyncS
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
-async def delete_session(session_id: str, db: AsyncSession = Depends(get_db_session)):
+async def delete_session(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
     repo = SessionRepository(db)
+    sess = await repo.get_by_id(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _check_session_access(sess, user)
+
     deleted = await repo.delete(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -71,9 +109,16 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db_sess
 async def get_session_messages(
     session_id: str,
     request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Retrieve message history for a session."""
+    repo = SessionRepository(db)
+    sess = await repo.get_by_id(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _check_session_access(sess, user)
+
     ui_messages = await ChatUiMessageRepository(db).list_by_session(session_id)
     if ui_messages:
         return [
