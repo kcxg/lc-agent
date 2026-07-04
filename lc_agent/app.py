@@ -110,7 +110,6 @@ class LcAgentApp:
                     allowed_tool_groups=row.allowed_tool_groups,
                     allowed_mcp_servers=row.allowed_mcp_servers,
                     allowed_skills=row.allowed_skills,
-                    dangerous_tools=row.dangerous_tools,
                 )
                 self.engine._presets[preset.id] = preset
             loaded = len(self.engine._presets)

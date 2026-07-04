@@ -1,12 +1,12 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.models import AgentPreset
+from lc_agent.core.permissions import PermissionsService
 from lc_agent.tools.registry import ToolRegistry, tool
 
 
 @pytest.fixture
-def hitl_engine():
+def hitl_engine(tmp_path):
     ToolRegistry._global_tools = {}
     ToolRegistry._group_descriptions = {}
     ToolRegistry._instance = None
@@ -30,35 +30,33 @@ def hitl_engine():
         },
     }
     engine = AgentEngine(config)
+    engine._permissions_service = PermissionsService(tmp_path / "permissions.jsonc")
     yield engine
     ToolRegistry._global_tools = {}
     ToolRegistry._group_descriptions = {}
     ToolRegistry._instance = None
 
 
-def test_build_agent_with_dangerous_tools(hitl_engine):
-    """Agent with dangerous_tools should have interrupt_before set."""
+def test_build_agent_with_permissions_service(hitl_engine):
+    """Agent with permissions service should build successfully."""
     preset = AgentPreset(
         id="test-hitl",
         name="HITL Agent",
         system_prompt="Be careful.",
         default_model="test-model",
-        dangerous_tools=["delete_file", "rm_rf"],
     )
     agent = hitl_engine.build_agent(preset)
     assert agent is not None
 
 
-def test_build_agent_without_dangerous_tools(hitl_engine):
-    """Agent without dangerous_tools should not interrupt."""
+def test_build_agent_without_permissions_service(hitl_engine):
+    """Agent without permissions service should build without HITL middleware."""
+    hitl_engine._permissions_service = None
     preset = AgentPreset(
         id="test-safe",
         name="Safe Agent",
         system_prompt="Be safe.",
         default_model="test-model",
-        dangerous_tools=[],
     )
     agent = hitl_engine.build_agent(preset)
     assert agent is not None
-
-
