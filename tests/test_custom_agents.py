@@ -113,3 +113,30 @@ async def test_api_custom_agent_not_deletable(tmp_path):
     reset_engine()
 
 
+
+
+def test_add_agent_marks_code_agent_as_self_contained():
+    from lc_agent.app import LcAgentApp
+
+    class DummyGraph:
+        async def ainvoke(self, *args, **kwargs):
+            return {"messages": []}
+
+        async def astream_events(self, *args, **kwargs):
+            if False:
+                yield {}
+
+    app = LcAgentApp({"agent": {"default_model": "model-a"}})
+    graph = DummyGraph()
+
+    app.add_agent("research", graph, "Research graph")
+
+    preset = app.engine._custom_presets["research"]
+    assert app.engine._agents["research"] is graph
+    assert preset.source == "code"
+    assert preset.default_model == "custom"
+    assert preset.system_prompt == "Research graph"
+    assert preset.allowed_tool_groups == []
+    assert preset.allowed_mcp_servers == []
+    assert preset.allowed_skills == []
+    assert preset.default_enabled is False

@@ -1,4 +1,4 @@
-# lc_agent/app.py
+﻿# lc_agent/app.py
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -184,7 +184,11 @@ class LcAgentApp:
             name=name,
             system_prompt=description or f"Custom agent: {name}",
             default_model="custom",
+            allowed_tool_groups=[],
+            allowed_mcp_servers=[],
+            allowed_skills=[],
             source="code",
+            default_enabled=False,
         )
         self.engine._custom_presets[name] = preset
 
@@ -196,3 +200,5 @@ class LcAgentApp:
         print(f"  Web UI: http://{self.host}:{self.port}")
         print(f"  API Docs: http://{self.host}:{self.port}/api/docs\n")
         uvicorn.run(self.fastapi_app, host=self.host, port=self.port)
+
+
