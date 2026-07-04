@@ -73,4 +73,25 @@ assertContains(
   "right panel must hide configurable tools for code agents",
 )
 
+assertContains(
+  "src/components/dialogs/AgentEditorDialog.vue",
+  "\u6b64\u667a\u80fd\u4f53\u7531\u4ee3\u7801\u6ce8\u518c\uff08CompiledGraph\uff09\uff0c\u5de5\u5177\u3001MCP\u3001Skills\u3001\u63d0\u793a\u8bcd\u548c\u6a21\u578b\u7531\u4ee3\u7801\u4e2d\u7684 graph \u51b3\u5b9a\u3002",
+  "editor must explain that code-agent framework fields are graph-owned",
+)
+assertContains(
+  "src/components/dialogs/AgentEditorDialog.vue",
+  "<el-form v-if=\"!isCodeAgent\"",
+  "editor must hide normal editable form for code agents",
+)
+assertContains(
+  "src/components/dialogs/AgentEditorDialog.vue",
+  "v-if=\"!isCodeAgent\"",
+  "editor save button must be hidden for code agents",
+)
+assertNotContains(
+  "src/components/dialogs/AgentEditorDialog.vue",
+  "\u4ec5\u53ef\u4fee\u6539\u8fd0\u884c\u65f6\u914d\u7f6e\uff08\u5de5\u5177/MCP/Skills\uff09",
+  "editor must not claim code-agent runtime framework config is editable",
+)
+
 console.log('[code-agent-contract] store checks passed')

@@ -6,10 +6,10 @@
     :close-on-click-modal="false"
   >
     <el-alert v-if="isCodeAgent" type="warning" :closable="false" style="margin-bottom: 12px">
-      此智能体由代码注册（CompiledGraph），仅可修改运行时配置（工具/MCP/Skills）。
+      此智能体由代码注册（CompiledGraph），工具、MCP、Skills、提示词和模型由代码中的 graph 决定。此处仅展示说明，不能修改框架级配置。
     </el-alert>
 
-    <el-form :model="form" label-width="100px" label-position="top">
+    <el-form v-if="!isCodeAgent" :model="form" label-width="100px" label-position="top">
       <el-form-item label="名称" required>
         <el-input v-model="form.name" :disabled="isCodeAgent" placeholder="例如：Code Assistant" />
       </el-form-item>
@@ -103,12 +103,31 @@
       </el-form-item>
     </el-form>
 
+    <div v-else class="code-agent-readonly">
+      <div class="readonly-row">
+        <span class="readonly-label">名称</span>
+        <span class="readonly-value">{{ form.name }}</span>
+      </div>
+      <div class="readonly-row">
+        <span class="readonly-label">说明</span>
+        <span class="readonly-value">{{ form.system_prompt }}</span>
+      </div>
+      <div class="readonly-row">
+        <span class="readonly-label">运行模型</span>
+        <span class="readonly-value">由代码 graph 决定</span>
+      </div>
+      <div class="readonly-row">
+        <span class="readonly-label">工具能力</span>
+        <span class="readonly-value">由代码 graph 决定</span>
+      </div>
+    </div>
+
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
       <el-button type="danger" v-if="isEdit && !agentsStore.isAgentBuiltin(editingId!) && !isCodeAgent" @click="handleDelete">
         删除
       </el-button>
-      <el-button type="primary" :loading="saving" @click="handleSave">
+      <el-button v-if="!isCodeAgent" type="primary" :loading="saving" @click="handleSave">
         {{ isEdit ? '保存' : '创建' }}
       </el-button>
     </template>
@@ -274,4 +293,35 @@ defineExpose({ open })
   margin-left: 4px;
   opacity: 0.7;
 }
+.code-agent-readonly {
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+
+.readonly-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.readonly-row:last-child {
+  border-bottom: none;
+}
+
+.readonly-label {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.readonly-value {
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  text-align: right;
+}
+
 </style>
