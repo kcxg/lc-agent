@@ -4,7 +4,7 @@
     <div v-else class="app-container">
     <AppHeader
       :app-name="appName"
-      :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
+      :model-name="agentsStore.isCodeAgent ? '代码内定义' : (toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A')"
       @edit-agent="editCurrentAgent"
       @new-agent="createNewAgent"
       @new-chat="handleNewChat"
@@ -164,7 +164,10 @@ async function restoreSession(sessionId: string) {
     if (session.agent_id && session.agent_id !== agentsStore.currentAgentId) {
       await agentsStore.selectAgent(session.agent_id)
     }
-    if (session.model) {
+    const sessionAgent = agentsStore.agents.find(a => a.id === session.agent_id)
+    if (sessionAgent?.source === 'code') {
+      toolsStore.syncModelWithAgentDefault()
+    } else if (session.model) {
       toolsStore.setModel(session.model)
     }
     chatStore.clearMessages()
@@ -204,24 +207,30 @@ async function handleNewChat() {
 async function handleSwitchSession(sessionId: string) {
   if (chatStore.threadId === sessionId && chatStore.isConnected) {
     const session = sessionsStore.sessions.find(s => s.id === sessionId)
-    if (session?.model) {
+    const agentId = session?.agent_id || agentsStore.currentAgentId
+    const sessionAgent = agentsStore.agents.find(a => a.id === agentId)
+    if (sessionAgent?.source === 'code') {
+      toolsStore.syncModelWithAgentDefault()
+    } else if (session?.model) {
       toolsStore.setModel(session.model)
     }
-    const agentId = session?.agent_id || agentsStore.currentAgentId
     router.push({ name: 'chat', params: { sessionId }, query: { agent: agentId } })
     closeMobileDrawers()
     return
   }
   const session = sessionsStore.sessions.find(s => s.id === sessionId)
   sessionsStore.selectSession(sessionId)
-  if (session?.model) {
+  const agentId = session?.agent_id || agentsStore.currentAgentId
+  const sessionAgent = agentsStore.agents.find(a => a.id === agentId)
+  if (sessionAgent?.source === 'code') {
+    toolsStore.syncModelWithAgentDefault()
+  } else if (session?.model) {
     toolsStore.setModel(session.model)
   }
   chatStore.clearMessages()
   chatStore.disconnect()
   await chatStore.loadMessages(sessionId)
   await chatStore.connect(sessionId)
-  const agentId = session?.agent_id || agentsStore.currentAgentId
   if (session?.agent_id && session.agent_id !== agentsStore.currentAgentId) {
     await agentsStore.selectAgent(session.agent_id)
   }

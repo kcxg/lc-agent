@@ -129,6 +129,7 @@ function getAgentIcon(agent: any): string {
 
 const hasMessages = computed(() => chatStore.messages.length > 0)
 const sessionModel = computed(() => {
+  if (agentsStore.isCodeAgent) return '代码内定义'
   const model = toolsStore.currentModel || agentsStore.currentAgent?.default_model || ''
   if (!model) return ''
   const parts = model.split('/')

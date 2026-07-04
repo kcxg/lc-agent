@@ -72,7 +72,6 @@ assertContains(
   "v-if=\"!agentsStore.isChatAgent && !agentsStore.isCodeAgent\"",
   "right panel must hide configurable tools for code agents",
 )
-
 assertContains(
   "src/components/dialogs/AgentEditorDialog.vue",
   "\u6b64\u667a\u80fd\u4f53\u7531\u4ee3\u7801\u6ce8\u518c\uff08CompiledGraph\uff09\uff0c\u5de5\u5177\u3001MCP\u3001Skills\u3001\u63d0\u793a\u8bcd\u548c\u6a21\u578b\u7531\u4ee3\u7801\u4e2d\u7684 graph \u51b3\u5b9a\u3002",
@@ -93,7 +92,6 @@ assertNotContains(
   "\u4ec5\u53ef\u4fee\u6539\u8fd0\u884c\u65f6\u914d\u7f6e\uff08\u5de5\u5177/MCP/Skills\uff09",
   "editor must not claim code-agent runtime framework config is editable",
 )
-
 assertContains(
   "src/views/ChatView.vue",
   "const modelOverride = agentsStore.isCodeAgent ? '' : toolsStore.currentModel",
@@ -118,6 +116,31 @@ assertContains(
   "src/App.vue",
   "const sessionModel = getSessionModelForAgent(agentId)",
   "new chats must use code-agent-aware session model",
+)
+assertContains(
+  "src/App.vue",
+  ":model-name=\"agentsStore.isCodeAgent ? '\u4ee3\u7801\u5185\u5b9a\u4e49'",
+  "app header model prop must show graph-defined text for code agents",
+)
+assertContains(
+  "src/components/layout/AppHeader.vue",
+  "if (agentsStore.isCodeAgent) return '\u4ee3\u7801\u5185\u5b9a\u4e49'",
+  "header model helper must show graph-defined text for code agents",
+)
+assertContains(
+  "src/views/ChatView.vue",
+  "if (agentsStore.isCodeAgent) return '\u4ee3\u7801\u5185\u5b9a\u4e49'",
+  "chat message model label must show graph-defined text for code agents",
+)
+assertContains(
+  "src/App.vue",
+  "if (sessionAgent?.source === 'code') {",
+  "session restore must special-case code-agent stored model",
+)
+assertContains(
+  "src/App.vue",
+  "toolsStore.syncModelWithAgentDefault()",
+  "session restore must clear UI model for code agents",
 )
 
 console.log('[code-agent-contract] store checks passed')
