@@ -584,6 +584,12 @@ export const useChatStore = defineStore('chat', () => {
     }))
     client.sendInterruptResume({ decisions }, presetId)
     interrupt.value = null
+    isStreaming.value = true
+    currentRoundStart = Date.now()
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant') {
+      last.isStreaming = true
+    }
   }
 
   function resumeInterrupt(resumeValue: any, presetId: string = '__chat__', model?: string) {

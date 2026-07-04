@@ -5,9 +5,16 @@ export interface PermissionsConfig {
   tool_allowlist: string[]
 }
 
+async function checkedJson<T>(resp: Response): Promise<T> {
+  if (!resp.ok) {
+    throw new Error(`Permissions API error: ${resp.status} ${resp.statusText}`)
+  }
+  return resp.json()
+}
+
 export async function getPermissions(): Promise<PermissionsConfig> {
   const resp = await fetch(BASE)
-  return resp.json()
+  return checkedJson(resp)
 }
 
 export async function allowTool(toolName: string): Promise<PermissionsConfig> {
@@ -16,7 +23,7 @@ export async function allowTool(toolName: string): Promise<PermissionsConfig> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tool_name: toolName }),
   })
-  return resp.json()
+  return checkedJson(resp)
 }
 
 export async function removeTool(toolName: string): Promise<PermissionsConfig> {
@@ -25,7 +32,7 @@ export async function removeTool(toolName: string): Promise<PermissionsConfig> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tool_name: toolName }),
   })
-  return resp.json()
+  return checkedJson(resp)
 }
 
 export async function setPermissions(tools: string[]): Promise<PermissionsConfig> {
@@ -34,5 +41,5 @@ export async function setPermissions(tools: string[]): Promise<PermissionsConfig
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tool_allowlist: tools }),
   })
-  return resp.json()
+  return checkedJson(resp)
 }

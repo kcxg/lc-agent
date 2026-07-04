@@ -470,10 +470,10 @@ watch(errorMessage, (newError) => {
 async function handleAllowPermanently(toolName: string) {
   try {
     await allowTool(toolName)
+    chatStore.respondToInterrupt(true, agentsStore.currentAgentId)
   } catch (e) {
     console.error('Failed to permanently allow tool:', e)
   }
-  chatStore.respondToInterrupt(true, agentsStore.currentAgentId)
 }
 
 function handleInterruptDecide(decision: { type: string }) {
