@@ -73,7 +73,7 @@ def app_with_skills(skills_dir):
             }
         },
         "agent": {"default_model": "gpt-4", "system_prompt": "You are helpful."},
-        "skills": {"directory": str(skills_dir)},
+        "skills": [str(skills_dir)],
     }
     return LcAgentApp(config)
 

@@ -1,5 +1,8 @@
 import pytest
 
+from lc_agent.core.auth import AuthService
+from lc_agent.db.models_auth import User
+
 
 @pytest.fixture
 def sample_config() -> dict:
@@ -20,3 +23,26 @@ def sample_config() -> dict:
         "mcp": {},
         "session": {"db_path": ":memory:"},
     }
+
+
+async def setup_test_auth(app, db_url: str, user_id: str = "test-admin", username: str = "testadmin") -> dict:
+    """Configure auth on a test app and return Authorization headers."""
+    import lc_agent.db.models_auth  # noqa: F401 — register User table
+
+    from lc_agent.db.engine import get_async_session
+
+    auth_service = AuthService(secret="test-secret-key-minimum16chars", token_expire_days=7)
+    app.state.auth_service = auth_service
+
+    async with get_async_session(db_url) as session:
+        admin = User(
+            id=user_id,
+            username=username,
+            password_hash=auth_service.hash_password("pass"),
+            role="admin",
+        )
+        session.add(admin)
+        await session.commit()
+
+    token = auth_service.create_token(user_id=user_id, username=username, role="admin")
+    return {"Authorization": f"Bearer {token}"}

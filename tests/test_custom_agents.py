@@ -48,12 +48,22 @@ def test_add_agent_duplicate_raises(app_instance):
 
 
 @pytest.mark.asyncio
-async def test_api_agents_includes_custom(app_instance):
+async def test_api_agents_includes_custom(tmp_path):
     """GET /api/agents should include custom agents with source flag."""
     from lc_agent.db.engine import init_db, reset_engine
+    from tests.conftest import setup_test_auth
 
     reset_engine()
-    await init_db("sqlite+aiosqlite:///./lc_agent_data.db")
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+    await init_db(db_url)
+
+    config = {
+        "provider": {},
+        "agent": {"system_prompt": "Hi", "default_model": ""},
+        "database": {"url": db_url, "checkpoint_path": ":memory:"},
+    }
+    app_instance = LcAgentApp(config)
+    headers = await setup_test_auth(app_instance.fastapi_app, db_url)
 
     mock_graph = MagicMock()
     app_instance.add_agent("api_agent", mock_graph, description="API test")
@@ -62,17 +72,34 @@ async def test_api_agents_includes_custom(app_instance):
         transport=ASGITransport(app=app_instance.fastapi_app),
         base_url="http://test"
     ) as client:
-        resp = await client.get("/api/agents")
+        resp = await client.get("/api/agents", headers=headers)
         assert resp.status_code == 200
         agents = resp.json()
         custom = [a for a in agents if a["id"] == "api_agent"]
         assert len(custom) == 1
         assert custom[0].get("source") == "code"
 
+    reset_engine()
+
 
 @pytest.mark.asyncio
-async def test_api_custom_agent_not_deletable(app_instance):
+async def test_api_custom_agent_not_deletable(tmp_path):
     """DELETE on custom agent should return 403."""
+    from lc_agent.db.engine import init_db, reset_engine
+    from tests.conftest import setup_test_auth
+
+    reset_engine()
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+    await init_db(db_url)
+
+    config = {
+        "provider": {},
+        "agent": {"system_prompt": "Hi", "default_model": ""},
+        "database": {"url": db_url, "checkpoint_path": ":memory:"},
+    }
+    app_instance = LcAgentApp(config)
+    headers = await setup_test_auth(app_instance.fastapi_app, db_url)
+
     mock_graph = MagicMock()
     app_instance.add_agent("protected", mock_graph)
 
@@ -80,7 +107,9 @@ async def test_api_custom_agent_not_deletable(app_instance):
         transport=ASGITransport(app=app_instance.fastapi_app),
         base_url="http://test"
     ) as client:
-        resp = await client.delete("/api/agents/protected")
+        resp = await client.delete("/api/agents/protected", headers=headers)
         assert resp.status_code == 403
+
+    reset_engine()
 
 
