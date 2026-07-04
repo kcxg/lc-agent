@@ -10,6 +10,7 @@ from langchain_agentskills import SkillsToolkit
 from langchain_agentskills.loaders import CompositeSkillLoader, DirectorySkillLoader
 
 from lc_agent.core.engine import AgentEngine
+from lc_agent.core.permissions import PermissionsService
 from lc_agent.db.engine import init_db
 from lc_agent.mcp.manager import McpManager
 from lc_agent.server.app import create_app, mount_static_files
@@ -26,6 +27,8 @@ class LcAgentApp:
         self.port = port
         self._db_url = config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
         self._checkpoint_path = config.get("database", {}).get("checkpoint_path", "./lc_agent_checkpoints.db")
+        permissions_path = config.get("permissions", {}).get("path", "./permissions.jsonc")
+        self._permissions_service = PermissionsService(permissions_path=Path(permissions_path))
         self.engine = AgentEngine(config)
         skills_dirs = config.get("skills", ["./skills"])
         existing_dirs = [d for d in skills_dirs if Path(d).is_dir()]
@@ -46,6 +49,8 @@ class LcAgentApp:
         self.engine._skills_toolkit = self.skills_toolkit
         self.engine._mcp_manager = self.mcp_manager
         self.fastapi_app.state.engine = self.engine
+        self.fastapi_app.state.permissions = self._permissions_service
+        self.engine._permissions_service = self._permissions_service
         sse_module.configure(self.engine, self._db_url)
         mount_static_files(self.fastapi_app)
 
