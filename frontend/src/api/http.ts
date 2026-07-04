@@ -16,7 +16,7 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
   })
   if (response.status === 401) {
     localStorage.removeItem('token')
-    window.location.hash = '#/login'
+    window.dispatchEvent(new CustomEvent('auth:expired'))
     throw new Error('认证已过期，请重新登录')
   }
   if (!response.ok) {

@@ -187,6 +187,11 @@ export class ChatSseClient {
       })
 
       if (!response.ok) {
+        if (response.status === 401) {
+          window.dispatchEvent(new CustomEvent('auth:expired'))
+          this.emit('error', { type: 'error', title: '认证已过期', detail: '请重新登录' })
+          return
+        }
         const text = await response.text()
         this.emit('error', {
           type: 'error',

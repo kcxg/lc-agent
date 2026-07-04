@@ -1,24 +1,17 @@
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from lc_agent.core.auth import AuthService
-from lc_agent.db.engine import get_async_session
 from lc_agent.db.models_auth import User
-
-PUBLIC_PATHS = {
-    "/api/auth/login",
-    "/api/health",
-    "/api/docs",
-    "/api/openapi.json",
-}
+from lc_agent.server.dependencies import get_db_session
 
 
-def _is_public(path: str) -> bool:
-    if path in PUBLIC_PATHS:
-        return True
-    if not path.startswith("/api/"):
-        return True
-    return False
+def get_auth_service(request: Request) -> AuthService:
+    svc = getattr(request.app.state, "auth_service", None)
+    if svc is None:
+        raise HTTPException(status_code=500, detail="Auth not configured")
+    return svc
 
 
 def _extract_token(request: Request) -> str | None:
@@ -28,11 +21,12 @@ def _extract_token(request: Request) -> str | None:
     return request.query_params.get("token")
 
 
-async def get_current_user(request: Request) -> User:
+async def get_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> User:
     """FastAPI dependency: extract and validate JWT, return User object."""
-    auth_service: AuthService | None = getattr(request.app.state, "auth_service", None)
-    if auth_service is None:
-        raise HTTPException(status_code=500, detail="Auth not configured")
+    auth_service = get_auth_service(request)
 
     token = _extract_token(request)
     if not token:
@@ -46,17 +40,12 @@ async def get_current_user(request: Request) -> User:
     if not user_id:
         raise HTTPException(status_code=401, detail="认证失败")
 
-    db_url = request.app.state.config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
-    db = get_async_session(db_url)
-    try:
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if user is None:
-            raise HTTPException(status_code=401, detail="认证失败")
-        request.state.current_user = user
-        return user
-    finally:
-        await db.close()
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=401, detail="认证失败")
+    request.state.current_user = user
+    return user
 
 
 async def require_admin(user: User = Depends(get_current_user)) -> User:

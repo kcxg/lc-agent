@@ -32,5 +32,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  if (typeof window !== 'undefined') {
+    window.addEventListener('auth:expired', () => {
+      logout()
+      window.location.hash = '#/login'
+    })
+  }
+
   return { token, user, isAuthenticated, isAdmin, login, logout, checkAuth }
 })

@@ -5,10 +5,9 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from lc_agent.core.auth import AuthService
 from lc_agent.db.models import ChatUiMessage, SessionMeta
 from lc_agent.db.models_auth import User, UserAgentAccess
-from lc_agent.server.auth_middleware import require_admin
+from lc_agent.server.auth_middleware import get_auth_service, require_admin
 from lc_agent.server.dependencies import get_db_session
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -20,13 +19,6 @@ class CreateUserRequest(BaseModel):
 
 class SetAgentsRequest(BaseModel):
     agent_ids: list[str]
-
-
-def _get_auth_service(request: Request) -> AuthService:
-    svc = getattr(request.app.state, "auth_service", None)
-    if svc is None:
-        raise HTTPException(status_code=500, detail="Auth not configured")
-    return svc
 
 
 @router.get("/users")
@@ -49,7 +41,7 @@ async def create_user(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    auth_service = _get_auth_service(request)
+    auth_service = get_auth_service(request)
 
     existing = await db.execute(select(User).where(User.username == body.username))
     if existing.scalar_one_or_none():
@@ -106,7 +98,7 @@ async def reset_password(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    auth_service = _get_auth_service(request)
+    auth_service = get_auth_service(request)
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
