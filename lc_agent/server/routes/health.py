@@ -10,9 +10,14 @@ router = APIRouter(tags=["health"])
 async def health(request: Request):
     """Health check endpoint."""
     config = request.app.state.config
+    auth_enabled = (
+        hasattr(request.app.state, "auth_service")
+        and request.app.state.auth_service is not None
+    )
     return {
         "status": "ok",
         "version": __version__,
+        "auth_enabled": auth_enabled,
         "config_loaded": config.get("_config_path") is not None,
         "app_name": config.get("ui", {}).get("app_name"),
     }

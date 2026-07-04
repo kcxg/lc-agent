@@ -17,6 +17,13 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   if (to.meta.public) return true
   const authStore = useAuthStore()
+
+  if (authStore.authRequired === null) {
+    await authStore.checkBackendAuth()
+  }
+
+  if (!authStore.authRequired) return true
+
   if (!authStore.isAuthenticated) {
     const valid = await authStore.checkAuth()
     if (!valid) return { name: 'login' }

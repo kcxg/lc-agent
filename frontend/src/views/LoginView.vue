@@ -42,7 +42,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
@@ -54,6 +54,15 @@ const username = ref('')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
+
+onMounted(async () => {
+  if (authStore.authRequired === null) {
+    await authStore.checkBackendAuth()
+  }
+  if (!authStore.authRequired) {
+    await router.push('/')
+  }
+})
 
 async function handleLogin() {
   if (!username.value.trim() || !password.value) {
