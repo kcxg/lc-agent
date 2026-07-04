@@ -1,6 +1,7 @@
 <template>
   <ConfigProvider :theme="isDark ? 'dark' : 'light'">
-  <div class="app-container">
+    <router-view v-if="isPublicRoute" />
+    <div v-else class="app-container">
     <AppHeader
       :app-name="appName"
       :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
@@ -45,12 +46,12 @@
     </div>
 
     <AgentEditorDialog ref="agentEditorRef" />
-  </div>
+    </div>
   </ConfigProvider>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ConfigProvider } from 'vue-element-plus-x'
 import { useTheme } from '@/composables/useTheme'
@@ -78,7 +79,13 @@ const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
 const appName = ref('lc_agent')
 
-onMounted(async () => {
+const isPublicRoute = computed(() => !!route.meta.public)
+const appInitialized = ref(false)
+
+async function initApp() {
+  if (appInitialized.value || isPublicRoute.value) return
+  appInitialized.value = true
+
   await Promise.all([
     toolsStore.init(),
     agentsStore.init(),
@@ -118,6 +125,16 @@ onMounted(async () => {
 
   if (agentQuery && agentsStore.agents.find(a => a.id === agentQuery)) {
     await agentsStore.selectAgent(agentQuery)
+  }
+}
+
+onMounted(async () => {
+  await initApp()
+})
+
+watch(isPublicRoute, async (isPublic) => {
+  if (!isPublic) {
+    await initApp()
   }
 })
 

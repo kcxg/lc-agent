@@ -1,10 +1,24 @@
 const BASE_URL = '/api'
 
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = localStorage.getItem('token')
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  return headers
+}
+
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     ...options,
   })
+  if (response.status === 401) {
+    localStorage.removeItem('token')
+    window.location.hash = '#/login'
+    throw new Error('认证已过期，请重新登录')
+  }
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`)
   }

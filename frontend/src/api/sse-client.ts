@@ -34,6 +34,22 @@ export interface SseMessage {
 
 export type SseEventHandler = (msg: SseMessage) => void
 
+function getSseAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = localStorage.getItem('token')
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  return headers
+}
+
+function appendTokenToUrl(url: string): string {
+  const token = localStorage.getItem('token') || ''
+  if (!token) return url
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}token=${encodeURIComponent(token)}`
+}
+
 export class ChatSseClient {
   private baseUrl: string
   private handlers: Map<string, SseEventHandler[]> = new Map()
@@ -101,9 +117,10 @@ export class ChatSseClient {
     this.emit('cancelled', { type: 'cancelled' })
 
     try {
-      await fetch(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`, {
+      const cancelUrl = appendTokenToUrl(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`)
+      await fetch(cancelUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getSseAuthHeaders(),
         body: JSON.stringify({}),
       })
     } catch (e) {
@@ -113,7 +130,8 @@ export class ChatSseClient {
 
   async getState(): Promise<any> {
     if (!this._threadId) return { has_interrupts: false }
-    const resp = await fetch(`${this.baseUrl}/api/threads/${this._threadId}/state`)
+    const stateUrl = appendTokenToUrl(`${this.baseUrl}/api/threads/${this._threadId}/state`)
+    const resp = await fetch(stateUrl, { headers: getSseAuthHeaders() })
     return resp.json()
   }
 
@@ -146,9 +164,9 @@ export class ChatSseClient {
       console.warn('[SSE] Already streaming, aborting previous')
       this._abortController?.abort()
       if (this._threadId) {
-        fetch(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`, {
+        fetch(appendTokenToUrl(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getSseAuthHeaders(),
           body: JSON.stringify({}),
         }).catch(() => {})
       }
@@ -158,12 +176,12 @@ export class ChatSseClient {
     this._abortController = controller
     this._streaming = true
 
-    const url = `${this.baseUrl}/api/threads/${this._threadId}/runs/stream`
+    const url = appendTokenToUrl(`${this.baseUrl}/api/threads/${this._threadId}/runs/stream`)
 
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getSseAuthHeaders(),
         body: JSON.stringify(body),
         signal: controller.signal,
       })
