@@ -9,9 +9,11 @@ from fastapi import FastAPI
 from langchain_agentskills import SkillsToolkit
 from langchain_agentskills.loaders import CompositeSkillLoader, DirectorySkillLoader
 
+from lc_agent.core.auth import AuthService
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.permissions import PermissionsService
-from lc_agent.db.engine import init_db
+from lc_agent.db.engine import get_async_session, init_db
+from lc_agent.db.models_auth import User
 from lc_agent.mcp.manager import McpManager
 from lc_agent.server.app import create_app, mount_static_files
 from lc_agent.server import sse as sse_module
@@ -63,6 +65,7 @@ class LcAgentApp:
         import asyncio
 
         await init_db(self._db_url)
+        await self._init_auth(app)
         try:
             from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
             import aiosqlite
@@ -89,6 +92,45 @@ class LcAgentApp:
             yield
         finally:
             await self.mcp_manager.shutdown()
+
+    async def _init_auth(self, app: FastAPI) -> None:
+        """Initialize auth service and ensure at least one admin exists."""
+        auth_config = self.config.get("auth", {})
+        secret = auth_config.get("secret", "")
+        if not secret:
+            print("[Auth] WARNING: auth.secret not configured, authentication DISABLED")
+            return
+
+        token_expire_days = auth_config.get("token_expire_days", 7)
+        auth_service = AuthService(secret=secret, token_expire_days=token_expire_days)
+        app.state.auth_service = auth_service
+
+        from lc_agent.db.models import SessionMeta
+        from sqlalchemy import select
+
+        db = get_async_session(self._db_url)
+        try:
+            result = await db.execute(select(User).where(User.role == "admin"))
+            admin = result.scalar_one_or_none()
+            if admin is None:
+                password = auth_service.generate_random_password()
+                admin = User(
+                    username="admin",
+                    password_hash=auth_service.hash_password(password),
+                    role="admin",
+                )
+                db.add(admin)
+
+                await db.execute(
+                    SessionMeta.__table__.update().where(SessionMeta.user_id == "").values(user_id=admin.id)
+                )
+
+                await db.commit()
+                print(f"[Auth] Created initial admin: admin / {password}")
+            else:
+                print(f"[Auth] Admin user exists: {admin.username}")
+        finally:
+            await db.close()
 
     async def _load_presets_from_db(self):
         """Load user-created presets from database on startup."""
