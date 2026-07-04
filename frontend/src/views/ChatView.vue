@@ -473,6 +473,7 @@ async function handleAllowPermanently(toolName: string) {
   } catch (e) {
     console.error('Failed to permanently allow tool:', e)
   }
+  chatStore.respondToInterrupt(true, agentsStore.currentAgentId)
 }
 
 function handleInterruptDecide(decision: { type: string }) {

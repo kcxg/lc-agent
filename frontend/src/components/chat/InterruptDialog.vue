@@ -38,7 +38,7 @@
     <template v-else>
       <div v-for="(action, idx) in interrupt?.actionRequests ?? []" :key="idx" class="action-item">
         <p><strong>工具:</strong> {{ action.name }}</p>
-        <pre class="action-args">{{ JSON.stringify(action.arguments, null, 2) }}</pre>
+        <pre class="action-args">{{ JSON.stringify(action.args ?? action.arguments, null, 2) }}</pre>
       </div>
     </template>
 
@@ -171,7 +171,6 @@ function allowPermanently() {
   if (toolName) {
     emit('allow-permanently', toolName)
   }
-  emit('decide', { type: 'approve' })
 }
 
 function approve() {

@@ -578,7 +578,11 @@ export const useChatStore = defineStore('chat', () => {
 
   function respondToInterrupt(approved: boolean, presetId: string = '__chat__') {
     const client = _ensureClient()
-    client.sendInterruptResponse(approved, presetId)
+    const count = interrupt.value?.actionRequests?.length || 1
+    const decisions = Array.from({ length: count }, () => ({
+      type: approved ? 'approve' : 'reject',
+    }))
+    client.sendInterruptResume({ decisions }, presetId)
     interrupt.value = null
   }
 
