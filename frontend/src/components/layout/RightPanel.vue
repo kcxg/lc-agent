@@ -1,42 +1,44 @@
 <template>
   <aside class="right-panel">
     <div class="right-panel-fixed">
-      <div class="panel-section">
-        <h4>模型</h4>
-        <ModelSelector
-          :models="toolsStore.models"
-          :current-model="toolsStore.currentModel"
-          @change="toolsStore.setModel"
-        />
-      </div>
-
-      <div class="panel-section window-trim-section">
-        <div class="window-trim-control">
-          <h4>窗口裁剪模型</h4>
-          <el-switch
-            :model-value="summEnabled"
-            size="small"
-            @change="(val: boolean) => { summEnabled = val; updateSummarization({ enabled: val }) }"
+      <template v-if="!agentsStore.isCodeAgent">
+        <div class="panel-section">
+          <h4>模型</h4>
+          <ModelSelector
+            :models="toolsStore.models"
+            :current-model="toolsStore.currentModel"
+            @change="toolsStore.setModel"
           />
         </div>
-        <el-select
-          v-if="summEnabled"
-          v-model="summModel"
-          placeholder="默认同主模型"
-          size="small"
-          filterable
-          clearable
-          class="window-trim-select"
-          @change="updateSummarization({ default_model: $event || '' })"
-        >
-          <el-option
-            v-for="model in toolsStore.models"
-            :key="model.id"
-            :label="model.id"
-            :value="model.id"
-          />
-        </el-select>
-      </div>
+
+        <div class="panel-section window-trim-section">
+          <div class="window-trim-control">
+            <h4>窗口裁剪模型</h4>
+            <el-switch
+              :model-value="summEnabled"
+              size="small"
+              @change="(val: boolean) => { summEnabled = val; updateSummarization({ enabled: val }) }"
+            />
+          </div>
+          <el-select
+            v-if="summEnabled"
+            v-model="summModel"
+            placeholder="默认同主模型"
+            size="small"
+            filterable
+            clearable
+            class="window-trim-select"
+            @change="updateSummarization({ default_model: $event || '' })"
+          >
+            <el-option
+              v-for="model in toolsStore.models"
+              :key="model.id"
+              :label="model.id"
+              :value="model.id"
+            />
+          </el-select>
+        </div>
+      </template>
 
       <div class="panel-section markdown-theme-section">
         <div class="section-header compact-section-header">
@@ -72,7 +74,15 @@
     </div>
 
     <div class="right-panel-scroll">
-      <template v-if="!agentsStore.isChatAgent">
+      <div v-if="agentsStore.isCodeAgent" class="panel-section code-agent-hint">
+        <div class="hint-box code-agent-box">
+          <span class="hint-icon">⚙️</span>
+          <span class="hint-text">代码智能体</span>
+          <span class="hint-sub">此智能体由代码注册，工具、MCP、Skills、提示词和模型由代码中的 graph 决定。当前面板的框架级配置不适用于它。</span>
+        </div>
+      </div>
+
+      <template v-if="!agentsStore.isChatAgent && !agentsStore.isCodeAgent">
         <div class="panel-section">
           <h4>工具</h4>
           <ToolGroupPanel
@@ -538,6 +548,15 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   font-weight: 500;
   color: var(--el-color-primary);
   transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.code-agent-hint .hint-sub {
+  line-height: 1.45;
+}
+
+.code-agent-box {
+  border: 1px solid var(--el-color-primary-light-7);
+  background: color-mix(in srgb, var(--el-color-primary) 7%, var(--el-fill-color-light));
 }
 
 @keyframes spin {
