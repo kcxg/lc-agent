@@ -31,6 +31,7 @@ class SessionMeta(SQLModel, table=True):
     title: str = "新对话"
     agent_id: str = "__chat__"
     model: str = ""
+    user_id: str = Field(default="", index=True)
     message_count: int = 0
     is_pinned: bool = False
     pinned_at: datetime | None = None
