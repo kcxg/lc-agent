@@ -30,19 +30,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { getPermissions, allowTool, removeTool, setPermissions } from '@/api/permissions'
+import { useChatStore } from '@/stores/chat'
 import { ElMessage } from 'element-plus'
 
 const allowlist = ref<string[]>([])
 const newTool = ref('')
+const chatStore = useChatStore()
 
-onMounted(async () => {
+async function fetchList() {
   try {
     const data = await getPermissions()
     allowlist.value = data.tool_allowlist
   } catch (e) {
     console.error('Failed to load permissions:', e)
+  }
+}
+
+onMounted(fetchList)
+
+watch(() => chatStore.isStreaming, (streaming, prev) => {
+  if (prev && !streaming) {
+    fetchList()
   }
 })
 
