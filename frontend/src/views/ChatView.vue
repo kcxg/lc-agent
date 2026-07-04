@@ -142,6 +142,7 @@
       :interrupt="interrupt"
       @decide="handleInterruptDecide"
       @resume="handleInterruptResume"
+      @allow-permanently="handleAllowPermanently"
     />
 
     <CodeBlockModal
@@ -173,6 +174,7 @@ import HttpTracesGroup from '@/components/chat/HttpTracesGroup.vue'
 import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
 import MessageToolbar from '@/components/chat/MessageToolbar.vue'
 import CodeBlockModal from '@/components/chat/CodeBlockModal.vue'
+import { allowTool } from '@/api/permissions'
 
 interface ContentSegment {
   type: 'text' | 'thinking' | 'tool' | 'http'
@@ -464,6 +466,14 @@ watch(errorMessage, (newError) => {
     showErrorNotification(newError)
   }
 })
+
+async function handleAllowPermanently(toolName: string) {
+  try {
+    await allowTool(toolName)
+  } catch (e) {
+    console.error('Failed to permanently allow tool:', e)
+  }
+}
 
 function handleInterruptDecide(decision: { type: string }) {
   chatStore.respondToInterrupt(decision.type === 'approve', agentsStore.currentAgentId)

@@ -50,6 +50,7 @@
       </template>
       <template v-else>
         <el-button @click="reject">拒绝</el-button>
+        <el-button type="success" @click="allowPermanently" :disabled="!firstToolName">永久允许此工具</el-button>
         <el-button type="primary" @click="approve">批准执行</el-button>
       </template>
     </template>
@@ -72,6 +73,7 @@ const props = defineProps<{ interrupt: InterruptInfo | null }>()
 const emit = defineEmits<{
   decide: [decision: { type: string; message?: string }]
   resume: [value: any]
+  'allow-permanently': [toolName: string]
 }>()
 
 const visible = computed({
@@ -98,6 +100,20 @@ const askPayload = computed<AskUserPayload | null>(() => {
 const isAskUser = computed(() => askPayload.value !== null)
 
 const dialogTitle = computed(() => isAskUser.value ? '💬 请回答' : '⚠️ 工具需要审批')
+
+const firstToolName = computed<string | null>(() => {
+  if (!props.interrupt) return null
+  const reqs = props.interrupt.actionRequests
+  if (reqs && reqs.length > 0) return reqs[0].name
+  const data = props.interrupt.data
+  if (data && data.length > 0) {
+    const value = data[0]?.value
+    if (typeof value === 'object' && value?.action_requests?.length > 0) {
+      return value.action_requests[0].name
+    }
+  }
+  return null
+})
 
 const canSubmitAskUser = computed(() => {
   return selectedOption.value !== null || selectedOptions.value.length > 0 || freeInput.value.trim() !== ''
@@ -148,6 +164,14 @@ function submitAskUser() {
   const answer = parts.join('; ')
   if (!answer) return
   emit('resume', answer)
+}
+
+function allowPermanently() {
+  const toolName = firstToolName.value
+  if (toolName) {
+    emit('allow-permanently', toolName)
+  }
+  emit('decide', { type: 'approve' })
 }
 
 function approve() {

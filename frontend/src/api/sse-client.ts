@@ -75,7 +75,8 @@ export class ChatSseClient {
   }
 
   async sendInterruptResponse(approved: boolean, presetId: string, model?: string): Promise<void> {
-    await this.sendInterruptResume({ approved }, presetId, model)
+    const decisions = [{ type: approved ? 'approve' : 'reject' }]
+    await this.sendInterruptResume({ decisions }, presetId, model)
   }
 
   async sendInterruptResume(resumeValue: any, presetId: string, model?: string): Promise<void> {
