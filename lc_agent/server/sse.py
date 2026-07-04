@@ -101,8 +101,13 @@ async def _check_sse_auth(request: Request, thread_id: str) -> JSONResponse | No
         try:
             result = await _db.execute(sa_select(SessionMeta).where(SessionMeta.id == thread_id))
             session_meta = result.scalar_one_or_none()
-            if session_meta and session_meta.user_id and session_meta.user_id != user.id and user.role != "admin":
-                return JSONResponse(status_code=403, content={"detail": "权限不足"})
+            if session_meta:
+                # Deny if session has owner and it's not this user
+                if session_meta.user_id and session_meta.user_id != user.id and user.role != "admin":
+                    return JSONResponse(status_code=403, content={"detail": "权限不足"})
+                # For sessions with no owner (user_id=""), only admin can access
+                if not session_meta.user_id and user.role != "admin":
+                    return JSONResponse(status_code=403, content={"detail": "权限不足"})
         finally:
             await _db.close()
 
@@ -151,8 +156,13 @@ async def run_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
 
 @router.post("/{thread_id}/runs/cancel")
-async def cancel_run(thread_id: str):
+async def cancel_run(thread_id: str, request: Request):
     """Cancel the currently active run for this thread."""
+    user = await _authenticate_sse(request)
+    auth_service = getattr(request.app.state, "auth_service", None)
+    if auth_service is not None and user is None:
+        return JSONResponse(status_code=401, content={"detail": "认证失败"})
+
     _cancel_flags[thread_id] = True
     return {"ok": True, "thread_id": thread_id}
 
@@ -196,13 +206,17 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
     model_id = req.model
     lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
+    user = await _authenticate_sse(request)
 
     try:
         msg_count = await persistence.get_session_message_count(_db_url, thread_id)
         is_first = msg_count == 0
         if is_first:
             preliminary_title = content[:30].strip()
-            await persistence.ensure_session(_db_url, thread_id, preliminary_title, preset_id, model_id)
+            await persistence.ensure_session(
+                _db_url, thread_id, preliminary_title, preset_id, model_id,
+                user_id=user.id if user else "",
+            )
 
         if req.replace_from_message_id:
             await persistence.truncate_from_message(_db_url, thread_id, req.replace_from_message_id)
@@ -379,6 +393,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     model_id = req.model
     lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
+    user = await _authenticate_sse(request)
 
     resume_value = req.command.get("resume", {}) if req.command else {}
 
@@ -484,7 +499,9 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             if isinstance(resume_value, dict):
                 permanently_allow = resume_value.get("permanently_allow")
                 if permanently_allow and hasattr(request.app.state, "permissions"):
-                    request.app.state.permissions.allow_tool(permanently_allow)
+                    # Only admin can permanently allow tools
+                    if user and user.role == "admin":
+                        request.app.state.permissions.allow_tool(permanently_allow)
 
             http_traces = trace_collector.snapshot()
             done_payload: dict[str, Any] = {"is_resume": True}

@@ -47,7 +47,10 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db_session),
 ):
     repo = SessionRepository(db)
-    sessions = await repo.list_all(user_id=user.id)
+    if user.role == "admin":
+        sessions = await repo.list_all()
+    else:
+        sessions = await repo.list_all(user_id=user.id)
     return [serialize_session(s) for s in sessions]
 
 
@@ -58,6 +61,20 @@ async def create_session(
     db: AsyncSession = Depends(get_db_session),
 ):
     repo = SessionRepository(db)
+
+    # Validate agent access for non-admin
+    if user.role != "admin" and body.agent_id != "__chat__":
+        from lc_agent.db.models_auth import UserAgentAccess
+        from sqlalchemy import select as sa_select
+        result = await db.execute(
+            sa_select(UserAgentAccess).where(
+                UserAgentAccess.user_id == user.id,
+                UserAgentAccess.agent_id == body.agent_id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=403, detail="无权使用此智能体")
+
     session = await repo.create(
         title=body.title,
         agent_id=body.agent_id,

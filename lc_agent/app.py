@@ -100,6 +100,8 @@ class LcAgentApp:
         if not secret:
             print("[Auth] WARNING: auth.secret not configured, authentication DISABLED")
             return
+        if len(secret) < 16:
+            raise ValueError("Auth secret must be at least 16 characters")
 
         token_expire_days = auth_config.get("token_expire_days", 7)
         auth_service = AuthService(secret=secret, token_expire_days=token_expire_days)

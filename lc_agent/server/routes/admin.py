@@ -6,6 +6,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lc_agent.core.auth import AuthService
+from lc_agent.db.models import ChatUiMessage, SessionMeta
 from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.server.auth_middleware import require_admin
 from lc_agent.server.dependencies import get_db_session
@@ -84,6 +85,14 @@ async def delete_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    # Delete messages for user's sessions
+    user_sessions = await db.execute(select(SessionMeta.id).where(SessionMeta.user_id == user_id))
+    session_ids = [row[0] for row in user_sessions.all()]
+    if session_ids:
+        from sqlalchemy import delete as sa_delete
+        await db.execute(sa_delete(ChatUiMessage).where(ChatUiMessage.session_id.in_(session_ids)))
+        await db.execute(sa_delete(SessionMeta).where(SessionMeta.user_id == user_id))
 
     await db.execute(delete(UserAgentAccess).where(UserAgentAccess.user_id == user_id))
     await db.delete(user)
