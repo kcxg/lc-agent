@@ -12,21 +12,25 @@ _MIGRATIONS_DIR = str(Path(__file__).parent / "migrations")
 
 
 def get_async_engine(url: str = "sqlite+aiosqlite:///./lc_agent_data.db"):
-    global _engine
-    if _engine is None:
+    global _engine, _engine_url, _async_session_factory, _async_session_factory_url
+    if _engine is None or _engine_url != url:
+        _async_session_factory = None
+        _async_session_factory_url = None
         engine_kwargs = {"echo": False}
         if url.endswith(":memory:"):
             engine_kwargs["poolclass"] = StaticPool
             engine_kwargs["connect_args"] = {"check_same_thread": False}
         _engine = create_async_engine(url, **engine_kwargs)
+        _engine_url = url
     return _engine
 
 
 def get_async_session(url: str = "sqlite+aiosqlite:///./lc_agent_data.db") -> AsyncSession:
-    global _async_session_factory
-    if _async_session_factory is None:
+    global _async_session_factory, _async_session_factory_url
+    if _async_session_factory is None or _async_session_factory_url != url:
         engine = get_async_engine(url)
         _async_session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        _async_session_factory_url = url
     return _async_session_factory()
 
 

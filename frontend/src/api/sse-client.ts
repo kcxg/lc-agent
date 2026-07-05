@@ -34,6 +34,8 @@ export interface SseMessage {
 
 export type SseEventHandler = (msg: SseMessage) => void
 
+export type ReasoningEffort = 'default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
 function getSseAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const token = localStorage.getItem('token')
@@ -73,7 +75,7 @@ export class ChatSseClient {
     content: string,
     presetId?: string,
     model?: string,
-    options?: { replaceFromMessageId?: string; history?: any[] },
+    options?: { replaceFromMessageId?: string; history?: any[]; reasoningEffort?: ReasoningEffort },
   ): Promise<void> {
     if (!this._threadId) throw new Error('threadId not set')
 
@@ -85,6 +87,9 @@ export class ChatSseClient {
     if (options?.replaceFromMessageId) {
       body.replace_from_message_id = options.replaceFromMessageId
       body.history = options.history || []
+    }
+    if (options?.reasoningEffort && options.reasoningEffort !== 'default') {
+      body.reasoning_effort = options.reasoningEffort
     }
 
     await this._startStream(body)

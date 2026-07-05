@@ -1,6 +1,6 @@
 <template>
   <div class="chat-view">
-    <div class="messages-container">
+    <div ref="messagesContainerRef" class="messages-container">
       <Welcome
         v-if="messages.length === 0 && !isLoading"
         title="Start a conversation"
@@ -8,22 +8,27 @@
         variant="borderless"
       />
       <template v-else>
-        <div v-if="hasOlderMessages" class="load-older-messages">
-          <el-button
-            :loading="loadingOlder"
-            size="small"
-            text
-            @click="chatStore.loadOlderMessages(chatStore.threadId!)"
-          >
-            {{ loadingOlder ? '加载中...' : '加载更早的消息' }}
-          </el-button>
-        </div>
         <BubbleList
-        :list="bubbleList"
-        max-height="100%"
-        :auto-scroll="isStreaming"
-        :virtual="false"
-      >
+          :list="bubbleList"
+          max-height="100%"
+          :auto-scroll="isStreaming"
+          :virtual="false"
+        >
+        <template #item="{ item }">
+          <div
+            v-if="item.itemType === 'load-older'"
+            class="load-older-messages is-inline"
+          >
+            <el-button
+              :loading="loadingOlder"
+              size="small"
+              text
+              @click="handleLoadOlderMessages"
+            >
+              {{ loadingOlder ? '加载中...' : '加载更早的消息' }}
+            </el-button>
+          </div>
+        </template>
         <template #avatar="{ item }">
           <div
             class="role-avatar"
@@ -169,7 +174,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { BubbleList, Thinking, Welcome } from 'vue-element-plus-x'
 import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
@@ -189,6 +194,8 @@ import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
 import MessageToolbar from '@/components/chat/MessageToolbar.vue'
 import CodeBlockModal from '@/components/chat/CodeBlockModal.vue'
 
+const LOAD_OLDER_REVEAL_THRESHOLD = 24
+
 interface ContentSegment {
   type: 'text' | 'thinking' | 'tool' | 'http'
   text?: string
@@ -196,7 +203,7 @@ interface ContentSegment {
   httpIndex?: number
 }
 
-type ChatBubbleItem = BubbleListItemProps & {
+type MessageBubbleItem = BubbleListItemProps & {
   role: 'user' | 'ai'
   messageId: string
   isMarkdown?: boolean
@@ -211,12 +218,35 @@ type ChatBubbleItem = BubbleListItemProps & {
   isStreamingMessage?: boolean
 }
 
+type LoadOlderBubbleItem = BubbleListItemProps & {
+  key: string
+  type: 'load-older'
+  itemType: 'load-older'
+  role: 'ai'
+  messageId: string
+  content: string
+  isMarkdown?: boolean
+  toolCalls?: ToolCall[]
+  segments?: ContentSegment[]
+  usage?: MessageUsage
+  hasThinking?: boolean
+  hasToolCalls?: boolean
+  hasAnswer?: boolean
+  httpTraces?: HttpTrace[]
+  httpTracesCount?: number
+  isStreamingMessage?: boolean
+}
+
+type ChatBubbleItem = MessageBubbleItem | LoadOlderBubbleItem
+
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
 const toolsStore = useToolsStore()
 const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder } = storeToRefs(chatStore)
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
+const messagesContainerRef = ref<HTMLElement | null>(null)
+const showLoadOlderMessages = ref(false)
 const codeModalVisible = ref(false)
 const codeModalSource = ref('')
 const codeModalLanguage = ref('')
@@ -228,10 +258,21 @@ const isLoading = computed(() => {
   return last.role === 'user' && !isStreaming.value
 })
 
-const bubbleList = computed((): ChatBubbleItem[] =>
-  messages.value
+function createLoadOlderItem(): LoadOlderBubbleItem {
+  return {
+    key: 'load-older-messages',
+    type: 'load-older',
+    itemType: 'load-older',
+    role: 'ai',
+    messageId: '__load_older_messages__',
+    content: '加载更早的消息',
+  }
+}
+
+const bubbleList = computed((): ChatBubbleItem[] => {
+  const items = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
-    .map((msg, idx, arr) => {
+    .map((msg, idx, arr): MessageBubbleItem => {
       const segs = msg.role === 'assistant' && hasStructuredSegments(msg.content || '', msg.toolCalls)
         ? parseSegments(msg.content || '', msg.toolCalls)
         : undefined
@@ -263,8 +304,11 @@ const bubbleList = computed((): ChatBubbleItem[] =>
         avatarSize: '28px',
         avatarGap: '8px',
       }
-    }),
-)
+    })
+
+  if (hasOlderMessages.value) items.unshift(createLoadOlderItem())
+  return items
+})
 
 const lastUserMessage = computed(() =>
   [...messages.value].reverse().find(msg => msg.role === 'user'),
@@ -428,6 +472,7 @@ function handleSend(content: string) {
   chatStore.sendMessage(content, agentsStore.currentAgentId, modelOverride, {
     replaceFromMessageId: editMessageId || undefined,
     history,
+    reasoningEffort: toolsStore.reasoningEffort,
   })
 }
 
@@ -484,6 +529,10 @@ watch(errorMessage, (newError) => {
   }
 })
 
+watch(() => messages.value[messages.value.length - 1]?.id, () => {
+  scrollMessagesToBottom()
+}, { flush: 'post' })
+
 function handleAllowPermanently(toolName: string) {
   chatStore.respondToInterrupt(true, agentsStore.currentAgentId, toolName)
 }
@@ -537,6 +586,41 @@ async function copyMarkdownCode(button: HTMLButtonElement) {
     button.textContent = previousText
     button.classList.remove('copied')
   }, 1400)
+}
+
+function getMessagesScroller() {
+  return messagesContainerRef.value?.querySelector('.elx-bubble-list') as HTMLElement | null
+}
+
+function handleMessagesScroll() {
+  const scroller = getMessagesScroller()
+  if (!scroller) {
+    showLoadOlderMessages.value = false
+    return
+  }
+  const canRevealLoadOlderMessages = scroller.scrollHeight > scroller.clientHeight + LOAD_OLDER_REVEAL_THRESHOLD
+  showLoadOlderMessages.value = canRevealLoadOlderMessages && scroller.scrollTop <= LOAD_OLDER_REVEAL_THRESHOLD
+}
+
+async function scrollMessagesToBottom() {
+  await nextTick()
+  const container = getMessagesScroller()
+  if (!container) return
+  container.scrollTop = container.scrollHeight
+  handleMessagesScroll()
+}
+
+async function handleLoadOlderMessages() {
+  if (loadingOlder.value) return
+  const sessionId = chatStore.threadId
+  const scroller = getMessagesScroller()
+  if (!sessionId || !scroller) return
+
+  const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop
+  await chatStore.loadOlderMessages(sessionId)
+  await nextTick()
+  scroller.scrollTop = scroller.scrollHeight - distanceFromBottom
+  handleMessagesScroll()
 }
 
 function handleMarkdownClick(event: MouseEvent) {
@@ -607,6 +691,10 @@ onBeforeUnmount(() => {
   width: 100%;
   flex: 1;
   min-height: 0;
+}
+
+.messages-container :deep(.elx-bubble-list__list) {
+  height: 100%;
   overflow-y: auto;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
@@ -616,10 +704,11 @@ onBeforeUnmount(() => {
   min-height: 100%;
 }
 
-.load-older-messages {
+.load-older-messages.is-inline {
   display: flex;
   justify-content: center;
-  padding: 8px 0;
+  width: 100%;
+  padding: 4px 0 8px;
 }
 
 .messages-container :deep(.elx-bubble) {

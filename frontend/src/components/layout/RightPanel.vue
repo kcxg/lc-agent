@@ -9,6 +9,22 @@
             :current-model="toolsStore.currentModel"
             @change="toolsStore.setModel"
           />
+          <div class="reasoning-effort-control">
+            <span class="reasoning-effort-label">reasoning_effort</span>
+            <el-select
+              :model-value="toolsStore.reasoningEffort"
+              size="small"
+              class="reasoning-effort-select"
+              @update:model-value="toolsStore.setReasoningEffort"
+            >
+              <el-option
+                v-for="effort in ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']"
+                :key="effort"
+                :label="effort"
+                :value="effort"
+              />
+            </el-select>
+          </div>
         </div>
 
         <div class="panel-section window-trim-section">

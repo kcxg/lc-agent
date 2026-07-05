@@ -56,8 +56,8 @@ export const api = {
     fetchApi<void>(`/sessions/${id}`, { method: 'DELETE' }),
   getSessionMessages: (id: string, params?: { limit?: number; offset?: number }) => {
     const qs = new URLSearchParams()
-    if (params?.limit) qs.set('limit', String(params.limit))
-    if (params?.offset) qs.set('offset', String(params.offset))
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params?.offset !== undefined) qs.set('offset', String(params.offset))
     const query = qs.toString()
     return fetchApi<{ total: number; offset: number; limit: number; messages: any[] }>(
       `/sessions/${id}/messages${query ? '?' + query : ''}`

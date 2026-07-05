@@ -51,6 +51,7 @@ class RunStreamRequest(BaseModel):
     command: dict[str, Any] | None = None
     preset_id: str = "__chat__"
     model: str = ""
+    reasoning_effort: str | None = None
     replace_from_message_id: str | None = None
     history: list[dict[str, Any]] | None = None
 
@@ -204,6 +205,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
     content = req.input or ""
     preset_id = req.preset_id
     model_id = req.model
+    reasoning_effort = req.reasoning_effort
     lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
     user = await _authenticate_sse(request)
@@ -260,6 +262,8 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             stream_kwargs: dict[str, Any] = {}
             if model_id:
                 stream_kwargs["model_id"] = model_id
+            if reasoning_effort:
+                stream_kwargs["reasoning_effort"] = reasoning_effort
             if req.replace_from_message_id:
                 stream_kwargs["history"] = req.history or []
 
@@ -305,7 +309,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
             interrupt_sent = False
             try:
-                agent = engine._get_or_build_agent(preset_id, model_id)
+                agent = engine._get_or_build_agent(preset_id, model_id, reasoning_effort=reasoning_effort)
                 state_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": engine.recursion_limit}
                 graph_state = await agent.aget_state(state_config)
                 if graph_state.tasks:
@@ -391,6 +395,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     engine = _get_engine()
     preset_id = req.preset_id
     model_id = req.model
+    reasoning_effort = req.reasoning_effort
     lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
     user = await _authenticate_sse(request)
@@ -411,7 +416,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             tool_calls: list[dict[str, Any]] = list(existing_tool_calls)
             from langgraph.types import Command
 
-            agent = engine._get_or_build_agent(preset_id, model_id)
+            agent = engine._get_or_build_agent(preset_id, model_id, reasoning_effort=reasoning_effort)
             if agent is None:
                 yield stream_utils.format_sse_event("error", {
                     "title": "缺少 AI 代理配置",

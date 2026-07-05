@@ -1,4 +1,4 @@
-﻿# lc_agent/app.py
+# lc_agent/app.py
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -20,15 +20,49 @@ from lc_agent.server import sse as sse_module
 from lc_agent.skills.filtered_loader import FilteredSkillLoader
 
 
+def _resolve_sqlite_url(url: str, root: Path) -> str:
+    prefixes = ("sqlite+aiosqlite:///", "sqlite:///")
+    for prefix in prefixes:
+        if not url.startswith(prefix):
+            continue
+        path_part = url[len(prefix):]
+        if path_part in (":memory:", ""):
+            return url
+        path = Path(path_part)
+        if path.is_absolute():
+            return url
+        return f"{prefix}{(root / path).resolve().as_posix()}"
+    return url
+
+
+def _resolve_file_path(path: str, root: Path) -> str:
+    if path == ":memory:":
+        return path
+    file_path = Path(path)
+    if file_path.is_absolute():
+        return str(file_path)
+    return str((root / file_path).resolve())
+
+
 class LcAgentApp:
     """Main application orchestrator — creates engine, server, and runs."""
 
     def __init__(self, config: dict, host: str = "127.0.0.1", port: int = 8000):
         self.config = config
+        project_root = Path(config.get("_project_root") or Path.cwd())
+        database_config = self.config.setdefault("database", {})
+        database_config["url"] = _resolve_sqlite_url(
+            database_config.get("url", "sqlite+aiosqlite:///./lc_agent_data.db"),
+            project_root,
+        )
+        database_config["checkpoint_path"] = _resolve_file_path(
+            database_config.get("checkpoint_path", "./lc_agent_checkpoints.db"),
+            project_root,
+        )
         self.host = host
         self.port = port
-        self._db_url = config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
-        self._checkpoint_path = config.get("database", {}).get("checkpoint_path", "./lc_agent_checkpoints.db")
+        self._db_url = database_config["url"]
+        self._checkpoint_path = database_config["checkpoint_path"]
         permissions_path = config.get("permissions", {}).get("path", "./permissions.jsonc")
         self._permissions_service = PermissionsService(permissions_path=Path(permissions_path))
         self.engine = AgentEngine(config)

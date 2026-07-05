@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { ChatSseClient, type SseMessage } from '@/api/sse-client'
+import { ChatSseClient, type ReasoningEffort, type SseMessage } from '@/api/sse-client'
 import { useSessionsStore } from '@/stores/sessions'
 import { api } from '@/api/http'
 import { createClientId } from '@/utils/client-id'
+
+const INITIAL_MESSAGE_LIMIT = 6
 
 export interface LlmRoundUsage {
   inputTokens: number
@@ -101,6 +103,7 @@ export interface ReplayMessage {
 export interface SendMessageOptions {
   replaceFromMessageId?: string
   history?: ReplayMessage[]
+  reasoningEffort?: ReasoningEffort
 }
 
 function normalizeToolStatus(status: any): ToolCall['status'] {
@@ -576,6 +579,7 @@ export const useChatStore = defineStore('chat', () => {
     client.sendMessage(content.trim(), presetId, modelId, {
       replaceFromMessageId: options.replaceFromMessageId,
       history: options.history,
+      reasoningEffort: options.reasoningEffort,
     })
   }
 
@@ -621,7 +625,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadMessages(sessionId: string) {
     try {
-      const resp = await api.getSessionMessages(sessionId)
+      const resp = await api.getSessionMessages(sessionId, { limit: INITIAL_MESSAGE_LIMIT })
       const total = resp?.total ?? 0
       const rawMessages = resp?.messages ?? resp
       totalMessageCount.value = total
@@ -641,7 +645,8 @@ export const useChatStore = defineStore('chat', () => {
     if (!hasOlderMessages.value || loadingOlder.value || _currentOffset <= 0) return
     loadingOlder.value = true
     try {
-      const newOffset = Math.max(0, _currentOffset - 50)
+      const olderPageSize = INITIAL_MESSAGE_LIMIT
+      const newOffset = Math.max(0, _currentOffset - olderPageSize)
       const newLimit = _currentOffset - newOffset
       if (newLimit <= 0) return
 
