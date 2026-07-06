@@ -10,11 +10,17 @@ except PackageNotFoundError:
 
 from lc_agent.app import LcAgentApp
 from lc_agent.config.loader import load_config
+from lc_agent.core.traced_llm import (
+    create_traced_chat_openai,
+    create_traced_openai_http_client,
+)
 from lc_agent.tools.registry import ToolRegistry, tool
 
 __all__ = [
     "LcAgentApp",
     "load_config",
+    "create_traced_chat_openai",
+    "create_traced_openai_http_client",
     "ToolRegistry",
     "tool",
     "__version__",

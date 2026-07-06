@@ -34,5 +34,7 @@ class AgentPreset(BaseModel):
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
 
+    llm_params: dict | None = None
+
     source: str = "user"
     default_enabled: bool = True

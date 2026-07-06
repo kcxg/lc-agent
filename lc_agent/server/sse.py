@@ -10,7 +10,7 @@ import traceback
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from lc_agent.core.engine import AgentEngine
@@ -51,11 +51,68 @@ class RunStreamRequest(BaseModel):
     command: dict[str, Any] | None = None
     preset_id: str = "__chat__"
     model: str = ""
+    llm_params: dict[str, Any] | None = None
     replace_from_message_id: str | None = None
     history: list[dict[str, Any]] | None = None
 
 
 # --- Endpoints ---
+
+
+async def _authenticate_sse(request: Request):
+    """Authenticate SSE request. Returns User or None. Returns None if auth not configured."""
+    auth_service = getattr(request.app.state, "auth_service", None)
+    if auth_service is None:
+        return None  # Auth not configured, allow all (backward compat)
+
+    from lc_agent.server.auth_middleware import _extract_token
+    token = _extract_token(request)
+    if not token:
+        return None
+
+    payload = auth_service.decode_token(token)
+    if payload is None:
+        return None
+
+    from lc_agent.db.models_auth import User
+    from sqlalchemy import select
+    from lc_agent.db.engine import get_async_session
+    db_url = request.app.state.config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
+    db = get_async_session(db_url)
+    try:
+        result = await db.execute(select(User).where(User.id == payload["sub"]))
+        return result.scalar_one_or_none()
+    finally:
+        await db.close()
+
+
+async def _check_sse_auth(request: Request, thread_id: str) -> JSONResponse | None:
+    """Return JSONResponse if access denied, None if allowed."""
+    user = await _authenticate_sse(request)
+    auth_service = getattr(request.app.state, "auth_service", None)
+    if auth_service is not None and user is None:
+        return JSONResponse(status_code=401, content={"detail": "认证失败"})
+
+    if user is not None:
+        from lc_agent.db.engine import get_async_session as _get_session
+        from lc_agent.db.models import SessionMeta
+        from sqlalchemy import select as sa_select
+        db_url = request.app.state.config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
+        _db = _get_session(db_url)
+        try:
+            result = await _db.execute(sa_select(SessionMeta).where(SessionMeta.id == thread_id))
+            session_meta = result.scalar_one_or_none()
+            if session_meta:
+                # Deny if session has owner and it's not this user
+                if session_meta.user_id and session_meta.user_id != user.id and user.role != "admin":
+                    return JSONResponse(status_code=403, content={"detail": "权限不足"})
+                # For sessions with no owner (user_id=""), only admin can access
+                if not session_meta.user_id and user.role != "admin":
+                    return JSONResponse(status_code=403, content={"detail": "权限不足"})
+        finally:
+            await _db.close()
+
+    return None
 
 
 def _get_lock(thread_id: str) -> asyncio.Lock:
@@ -67,6 +124,10 @@ def _get_lock(thread_id: str) -> asyncio.Lock:
 @router.post("/{thread_id}/runs/stream")
 async def run_stream(thread_id: str, req: RunStreamRequest, request: Request):
     """Unified entry: send message or resume interrupt, returning SSE stream."""
+    auth_error = await _check_sse_auth(request, thread_id)
+    if auth_error is not None:
+        return auth_error
+
     lock = _get_lock(thread_id)
     if lock.locked():
         _cancel_flags[thread_id] = True
@@ -96,15 +157,24 @@ async def run_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
 
 @router.post("/{thread_id}/runs/cancel")
-async def cancel_run(thread_id: str):
+async def cancel_run(thread_id: str, request: Request):
     """Cancel the currently active run for this thread."""
+    user = await _authenticate_sse(request)
+    auth_service = getattr(request.app.state, "auth_service", None)
+    if auth_service is not None and user is None:
+        return JSONResponse(status_code=401, content={"detail": "认证失败"})
+
     _cancel_flags[thread_id] = True
     return {"ok": True, "thread_id": thread_id}
 
 
 @router.get("/{thread_id}/state")
-async def get_thread_state(thread_id: str, preset_id: str = "__chat__", model: str = ""):
+async def get_thread_state(thread_id: str, request: Request, preset_id: str = "__chat__", model: str = ""):
     """Check thread state — primarily for pending interrupts."""
+    auth_error = await _check_sse_auth(request, thread_id)
+    if auth_error is not None:
+        return auth_error
+
     engine = _get_engine()
     agent = engine._get_or_build_agent(preset_id, model)
     if agent is None:
@@ -135,15 +205,20 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
     content = req.input or ""
     preset_id = req.preset_id
     model_id = req.model
+    llm_params = req.llm_params
     lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
+    user = await _authenticate_sse(request)
 
     try:
         msg_count = await persistence.get_session_message_count(_db_url, thread_id)
         is_first = msg_count == 0
         if is_first:
             preliminary_title = content[:30].strip()
-            await persistence.ensure_session(_db_url, thread_id, preliminary_title, preset_id, model_id)
+            await persistence.ensure_session(
+                _db_url, thread_id, preliminary_title, preset_id, model_id,
+                user_id=user.id if user else "",
+            )
 
         if req.replace_from_message_id:
             await persistence.truncate_from_message(_db_url, thread_id, req.replace_from_message_id)
@@ -187,6 +262,8 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             stream_kwargs: dict[str, Any] = {}
             if model_id:
                 stream_kwargs["model_id"] = model_id
+            if llm_params:
+                stream_kwargs["llm_params"] = llm_params
             if req.replace_from_message_id:
                 stream_kwargs["history"] = req.history or []
 
@@ -232,7 +309,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
             interrupt_sent = False
             try:
-                agent = engine._get_or_build_agent(preset_id, model_id)
+                agent = engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
                 state_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": engine.recursion_limit}
                 graph_state = await agent.aget_state(state_config)
                 if graph_state.tasks:
@@ -318,8 +395,10 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     engine = _get_engine()
     preset_id = req.preset_id
     model_id = req.model
+    llm_params = req.llm_params
     lock = _get_lock(thread_id)
     _cancel_flags[thread_id] = False
+    user = await _authenticate_sse(request)
 
     resume_value = req.command.get("resume", {}) if req.command else {}
 
@@ -337,7 +416,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             tool_calls: list[dict[str, Any]] = list(existing_tool_calls)
             from langgraph.types import Command
 
-            agent = engine._get_or_build_agent(preset_id, model_id)
+            agent = engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
             if agent is None:
                 yield stream_utils.format_sse_event("error", {
                     "title": "缺少 AI 代理配置",
@@ -425,7 +504,9 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             if isinstance(resume_value, dict):
                 permanently_allow = resume_value.get("permanently_allow")
                 if permanently_allow and hasattr(request.app.state, "permissions"):
-                    request.app.state.permissions.allow_tool(permanently_allow)
+                    # Only admin can permanently allow tools
+                    if user and user.role == "admin":
+                        request.app.state.permissions.allow_tool(permanently_allow)
 
             http_traces = trace_collector.snapshot()
             done_payload: dict[str, Any] = {"is_resume": True}

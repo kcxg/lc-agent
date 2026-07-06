@@ -32,6 +32,7 @@ async def ensure_session(
     title: str,
     agent_id: str,
     model: str,
+    user_id: str = "",
 ) -> None:
     """Create session metadata if not exists, or update if exists."""
     try:
@@ -49,6 +50,7 @@ async def ensure_session(
                     agent_id=agent_id,
                     model=model,
                     message_count=0,
+                    user_id=user_id,
                 )
             else:
                 await repo.update(

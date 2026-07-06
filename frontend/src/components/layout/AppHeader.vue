@@ -46,10 +46,27 @@
       </div>
     </div>
     <div class="header-right">
-      <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">新对话</button>
+      <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">
+        <el-icon class="mobile-btn-icon"><Plus /></el-icon>
+        <span class="mobile-btn-text">新对话</span>
+      </button>
       <span class="mobile-only">
         <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
       </span>
+      <el-dropdown trigger="click" @command="handleUserCommand">
+        <span class="user-dropdown-trigger">
+          <el-icon><UserFilled /></el-icon>
+          <span class="username-text">{{ authStore.user?.username || '用户' }}</span>
+          <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
+        </span>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="change-password">修改密码</el-dropdown-item>
+            <el-dropdown-item v-if="authStore.isAdmin" command="admin">管理后台</el-dropdown-item>
+            <el-dropdown-item divided command="logout">登出</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <el-button
         class="mobile-tools-btn"
         :icon="Setting"
@@ -62,22 +79,41 @@
       <el-button :icon="RefreshRight" circle size="small" title="刷新页面" @click="reloadPage" />
       <el-button :icon="isDark ? Sunny : Moon" circle size="small" @click="toggleDark()" />
     </div>
+
+    <ChangePasswordDialog ref="changePasswordRef" />
   </header>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAgentsStore } from '@/stores/agents'
+import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon, Menu, Setting, RefreshRight, MagicStick } from '@element-plus/icons-vue'
+import { Sunny, Moon, Menu, Setting, RefreshRight, MagicStick, UserFilled, ArrowDown, Plus } from '@element-plus/icons-vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
+import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
 
+const router = useRouter()
 const agentsStore = useAgentsStore()
+const authStore = useAuthStore()
 const chatStore = useChatStore()
 const toolsStore = useToolsStore()
 const { isDark, toggleDark } = useTheme()
+const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
+
+function handleUserCommand(command: string) {
+  if (command === 'change-password') {
+    changePasswordRef.value?.open()
+  } else if (command === 'admin') {
+    router.push('/admin')
+  } else if (command === 'logout') {
+    authStore.logout()
+    router.push('/login')
+  }
+}
 
 function reloadPage() {
   window.location.reload()
@@ -93,6 +129,7 @@ function getAgentIcon(agent: any): string {
 
 const hasMessages = computed(() => chatStore.messages.length > 0)
 const sessionModel = computed(() => {
+  if (agentsStore.isCodeAgent) return '代码内定义'
   const model = toolsStore.currentModel || agentsStore.currentAgent?.default_model || ''
   if (!model) return ''
   const parts = model.split('/')
@@ -254,6 +291,37 @@ defineEmits<{
   border: 1px solid var(--el-border-color);
   border-radius: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.user-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--el-border-color);
+  background: var(--el-fill-color-light);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.user-dropdown-trigger:hover {
+  background: var(--el-fill-color);
+  border-color: var(--el-color-primary-light-5);
+}
+
+.username-text {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdown-arrow {
+  font-size: 12px;
+  opacity: 0.6;
 }
 
 
@@ -471,7 +539,7 @@ defineEmits<{
   }
 
   .header-right {
-    gap: 4px;
+    gap: 0;
   }
 
   .agent-select {
@@ -499,17 +567,57 @@ defineEmits<{
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 34px;
-    padding: 0 10px;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    min-width: 28px;
+    padding: 0;
     white-space: nowrap;
     font-size: 12px;
     flex-shrink: 0;
-    border-radius: 999px;
+    border-radius: 50%;
+  }
+  .mobile-new-chat-btn .mobile-btn-text {
+    display: none;
+  }
+  .mobile-new-chat-btn .mobile-btn-icon {
+    font-size: 14px;
+  }
+
+  .user-dropdown-trigger .username-text,
+  .user-dropdown-trigger .dropdown-arrow {
+    display: none;
+  }
+  .user-dropdown-trigger {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .header-right :deep(.el-button.is-circle) {
+    width: 28px;
+    height: 28px;
+    --el-button-size: 28px;
+    margin: 0;
+  }
+
+  .header-right :deep(.el-button + .el-button) {
+    margin-left: 0;
   }
 
   :deep(.copy-rounds-trigger) {
-    min-height: 34px;
-    padding: 0 10px;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
   }
 }
 </style>

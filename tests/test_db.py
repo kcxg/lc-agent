@@ -5,17 +5,18 @@ from lc_agent.db.engine import get_async_session, init_db, reset_engine
 from lc_agent.db.repository import ChatUiMessageRepository, PresetRepository, SessionRepository
 
 
-@pytest.fixture(autouse=True)
-async def setup_db():
+@pytest.fixture
+async def db_url(tmp_path):
     reset_engine()
-    await init_db("sqlite+aiosqlite:///:memory:")
-    yield
+    url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+    await init_db(url)
+    yield url
     reset_engine()
 
 
 @pytest.mark.asyncio
-async def test_create_agent_preset():
-    async with get_async_session("sqlite+aiosqlite:///:memory:") as session:
+async def test_create_agent_preset(db_url):
+    async with get_async_session(db_url) as session:
         preset = AgentPresetDB(name="Test Agent", system_prompt="Hello", default_model="gpt-4")
         session.add(preset)
         await session.commit()
@@ -26,8 +27,8 @@ async def test_create_agent_preset():
 
 
 @pytest.mark.asyncio
-async def test_create_session():
-    async with get_async_session("sqlite+aiosqlite:///:memory:") as session:
+async def test_create_session(db_url):
+    async with get_async_session(db_url) as session:
         sess = SessionMeta(title="Test Chat", agent_id="__default__", model="gpt-4")
         session.add(sess)
         await session.commit()
@@ -38,8 +39,8 @@ async def test_create_session():
 
 
 @pytest.mark.asyncio
-async def test_session_default_values():
-    async with get_async_session("sqlite+aiosqlite:///:memory:") as session:
+async def test_session_default_values(db_url):
+    async with get_async_session(db_url) as session:
         sess = SessionMeta()
         session.add(sess)
         await session.commit()
@@ -49,8 +50,8 @@ async def test_session_default_values():
 
 
 @pytest.mark.asyncio
-async def test_preset_repository_crud():
-    async with get_async_session("sqlite+aiosqlite:///:memory:") as session:
+async def test_preset_repository_crud(db_url):
+    async with get_async_session(db_url) as session:
         repo = PresetRepository(session)
 
         created = await repo.create(name="Coder", system_prompt="Code", default_model="gpt-4")
@@ -73,8 +74,8 @@ async def test_preset_repository_crud():
 
 
 @pytest.mark.asyncio
-async def test_session_repository_crud():
-    async with get_async_session("sqlite+aiosqlite:///:memory:") as session:
+async def test_session_repository_crud(db_url):
+    async with get_async_session(db_url) as session:
         repo = SessionRepository(session)
 
         created = await repo.create(title="Hello chat", agent_id="__default__", model="gpt-4")
@@ -93,8 +94,8 @@ async def test_session_repository_crud():
 
 
 @pytest.mark.asyncio
-async def test_chat_ui_message_repository_preserves_tool_calls_and_usage():
-    async with get_async_session("sqlite+aiosqlite:///:memory:") as session:
+async def test_chat_ui_message_repository_preserves_tool_calls_and_usage(db_url):
+    async with get_async_session(db_url) as session:
         repo = ChatUiMessageRepository(session)
 
         await repo.create(session_id="thread-1", role="user", content="查一下 langgraph")
@@ -138,8 +139,8 @@ async def test_chat_ui_message_repository_preserves_tool_calls_and_usage():
 
 
 @pytest.mark.asyncio
-async def test_chat_ui_message_repository_truncates_from_message_id():
-    async with get_async_session("sqlite+aiosqlite:///:memory:") as session:
+async def test_chat_ui_message_repository_truncates_from_message_id(db_url):
+    async with get_async_session(db_url) as session:
         repo = ChatUiMessageRepository(session)
 
         kept = await repo.create(session_id="thread-edit", role="user", content="第一问")

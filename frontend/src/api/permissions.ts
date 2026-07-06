@@ -1,45 +1,31 @@
-const BASE = '/api/permissions'
+import { fetchApi } from './http'
 
 export interface PermissionsConfig {
   version: number
   tool_allowlist: string[]
 }
 
-async function checkedJson<T>(resp: Response): Promise<T> {
-  if (!resp.ok) {
-    throw new Error(`Permissions API error: ${resp.status} ${resp.statusText}`)
-  }
-  return resp.json()
-}
-
 export async function getPermissions(): Promise<PermissionsConfig> {
-  const resp = await fetch(BASE)
-  return checkedJson(resp)
+  return fetchApi<PermissionsConfig>('/permissions')
 }
 
 export async function allowTool(toolName: string): Promise<PermissionsConfig> {
-  const resp = await fetch(`${BASE}/allow`, {
+  return fetchApi<PermissionsConfig>('/permissions/allow', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tool_name: toolName }),
   })
-  return checkedJson(resp)
 }
 
 export async function removeTool(toolName: string): Promise<PermissionsConfig> {
-  const resp = await fetch(`${BASE}/remove`, {
+  return fetchApi<PermissionsConfig>('/permissions/remove', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tool_name: toolName }),
   })
-  return checkedJson(resp)
 }
 
 export async function setPermissions(tools: string[]): Promise<PermissionsConfig> {
-  const resp = await fetch(BASE, {
+  return fetchApi<PermissionsConfig>('/permissions', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tool_allowlist: tools }),
   })
-  return checkedJson(resp)
 }

@@ -56,6 +56,7 @@ export const useToolsStore = defineStore('tools', () => {
   const mcpServers = ref<McpServer[]>([])
   const skills = ref<Skill[]>([])
   const currentModel = ref('')
+  const llmParams = ref<Record<string, any> | null>(null)
   const mcpRefreshing = ref(false)
 
   const localOverrides = reactive<Record<string, boolean>>({})
@@ -106,8 +107,12 @@ export const useToolsStore = defineStore('tools', () => {
 
   function syncModelWithAgentDefault() {
     const agentsStore = useAgentsStore()
+    if (agentsStore.currentAgent?.source === 'code') {
+      currentModel.value = ''
+      return
+    }
     const defaultModel = agentsStore.currentAgent?.default_model
-    if (defaultModel) {
+    if (defaultModel && defaultModel !== 'custom') {
       currentModel.value = defaultModel
       return
     }
@@ -120,6 +125,22 @@ export const useToolsStore = defineStore('tools', () => {
     for (const key of Object.keys(localOverrides)) {
       delete localOverrides[key]
     }
+  }
+
+  function setLlmParam(key: string, value: any) {
+    if (value === null || value === undefined || value === '') {
+      if (llmParams.value) {
+        delete llmParams.value[key]
+        if (Object.keys(llmParams.value).length === 0) llmParams.value = null
+      }
+    } else {
+      if (!llmParams.value) llmParams.value = {}
+      llmParams.value[key] = value
+    }
+  }
+
+  function resetLlmParams() {
+    llmParams.value = null
   }
 
   async function refreshMcpServers() {
@@ -151,6 +172,7 @@ export const useToolsStore = defineStore('tools', () => {
       watch(() => agentsStore.currentAgentId, () => {
         _clearOverrides()
         syncModelWithAgentDefault()
+        resetLlmParams()
       })
     } catch (e) {
       console.error('[ToolsStore] Failed to fetch:', e)
@@ -214,8 +236,9 @@ export const useToolsStore = defineStore('tools', () => {
   }
 
   return {
-    groups, models, mcpServers, skills, currentModel, mcpRefreshing,
+    groups, models, mcpServers, skills, currentModel, llmParams, mcpRefreshing,
     filteredGroups, filteredMcp, filteredSkills,
-    init, refreshMcpServers, toggleGroup, toggleMcp, toggleSkill, setModel, syncModelWithAgentDefault,
+    init, refreshMcpServers, toggleGroup, toggleMcp, toggleSkill,
+    setModel, setLlmParam, resetLlmParams, syncModelWithAgentDefault,
   }
 })

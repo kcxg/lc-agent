@@ -48,12 +48,22 @@ def test_add_agent_duplicate_raises(app_instance):
 
 
 @pytest.mark.asyncio
-async def test_api_agents_includes_custom(app_instance):
+async def test_api_agents_includes_custom(tmp_path):
     """GET /api/agents should include custom agents with source flag."""
     from lc_agent.db.engine import init_db, reset_engine
+    from tests.conftest import setup_test_auth
 
     reset_engine()
-    await init_db("sqlite+aiosqlite:///./lc_agent_data.db")
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+    await init_db(db_url)
+
+    config = {
+        "provider": {},
+        "agent": {"system_prompt": "Hi", "default_model": ""},
+        "database": {"url": db_url, "checkpoint_path": ":memory:"},
+    }
+    app_instance = LcAgentApp(config)
+    headers = await setup_test_auth(app_instance.fastapi_app, db_url)
 
     mock_graph = MagicMock()
     app_instance.add_agent("api_agent", mock_graph, description="API test")
@@ -62,17 +72,34 @@ async def test_api_agents_includes_custom(app_instance):
         transport=ASGITransport(app=app_instance.fastapi_app),
         base_url="http://test"
     ) as client:
-        resp = await client.get("/api/agents")
+        resp = await client.get("/api/agents", headers=headers)
         assert resp.status_code == 200
         agents = resp.json()
         custom = [a for a in agents if a["id"] == "api_agent"]
         assert len(custom) == 1
         assert custom[0].get("source") == "code"
 
+    reset_engine()
+
 
 @pytest.mark.asyncio
-async def test_api_custom_agent_not_deletable(app_instance):
+async def test_api_custom_agent_not_deletable(tmp_path):
     """DELETE on custom agent should return 403."""
+    from lc_agent.db.engine import init_db, reset_engine
+    from tests.conftest import setup_test_auth
+
+    reset_engine()
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+    await init_db(db_url)
+
+    config = {
+        "provider": {},
+        "agent": {"system_prompt": "Hi", "default_model": ""},
+        "database": {"url": db_url, "checkpoint_path": ":memory:"},
+    }
+    app_instance = LcAgentApp(config)
+    headers = await setup_test_auth(app_instance.fastapi_app, db_url)
+
     mock_graph = MagicMock()
     app_instance.add_agent("protected", mock_graph)
 
@@ -80,7 +107,63 @@ async def test_api_custom_agent_not_deletable(app_instance):
         transport=ASGITransport(app=app_instance.fastapi_app),
         base_url="http://test"
     ) as client:
-        resp = await client.delete("/api/agents/protected")
+        resp = await client.delete("/api/agents/protected", headers=headers)
         assert resp.status_code == 403
 
+    reset_engine()
 
+
+
+
+def test_add_agent_marks_code_agent_as_self_contained():
+    from lc_agent.app import LcAgentApp
+
+    class DummyGraph:
+        async def ainvoke(self, *args, **kwargs):
+            return {"messages": []}
+
+        async def astream_events(self, *args, **kwargs):
+            if False:
+                yield {}
+
+    app = LcAgentApp({"agent": {"default_model": "model-a"}})
+    graph = DummyGraph()
+
+    app.add_agent("research", graph, "Research graph")
+
+    preset = app.engine._custom_presets["research"]
+    assert app.engine._agents["research"] is graph
+    assert preset.source == "code"
+    assert preset.default_model == "custom"
+    assert preset.system_prompt == "Research graph"
+    assert preset.allowed_tool_groups == []
+    assert preset.allowed_mcp_servers == []
+    assert preset.allowed_skills == []
+    assert preset.default_enabled is False
+
+
+def test_code_agent_resolution_returns_registered_graph_without_rebuild(monkeypatch):
+    from lc_agent.app import LcAgentApp
+
+    class DummyGraph:
+        async def ainvoke(self, *args, **kwargs):
+            return {"messages": []}
+
+        async def astream_events(self, *args, **kwargs):
+            if False:
+                yield {}
+
+    app = LcAgentApp({"agent": {"default_model": "model-a"}})
+    graph = DummyGraph()
+    app.add_agent("research", graph, "Research graph")
+    app.engine._mcp_generation = 99
+
+    def fail_build_agent(*args, **kwargs):
+        raise AssertionError("code agents must not be rebuilt through build_agent")
+
+    monkeypatch.setattr(app.engine, "build_agent", fail_build_agent)
+
+    resolved = app.engine._get_or_build_agent("research", model_id="some-ui-model")
+
+    assert resolved is graph
+    assert "research::model::some-ui-model" not in app.engine._agents

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "test:chat-width": "node scripts/check-chat-width-contract.mjs",
+    "test:code-agent": "node scripts/check-code-agent-contract.mjs",
     "test:chat-history": "node scripts/check-chat-history-contract.mjs",
     "test:chat-edit": "node scripts/check-chat-edit-contract.mjs",
     "test:chat-identity": "node scripts/check-chat-identity-thinking-contract.mjs",
@@ -46,3 +47,4 @@
     "vue-tsc": "^3.3.4"
   }
 }
+

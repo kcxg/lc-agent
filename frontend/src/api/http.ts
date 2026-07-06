@@ -1,10 +1,24 @@
 const BASE_URL = '/api'
 
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = localStorage.getItem('token')
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  return headers
+}
+
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     ...options,
   })
+  if (response.status === 401) {
+    localStorage.removeItem('token')
+    window.dispatchEvent(new CustomEvent('auth:expired'))
+    throw new Error('认证已过期，请重新登录')
+  }
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`)
   }
@@ -40,8 +54,17 @@ export const api = {
     fetchApi<any>(`/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSession: (id: string) =>
     fetchApi<void>(`/sessions/${id}`, { method: 'DELETE' }),
-  getSessionMessages: (id: string) =>
-    fetchApi<any[]>(`/sessions/${id}/messages`),
+  getSessionMessages: (id: string, params?: { limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params?.offset !== undefined) qs.set('offset', String(params.offset))
+    const query = qs.toString()
+    return fetchApi<{ total: number; offset: number; limit: number; messages: any[] }>(
+      `/sessions/${id}/messages${query ? '?' + query : ''}`
+    )
+  },
+  getMessageTraces: (sessionId: string, messageId: string) =>
+    fetchApi<{ traces: any[] }>(`/sessions/${sessionId}/messages/${messageId}/traces`),
 
   getSummarization: () => fetchApi<{ enabled: boolean; default_model: string; trigger: any; keep: any }>('/settings/summarization'),
   updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>

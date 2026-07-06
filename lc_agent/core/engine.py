@@ -97,7 +97,12 @@ class AgentEngine:
         """Return the default agent (Chat - safest)."""
         return self.get_builtin_presets()[0]
 
-    def build_agent(self, preset: AgentPreset | None = None, cache_key: str | None = None):
+    def build_agent(
+        self,
+        preset: AgentPreset | None = None,
+        cache_key: str | None = None,
+        llm_params: dict | None = None,
+    ):
         """Build a LangGraph ReAct agent from preset."""
         if preset is None:
             preset = self.get_default_preset()
@@ -136,7 +141,8 @@ class AgentEngine:
             tools = tools + mcp_tools
 
         model_info = self._find_model(preset.default_model)
-        llm = self._create_llm(model_info, preset.default_model)
+        effective_params = {**(preset.llm_params or {}), **(llm_params or {})}
+        llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
 
         from langchain.agents import create_agent
 
@@ -183,39 +189,60 @@ class AgentEngine:
             timeout=120,
         )
 
-    def _create_llm(self, model_info: ModelInfo | None, model_id: str):
+    def _create_llm(
+        self,
+        model_info: ModelInfo | None,
+        model_id: str,
+        llm_params: dict | None = None,
+    ):
         """Create a chat model instance.
 
         Uses ChatOpenAIReasoning when base_url is set — extracts reasoning_content
         from any provider that returns it (DeepSeek, GLM, etc).
         Uses init_chat_model for standard providers (handles provider routing).
         """
+        params = llm_params or {}
+        temperature = params.get("temperature", 0.7)
+        reasoning_effort = params.get("reasoning_effort")
+        # passthrough: top_p, top_k, presence_penalty, frequency_penalty, max_tokens, etc.
+        HANDLED_KEYS = {"temperature", "reasoning_effort"}
+        extra_params = {k: v for k, v in params.items() if k not in HANDLED_KEYS and v is not None}
+
         if model_info and model_info.base_url:
             from lc_agent.core.chat_model import ChatOpenAIReasoning
             kwargs: dict[str, Any] = dict(
                 model=model_info.id,
                 base_url=model_info.base_url,
                 api_key=model_info.api_key or "not-set",
-                temperature=0.7,
+                temperature=temperature,
                 stream_usage=True,
                 http_async_client=self._build_tracing_async_client(model_info, model_id),
+                **extra_params,
             )
             if model_info.max_output_tokens > 0:
                 kwargs["max_tokens"] = model_info.max_output_tokens
+            if reasoning_effort:
+                kwargs["reasoning_effort"] = reasoning_effort
             return ChatOpenAIReasoning(**kwargs)
 
         from langchain.chat_models import init_chat_model
 
         if model_info:
             model_str = f"{model_info.provider}:{model_info.id}" if model_info.provider else model_info.id
-            return init_chat_model(
-                model_str,
+            kwargs: dict[str, Any] = dict(
                 api_key=model_info.api_key or "not-set",
-                temperature=0.7,
+                temperature=temperature,
                 stream_usage=True,
+                **extra_params,
             )
+            if reasoning_effort:
+                kwargs["reasoning_effort"] = reasoning_effort
+            return init_chat_model(model_str, **kwargs)
 
-        return init_chat_model(model_id, api_key="not-set", temperature=0.7, stream_usage=True)
+        kwargs: dict[str, Any] = dict(api_key="not-set", temperature=temperature, stream_usage=True, **extra_params)
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+        return init_chat_model(model_id, **kwargs)
 
     def _find_model(self, model_id: str) -> ModelInfo | None:
         """Find model info by ID."""
@@ -274,14 +301,16 @@ class AgentEngine:
             return self._presets[preset_id]
         return self.get_default_preset()
 
-    def _get_agent_cache_key(self, preset_id: str, model_id: str = "") -> str:
-        if model_id:
-            return f"{preset_id}::model::{model_id}"
-        return preset_id
+    def _get_agent_cache_key(self, preset_id: str, model_id: str = "", llm_params: dict | None = None) -> str:
+        key = f"{preset_id}::model::{model_id}" if model_id else preset_id
+        if llm_params:
+            import json
+            key = f"{key}::llm::{json.dumps(llm_params, sort_keys=True)}"
+        return key
 
     def invalidate_agent_cache(self, preset_id: str, keep_exact: bool = False) -> None:
-        """Remove cached agents for a preset, including model override variants."""
-        prefix = f"{preset_id}::model::"
+        """Remove cached agents for a preset, including model/llm_params override variants."""
+        prefix = f"{preset_id}::"
         keys = [
             key
             for key in self._agents
@@ -302,15 +331,32 @@ class AgentEngine:
             return preset.model_copy(update={"default_model": model_id})
         return preset
 
-    def _get_or_build_agent(self, preset_id: str, model_id: str = ""):
-        """Get cached agent or build a new one. Rebuilds if MCP state changed."""
-        preset = self._resolve_preset_for_model(preset_id, model_id)
-        cache_key = self._get_agent_cache_key(preset_id, model_id if preset.default_model == model_id else "")
+    def _get_or_build_agent(
+        self,
+        preset_id: str,
+        model_id: str = "",
+        llm_params: dict | None = None,
+    ):
+        """Get cached agent or build a new one. Rebuilds preset agents if MCP state changed."""
+        preset = self._resolve_preset(preset_id)
+        if preset.source == "code" or preset_id in self._custom_presets:
+            agent = self._agents.get(preset_id)
+            if agent is None:
+                raise ValueError(f"Code agent '{preset_id}' is registered without a graph")
+            return agent
+
+        if model_id and self._find_model(model_id):
+            preset = preset.model_copy(update={"default_model": model_id})
+        cache_key = self._get_agent_cache_key(
+            preset_id,
+            model_id if preset.default_model == model_id else "",
+            llm_params=llm_params,
+        )
         mcp_gen = getattr(self, '_mcp_generation', 0)
         cached = self._agents.get(cache_key)
         cached_gen = self._agent_mcp_gen.get(cache_key, -1)
         if cached is None or cached_gen != mcp_gen:
-            agent = self.build_agent(preset, cache_key=cache_key)
+            agent = self.build_agent(preset, cache_key=cache_key, llm_params=llm_params)
             self._agent_mcp_gen[cache_key] = mcp_gen
             return agent
         return cached
@@ -336,9 +382,10 @@ class AgentEngine:
         preset_id: str = "__chat__",
         model_id: str = "",
         history: list[dict[str, str]] | None = None,
+        llm_params: dict | None = None,
     ) -> AsyncIterator[dict]:
         """Stream chat responses as events."""
-        agent = self._get_or_build_agent(preset_id, model_id)
+        agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
         input_messages = list(history or [])

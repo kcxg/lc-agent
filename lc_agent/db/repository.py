@@ -49,10 +49,12 @@ class SessionRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def list_all(self, limit: int = 50) -> list[SessionMeta]:
-        result = await self.session.execute(
-            select(SessionMeta).order_by(SessionMeta.updated_at.desc()).limit(limit)
-        )
+    async def list_all(self, limit: int = 50, user_id: str | None = None) -> list[SessionMeta]:
+        stmt = select(SessionMeta)
+        if user_id:
+            stmt = stmt.where(SessionMeta.user_id == user_id)
+        stmt = stmt.order_by(SessionMeta.updated_at.desc()).limit(limit)
+        result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_by_id(self, session_id: str) -> SessionMeta | None:
@@ -129,13 +131,27 @@ class ChatUiMessageRepository:
             pass
         return message
 
-    async def list_by_session(self, session_id: str) -> list[ChatUiMessage]:
-        result = await self.session.execute(
+    async def list_by_session(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[ChatUiMessage]:
+        stmt = (
             select(ChatUiMessage)
             .where(ChatUiMessage.session_id == session_id)
             .order_by(ChatUiMessage.created_at, ChatUiMessage.id)
         )
+        if offset > 0:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def get_by_id(self, message_id: str) -> ChatUiMessage | None:
+        return await self.session.get(ChatUiMessage, message_id)
 
     async def truncate_from_message(self, session_id: str, message_id: str) -> int:
         anchor = await self.session.get(ChatUiMessage, message_id)
