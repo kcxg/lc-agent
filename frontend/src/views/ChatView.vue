@@ -1,12 +1,15 @@
 <template>
   <div class="chat-view">
     <div ref="messagesContainerRef" class="messages-container">
-      <Welcome
-        v-if="messages.length === 0 && !isLoading"
-        title="开始新的对话"
-        description="有什么想法、问题或任务，都可以直接告诉我。"
-        variant="borderless"
-      />
+      <div v-if="messages.length === 0 && !isLoading" class="chat-empty">
+        <div class="empty-orb" aria-hidden="true">
+          <div class="orb-ring ring-1" />
+          <div class="orb-ring ring-2" />
+          <div class="orb-core" />
+        </div>
+        <h2 class="empty-title">开始新的对话</h2>
+        <p class="empty-desc">有什么想法、问题或任务，都可以直接告诉我。</p>
+      </div>
       <template v-else>
         <BubbleList
           :list="bubbleList"
@@ -183,7 +186,7 @@ const TOOL_MARKER = `${C}TOOL:`
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { BubbleList, Thinking, Welcome } from 'vue-element-plus-x'
+import { BubbleList, Thinking } from 'vue-element-plus-x'
 import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
 import { Cpu, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -987,15 +990,86 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
-.messages-container :deep(.elx-welcome) {
-  background: var(--el-bg-color-overlay) !important;
-  border: 1px solid var(--el-border-color-lighter) !important;
-  border-radius: 12px;
-  color: var(--el-text-color-primary);
+/* ── Empty state ─────────────────────────── */
+.chat-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 24px;
+  user-select: none;
 }
 
-.messages-container :deep(.elx-welcome__title) {
-  color: var(--el-text-color-primary) !important;
+.empty-orb {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-orb .orb-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--el-color-primary) 25%, transparent);
+  animation: orb-breathe 4s ease-in-out infinite;
+}
+
+.empty-orb .ring-1 {
+  width: 88px;
+  height: 88px;
+  animation-delay: 0s;
+}
+
+.empty-orb .ring-2 {
+  width: 64px;
+  height: 64px;
+  animation-delay: 0.6s;
+  border-color: color-mix(in srgb, var(--el-color-primary) 18%, transparent);
+}
+
+.empty-orb .orb-core {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 60%, var(--el-color-info)));
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--el-color-primary) 35%, transparent),
+    0 0 60px color-mix(in srgb, var(--el-color-primary) 15%, transparent);
+}
+
+@keyframes orb-breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.85;
+  }
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--el-text-color-primary);
+  line-height: 1.3;
+}
+
+.empty-desc {
+  margin: 0;
+  max-width: 360px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--el-text-color-secondary);
+  text-wrap: balance;
 }
 
 @media (max-width: 960px) {
