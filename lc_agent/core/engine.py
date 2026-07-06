@@ -32,6 +32,12 @@ class AgentEngine:
         self._mcp_generation: int = 0
         self.recursion_limit: int = config.get("agent", {}).get("recursion_limit", 100)
 
+    def _memory_enabled(self) -> bool:
+        memory_conf = self.config.get("memory", {})
+        if isinstance(memory_conf, dict):
+            return memory_conf.get("enabled", True)
+        return getattr(memory_conf, "enabled", True)
+
     def _parse_models(self, config: dict) -> list[ModelInfo]:
         """Extract ModelInfo list from config."""
         models = []
@@ -141,15 +147,27 @@ class AgentEngine:
             mcp_tools = self._mcp_manager.get_filtered_langchain_tools(preset.allowed_mcp_servers)
             tools = tools + mcp_tools
 
+        kwargs: dict[str, Any] = {}
+        if self._checkpointer:
+            kwargs["checkpointer"] = self._checkpointer
+
+        if self._store is not None and self._memory_enabled():
+            from lc_agent.core.memory import (
+                AgentRuntimeContext,
+                MEMORY_SYSTEM_PROMPT,
+                build_memory_tools,
+            )
+
+            tools = tools + build_memory_tools()
+            system_prompt = f"{system_prompt}\n\n{MEMORY_SYSTEM_PROMPT}"
+            kwargs["store"] = self._store
+            kwargs["context_schema"] = AgentRuntimeContext
+
         model_info = self._find_model(preset.default_model)
         effective_params = {**(preset.llm_params or {}), **(llm_params or {})}
         llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
 
         from langchain.agents import create_agent
-
-        kwargs: dict[str, Any] = {}
-        if self._checkpointer:
-            kwargs["checkpointer"] = self._checkpointer
 
         middleware = [TodoListMiddleware()]
         middleware.extend(self._build_summarization_middleware(preset))
@@ -362,14 +380,25 @@ class AgentEngine:
             return agent
         return cached
 
-    async def chat(self, message: str, thread_id: str, preset_id: str = "__chat__", model_id: str = "") -> str:
+    async def chat(
+        self,
+        message: str,
+        thread_id: str,
+        preset_id: str = "__chat__",
+        model_id: str = "",
+        user_id: str = "anonymous",
+    ) -> str:
         """Send a message and get a response (non-streaming)."""
+        from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
+
         agent = self._get_or_build_agent(preset_id, model_id)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
+        context = AgentRuntimeContext(user_id=normalize_memory_user_id(user_id))
         result = await agent.ainvoke(
             {"messages": [{"role": "user", "content": message}]},
             config=config,
+            context=context,
         )
         messages = result.get("messages", [])
         if messages:
@@ -384,16 +413,21 @@ class AgentEngine:
         model_id: str = "",
         history: list[dict[str, str]] | None = None,
         llm_params: dict | None = None,
+        user_id: str = "anonymous",
     ) -> AsyncIterator[dict]:
         """Stream chat responses as events."""
+        from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
+
         agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
+        context = AgentRuntimeContext(user_id=normalize_memory_user_id(user_id))
         input_messages = list(history or [])
         input_messages.append({"role": "user", "content": message})
         async for event in agent.astream_events(
             {"messages": input_messages},
             config=config,
+            context=context,
             version="v2",
         ):
             yield event

@@ -79,6 +79,7 @@ class TestAgentEngine:
 
     def test_build_agent_adds_memory_tools_when_store_enabled(self, sample_config, monkeypatch):
         from lc_agent.core.engine import AgentEngine
+        from lc_agent.core.memory import MEMORY_SYSTEM_PROMPT
 
         captured = {}
         config = {
@@ -94,7 +95,7 @@ class TestAgentEngine:
         }
         engine = AgentEngine(config, store=object())
 
-        monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id: object())
+        monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id, llm_params=None: object())
         monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
 
         def fake_create_agent(**kwargs):
@@ -114,7 +115,7 @@ class TestAgentEngine:
             "memory__delete_memory",
         }
         assert expected.issubset({tool.name for tool in captured["tools"]})
-        assert "跨会话长期记忆" in captured["system_prompt"]
+        assert MEMORY_SYSTEM_PROMPT in captured["system_prompt"]
 
     def test_parses_models_from_config(self, sample_config):
         from lc_agent.core.engine import AgentEngine
@@ -201,9 +202,10 @@ class TestAgentEngine:
         captured = {}
 
         class FakeAgent:
-            async def astream_events(self, inputs, config, version):
+            async def astream_events(self, inputs, *, config, context, version):
                 captured["inputs"] = inputs
                 captured["config"] = config
+                captured["context"] = context
                 captured["version"] = version
                 if False:
                     yield {}
@@ -232,6 +234,7 @@ class TestAgentEngine:
             "configurable": {"thread_id": "thread-1"},
             "recursion_limit": 100,
         }
+        assert captured["context"].user_id == "anonymous"
         assert captured["version"] == "v2"
         assert events == []
 
