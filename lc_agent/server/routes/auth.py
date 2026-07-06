@@ -1,15 +1,13 @@
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from lc_agent.server.auth import (
-    clear_auth_cookie,
-    get_auth_config,
-    is_request_authenticated,
-    set_auth_cookie,
-    validate_admin_credentials,
-)
+from lc_agent.db.models_auth import User
+from lc_agent.server.auth_middleware import get_auth_service, get_current_user
+from lc_agent.server.dependencies import get_db_session
 
-router = APIRouter(tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
@@ -17,30 +15,52 @@ class LoginRequest(BaseModel):
     password: str
 
 
-@router.get("/auth/me")
-async def auth_state(request: Request):
-    settings = get_auth_config(request.app.state.config)
-    authenticated = is_request_authenticated(request)
-    username = settings.admin_username if authenticated and settings.enabled else ""
-    return {"authenticated": authenticated, "username": username}
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 
-@router.post("/auth/login")
-async def login(body: LoginRequest, request: Request, response: Response):
-    settings = get_auth_config(request.app.state.config)
-    if not settings.enabled:
-        return {"authenticated": True, "username": ""}
-    if not validate_admin_credentials(settings, body.username, body.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
-    set_auth_cookie(response, settings)
-    return {"authenticated": True, "username": settings.admin_username}
+@router.post("/login")
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db_session)):
+    auth_service = get_auth_service(request)
+    result = await db.execute(select(User).where(User.username == body.username))
+    user = result.scalar_one_or_none()
+    if user is None or not auth_service.verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="认证失败")
+
+    token = auth_service.create_token(user_id=user.id, username=user.username, role=user.role)
+    return {
+        "token": token,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role,
+        },
+    }
 
 
-@router.post("/auth/logout")
-async def logout(request: Request, response: Response):
-    settings = get_auth_config(request.app.state.config)
-    clear_auth_cookie(response, settings)
-    return {"authenticated": False}
+@router.get("/me")
+async def me(user: User = Depends(get_current_user)):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+    }
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    auth_service = get_auth_service(request)
+    if not auth_service.verify_password(body.old_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="旧密码错误")
+
+    result = await db.execute(select(User).where(User.id == user.id))
+    db_user = result.scalar_one()
+    db_user.password_hash = auth_service.hash_password(body.new_password)
+    await db.commit()
+    return {"message": "密码修改成功"}

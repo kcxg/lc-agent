@@ -1,47 +1,67 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import { api } from '@/api/http'
+import { ref, computed } from 'vue'
+import { login as apiLogin, getMe } from '@/api/auth'
 
 export const useAuthStore = defineStore('auth', () => {
-  const initialized = ref(false)
-  const authenticated = ref(false)
-  const username = ref('')
+  const token = ref<string>(localStorage.getItem('token') || '')
+  const user = ref<{ id: string; username: string; role: string } | null>(null)
+  const authRequired = ref<boolean | null>(null)
+  const isAuthenticated = computed(() => !!token.value && !!user.value)
+  const isAdmin = computed(() => user.value?.role === 'admin')
 
-  async function refreshAuth() {
+  async function checkBackendAuth(): Promise<boolean> {
     try {
-      const state = await api.getAuthState()
-      authenticated.value = state.authenticated
-      username.value = state.username || ''
+      const resp = await fetch('/api/health')
+      const data = await resp.json()
+      const enabled = data.auth_enabled ?? false
+      authRequired.value = enabled
+      return enabled
     } catch {
-      authenticated.value = false
-      username.value = ''
-    } finally {
-      initialized.value = true
+      authRequired.value = false
+      return false
     }
   }
 
-  async function login(name: string, password: string) {
-    const result = await api.login({ username: name, password })
-    authenticated.value = result.authenticated
-    username.value = result.username || ''
-    initialized.value = true
+  async function login(username: string, password: string) {
+    const resp = await apiLogin(username, password)
+    token.value = resp.token
+    user.value = resp.user
+    localStorage.setItem('token', resp.token)
   }
 
-  async function logout() {
+  function logout() {
+    token.value = ''
+    user.value = null
+    localStorage.removeItem('token')
+  }
+
+  async function checkAuth(): Promise<boolean> {
+    if (!token.value) return false
     try {
-      await api.logout()
-    } finally {
-      authenticated.value = false
-      username.value = ''
-      initialized.value = true
+      user.value = await getMe(token.value)
+      return true
+    } catch {
+      logout()
+      return false
     }
   }
 
-  function markUnauthenticated() {
-    authenticated.value = false
-    username.value = ''
-    initialized.value = true
+  if (typeof window !== 'undefined') {
+    window.addEventListener('auth:expired', () => {
+      logout()
+      window.location.hash = '#/login'
+    })
   }
 
-  return { initialized, authenticated, username, refreshAuth, login, logout, markUnauthenticated }
+  return {
+    token,
+    user,
+    authRequired,
+    isAuthenticated,
+    isAdmin,
+    login,
+    logout,
+    checkAuth,
+    checkBackendAuth,
+  }
 })
