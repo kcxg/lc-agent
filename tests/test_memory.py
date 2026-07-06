@@ -85,6 +85,35 @@ async def test_memory_tools_use_runtime_store():
     assert "style" not in found_after_delete
 
 
+def test_memory_tools_do_not_expose_runtime_argument():
+    from lc_agent.core.memory import build_memory_tools
+
+    for tool in build_memory_tools(namespace=MEMORY_NAMESPACE):
+        assert "runtime" not in tool.args
+
+
+def test_memory_store_index_targets_content_field():
+    from lc_agent.core.memory import OpenAICompatibleEmbeddings, build_store_index
+
+    index = build_store_index(
+        {
+            "semantic_search": {
+                "enabled": True,
+                "api_key": "test-key",
+                "base_url": "https://embeddings.example/v1",
+                "model": "test-embedding-model",
+                "dims": 1024,
+            }
+        }
+    )
+
+    assert index is not None
+    assert index["fields"] == ["content"]
+    assert "text_fields" not in index
+    assert index["dims"] == 1024
+    assert isinstance(index["embed"], OpenAICompatibleEmbeddings)
+
+
 @pytest.mark.asyncio
 async def test_memory_insert_does_not_overwrite_existing_key_for_same_user():
     from langgraph.store.memory import InMemoryStore
