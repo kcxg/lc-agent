@@ -9,8 +9,10 @@ from fastapi import FastAPI
 from langchain_agentskills import SkillsToolkit
 from langchain_agentskills.loaders import CompositeSkillLoader, DirectorySkillLoader
 
+from lc_agent.config.schema import MemoryConfig
 from lc_agent.core.auth import AuthService
 from lc_agent.core.engine import AgentEngine
+from lc_agent.core.memory import aclose_memory_store, create_sqlite_memory_store
 from lc_agent.core.permissions import PermissionsService
 from lc_agent.db.engine import get_async_session, init_db
 from lc_agent.db.models_auth import User
@@ -42,6 +44,12 @@ def _resolve_file_path(path: str, root: Path) -> str:
     if file_path.is_absolute():
         return str(file_path)
     return str((root / file_path).resolve())
+
+
+def _get_config_value(config, name: str, default=None):
+    if isinstance(config, dict):
+        return config.get(name, default)
+    return getattr(config, name, default)
 
 
 class LcAgentApp:
@@ -98,33 +106,51 @@ class LcAgentApp:
         """FastAPI lifespan: startup and shutdown logic."""
         import asyncio
 
-        await init_db(self._db_url)
-        await self._init_auth(app)
+        memory_store = None
         try:
-            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-            import aiosqlite
-            conn = await aiosqlite.connect(self._checkpoint_path)
-            saver = AsyncSqliteSaver(conn)
-            await saver.setup()
-            self.engine._checkpointer = saver
-        except Exception as e:
-            print(f"[Warning] Checkpoint saver setup failed, using None: {e}")
-
-        await self._load_presets_from_db()
-
-        async def _connect_mcp_background():
+            await init_db(self._db_url)
+            await self._init_auth(app)
             try:
-                await self.mcp_manager.connect_all()
-                connected = [s for s in self.mcp_manager.servers if s.status == "connected"]
-                if connected:
-                    print(f"[MCP] Connected: {[s.name for s in connected]}")
+                from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+                import aiosqlite
+                conn = await aiosqlite.connect(self._checkpoint_path)
+                saver = AsyncSqliteSaver(conn)
+                await saver.setup()
+                self.engine._checkpointer = saver
             except Exception as e:
-                print(f"[MCP] Background connection error: {e}")
+                print(f"[Warning] Checkpoint saver setup failed, using None: {e}")
 
-        asyncio.create_task(_connect_mcp_background())
-        try:
+            memory_config = self.config.get("memory")
+            if memory_config is None:
+                memory_config = MemoryConfig().model_dump()
+            if _get_config_value(memory_config, "enabled", False):
+                memory_type = _get_config_value(memory_config, "type", "sqlite")
+                if memory_type != "sqlite":
+                    raise ValueError("Only sqlite long-term memory is supported")
+                memory_path = _resolve_file_path(
+                    _get_config_value(memory_config, "path", "./lc_agent_memory.db"),
+                    Path(self.config.get("_project_root") or Path.cwd()),
+                )
+                memory_store = await create_sqlite_memory_store(memory_path, memory_config=memory_config)
+                self.engine._store = memory_store
+
+            await self._load_presets_from_db()
+
+            async def _connect_mcp_background():
+                try:
+                    await self.mcp_manager.connect_all()
+                    connected = [s for s in self.mcp_manager.servers if s.status == "connected"]
+                    if connected:
+                        print(f"[MCP] Connected: {[s.name for s in connected]}")
+                except Exception as e:
+                    print(f"[MCP] Background connection error: {e}")
+
+            asyncio.create_task(_connect_mcp_background())
             yield
         finally:
+            if memory_store is not None:
+                await aclose_memory_store(memory_store)
+                self.engine._store = None
             await self.mcp_manager.shutdown()
 
     async def _init_auth(self, app: FastAPI) -> None:

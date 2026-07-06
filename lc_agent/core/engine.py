@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 class AgentEngine:
     """Core agent engine wrapping langchain.agents.create_agent with middleware support."""
 
-    def __init__(self, config: dict, checkpointer=None):
+    def __init__(self, config: dict, checkpointer=None, store=None):
         self.config = config
         self.tool_registry = ToolRegistry()
         self._checkpointer = checkpointer
+        self._store = store
         self._agents: dict[str, Any] = {}
         self._current_preset: AgentPreset | None = None
         self._models: list[ModelInfo] = self._parse_models(config)
