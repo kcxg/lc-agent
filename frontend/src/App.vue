@@ -1,7 +1,7 @@
 <template>
   <ConfigProvider :theme="isDark ? 'dark' : 'light'">
   <router-view v-if="route.name === 'login'" />
-  <div v-else-if="authStore.isAuthenticated" class="app-container">
+  <div v-else-if="!authStore.authRequired || authStore.isAuthenticated" class="app-container">
     <AppHeader
       :app-name="appName"
       :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
@@ -93,13 +93,13 @@ onMounted(async () => {
       appName.value = health.app_name
     }
   } catch { /* use default */ }
-  if (authStore.isAuthenticated) {
+  if (!authStore.authRequired || authStore.isAuthenticated) {
     await initializeProtectedStores()
   }
 })
 
 watch(() => authStore.isAuthenticated, async authenticated => {
-  if (authenticated) {
+  if (!authStore.authRequired || authenticated) {
     await initializeProtectedStores()
   } else {
     protectedStoresReady.value = false
