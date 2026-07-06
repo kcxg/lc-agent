@@ -44,10 +44,12 @@
         <button class="header-btn btn-new-chat" @click="$emit('newChat')">+ 新对话</button>
         <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
       </div>
-
     </div>
     <div class="header-right">
       <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">新对话</button>
+      <span class="mobile-only">
+        <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
+      </span>
       <el-button
         class="mobile-tools-btn"
         :icon="Setting"
@@ -73,13 +75,13 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
-import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon, Menu, Setting, RefreshRight, SwitchButton, MagicStick } from '@element-plus/icons-vue'
-import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
-import { computed } from 'vue'
+import { useTheme } from '@/composables/useTheme'
+import { Sunny, Moon, Menu, Setting, RefreshRight, MagicStick, SwitchButton } from '@element-plus/icons-vue'
+import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
 
 const agentsStore = useAgentsStore()
 const chatStore = useChatStore()
@@ -105,7 +107,6 @@ const sessionModel = computed(() => {
   const parts = model.split('/')
   return parts[parts.length - 1] || model
 })
-
 
 defineProps<{
   appName: string
@@ -165,7 +166,8 @@ defineEmits<{
 
 .mobile-sidebar-btn,
 .mobile-tools-btn,
-.mobile-new-chat-btn {
+.mobile-new-chat-btn,
+.mobile-only {
   display: none;
 }
 
@@ -180,7 +182,6 @@ defineEmits<{
   min-width: 0;
   flex-wrap: nowrap;
 }
-
 
 .agent-select {
   width: 260px;
@@ -456,9 +457,14 @@ defineEmits<{
 
   .mobile-sidebar-btn,
   .mobile-tools-btn,
-  .mobile-new-chat-btn {
+  .mobile-new-chat-btn,
+  .mobile-only {
     display: inline-flex;
     flex-shrink: 0;
+  }
+
+  .desktop-only {
+    display: none;
   }
 
   .header-left {
