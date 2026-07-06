@@ -55,6 +55,51 @@ class TestAgentEngine:
         engine = AgentEngine(sample_config)
         assert engine.config == sample_config
 
+    def test_build_agent_passes_long_term_memory_store(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine
+
+        captured = {}
+        store = object()
+        engine = AgentEngine(sample_config, store=store)
+
+        monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id: object())
+        monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+
+        def fake_create_agent(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr("langchain.agents.create_agent", fake_create_agent)
+
+        engine.build_agent()
+
+        assert captured["store"] is store
+
+    def test_build_agent_adds_memory_tools_when_store_enabled(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine
+
+        captured = {}
+        engine = AgentEngine(sample_config, store=object())
+
+        monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id: object())
+        monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+
+        def fake_create_agent(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr("langchain.agents.create_agent", fake_create_agent)
+
+        engine.build_agent()
+
+        tool_names = {tool.name for tool in captured["tools"]}
+        assert {
+            "memory__save_memory",
+            "memory__search_memories",
+            "memory__delete_memory",
+        }.issubset(tool_names)
+        assert "跨会话长期记忆" in captured["system_prompt"]
+
     def test_parses_models_from_config(self, sample_config):
         from lc_agent.core.engine import AgentEngine
         engine = AgentEngine(sample_config)

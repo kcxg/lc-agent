@@ -75,6 +75,12 @@ class TestAppConfig:
         )
         assert config.agent["default_model"] == "m1"
 
+    def test_memory_defaults_use_sqlite_not_in_memory(self):
+        config = AppConfig()
+        assert config.memory["enabled"] is True
+        assert config.memory["type"] == "sqlite"
+        assert config.memory["path"] == "./lc_agent_memory.db"
+
     def test_rejects_missing_agent_section(self):
         with pytest.raises(ValidationError):
             AppConfig(agent="not a dict")
