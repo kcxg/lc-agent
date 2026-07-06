@@ -2,13 +2,12 @@
 import mimetypes
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 
 from lc_agent import __version__
-from lc_agent.server.auth import get_auth_config, require_auth
 from lc_agent.server.routes.agents import router as agents_router
 from lc_agent.server.routes.auth import router as auth_router
 from lc_agent.server.routes.health import router as health_router
@@ -21,6 +20,7 @@ from lc_agent.server.routes.tools import router as tools_router
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 from lc_agent.server.routes.settings import router as settings_router
+from lc_agent.server.routes.admin import router as admin_router
 from lc_agent.server.routes.permissions import router as permissions_router
 from lc_agent.server.sse import router as sse_router
 
@@ -45,19 +45,17 @@ def create_app(config: dict, lifespan=None) -> FastAPI:
 
     app.state.config = config
 
-    auth_settings = get_auth_config(config)
-    protected_dependencies = [Depends(require_auth)] if auth_settings.enabled else []
-
     app.include_router(health_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
-    app.include_router(tools_router, prefix="/api", dependencies=protected_dependencies)
-    app.include_router(models_router, prefix="/api", dependencies=protected_dependencies)
-    app.include_router(agents_router, prefix="/api", dependencies=protected_dependencies)
-    app.include_router(sessions_router, prefix="/api", dependencies=protected_dependencies)
-    app.include_router(skills_router, prefix="/api", dependencies=protected_dependencies)
-    app.include_router(mcp_router, prefix="/api", dependencies=protected_dependencies)
-    app.include_router(settings_router, prefix="/api", dependencies=protected_dependencies)
-    app.include_router(permissions_router, prefix="/api", dependencies=protected_dependencies)
+    app.include_router(admin_router, prefix="/api")
+    app.include_router(tools_router, prefix="/api")
+    app.include_router(models_router, prefix="/api")
+    app.include_router(agents_router, prefix="/api")
+    app.include_router(sessions_router, prefix="/api")
+    app.include_router(skills_router, prefix="/api")
+    app.include_router(mcp_router, prefix="/api")
+    app.include_router(settings_router, prefix="/api")
+    app.include_router(permissions_router, prefix="/api")
     app.include_router(sse_router)
 
     return app

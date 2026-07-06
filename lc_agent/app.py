@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from langchain_agentskills import SkillsToolkit
 from langchain_agentskills.loaders import CompositeSkillLoader, DirectorySkillLoader
 
+from lc_agent.core.auth import AuthService
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.permissions import PermissionsService
 from lc_agent.db.engine import init_db
@@ -51,6 +52,17 @@ class LcAgentApp:
         self.fastapi_app.state.engine = self.engine
         self.fastapi_app.state.permissions = self._permissions_service
         self.engine._permissions_service = self._permissions_service
+        # JWT auth service (replaces old cookie-based auth)
+        auth_config = config.get("auth", {})
+        if auth_config.get("enabled", False):
+            auth_secret = auth_config.get("secret", "")
+            if len(auth_secret) >= 16:
+                self.fastapi_app.state.auth_service = AuthService(
+                    secret=auth_secret,
+                    token_expire_days=auth_config.get("token_expire_days", 7),
+                )
+            else:
+                print("[Auth] WARNING: auth.enabled=true but secret is too short (<16 chars), auth disabled")
         sse_module.configure(self.engine, self._db_url)
         mount_static_files(self.fastapi_app)
 
@@ -63,6 +75,8 @@ class LcAgentApp:
         import asyncio
 
         await init_db(self._db_url)
+        # Ensure default admin user exists if auth is enabled
+        await self._ensure_default_admin()
         try:
             from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
             import aiosqlite
@@ -117,6 +131,39 @@ class LcAgentApp:
                 print(f"[Agents] Loaded {loaded} user presets from database")
         except Exception as e:
             print(f"[Warning] Failed to load presets from DB: {e}")
+        finally:
+            await session.close()
+
+    async def _ensure_default_admin(self):
+        """Create default admin user if auth is enabled and no users exist."""
+        auth_service = getattr(self.fastapi_app.state, "auth_service", None)
+        if auth_service is None:
+            return
+
+        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.models_auth import User
+        from sqlalchemy import select
+
+        auth_config = self.config.get("auth", {})
+        default_username = auth_config.get("admin_username", "admin")
+        default_password = auth_config.get("admin_password", "admin123")
+
+        session = get_async_session(self._db_url)
+        try:
+            result = await session.execute(select(User).limit(1))
+            if result.first() is not None:
+                return  # Users already exist
+
+            user = User(
+                username=default_username,
+                password_hash=auth_service.hash_password(default_password),
+                role="admin",
+            )
+            session.add(user)
+            await session.commit()
+            print(f"[Auth] Created default admin user: {default_username}")
+        except Exception as e:
+            print(f"[Warning] Failed to create default admin: {e}")
         finally:
             await session.close()
 
