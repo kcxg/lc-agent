@@ -33,7 +33,7 @@ const router = createRouter({
 
 setUnauthorizedHandler(async () => {
   const authStore = useAuthStore()
-  authStore.markUnauthenticated()
+  authStore.logout()
   await router.replace({
     path: '/login',
     query: { redirect: router.currentRoute.value.fullPath },
@@ -43,22 +43,29 @@ setUnauthorizedHandler(async () => {
 router.beforeEach(async to => {
   const authStore = useAuthStore()
 
-  if (!authStore.initialized) {
-    await authStore.refreshAuth()
+  if (authStore.authRequired === null) {
+    await authStore.checkBackendAuth()
+  }
+
+  if (!authStore.authRequired) {
+    return true
   }
 
   if (to.meta.public) {
-    if (to.name === 'login' && authStore.authenticated) {
+    if (to.name === 'login' && authStore.isAuthenticated) {
       const redirect = typeof to.query.redirect === 'string' ? to.query.redirect : '/'
       return redirect === to.fullPath ? '/' : redirect
     }
     return true
   }
 
-  if (!authStore.authenticated) {
-    return {
-      path: '/login',
-      query: { redirect: to.fullPath },
+  if (!authStore.isAuthenticated) {
+    await authStore.checkAuth()
+    if (!authStore.isAuthenticated) {
+      return {
+        path: '/login',
+        query: { redirect: to.fullPath },
+      }
     }
   }
 
