@@ -24,6 +24,11 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/admin',
+      name: 'admin',
+      component: () => import('@/views/AdminView.vue'),
+    },
+    {
       path: '/test-segments',
       name: 'test-segments',
       component: () => import('@/views/TestSegments.vue'),

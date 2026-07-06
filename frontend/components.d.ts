@@ -56,4 +56,7 @@ declare module 'vue' {
     ToolCallCard: typeof import('./src/components/chat/ToolCallCard.vue')['default']
     ToolGroupPanel: typeof import('./src/components/panels/ToolGroupPanel.vue')['default']
   }
+  export interface GlobalDirectives {
+    vLoading: typeof import('element-plus/es')['ElLoadingDirective']
+  }
 }
