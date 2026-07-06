@@ -3,8 +3,8 @@
     <div ref="messagesContainerRef" class="messages-container">
       <Welcome
         v-if="messages.length === 0 && !isLoading"
-        title="Start a conversation"
-        description="Ask me anything"
+        title="开始新的对话"
+        description="有什么想法、问题或任务，都可以直接告诉我。"
         variant="borderless"
       />
       <template v-else>
