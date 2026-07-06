@@ -61,61 +61,23 @@
       <span class="model-badge">{{ modelName }}</span>
       <el-button :icon="RefreshRight" circle size="small" title="刷新页面" @click="reloadPage" />
       <el-button :icon="isDark ? Sunny : Moon" circle size="small" @click="toggleDark()" />
-      <el-tooltip content="修改密码" placement="bottom">
-        <el-button
-          :icon="Lock"
-          circle
-          size="small"
-          aria-label="修改密码"
-          @click="showPasswordDialog = true"
-        />
-      </el-tooltip>
-      <el-tooltip v-if="authStore.isAdmin" content="管理后台" placement="bottom">
-        <el-button
-          :icon="Setting"
-          circle
-          size="small"
-          aria-label="管理后台"
-          @click="goAdmin"
-        />
-      </el-tooltip>
-      <el-tooltip content="退出登录" placement="bottom">
-        <el-button
-          :icon="SwitchButton"
-          circle
-          size="small"
-          aria-label="退出登录"
-          @click="$emit('logout')"
-        />
-      </el-tooltip>
     </div>
-    <ChangePasswordDialog v-model:visible="showPasswordDialog" />
   </header>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
-import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon, Menu, Setting, RefreshRight, MagicStick, SwitchButton, Lock } from '@element-plus/icons-vue'
+import { Sunny, Moon, Menu, Setting, RefreshRight, MagicStick } from '@element-plus/icons-vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
-import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
 
-const router = useRouter()
 const agentsStore = useAgentsStore()
-const authStore = useAuthStore()
 const chatStore = useChatStore()
 const toolsStore = useToolsStore()
 const { isDark, toggleDark } = useTheme()
-const showPasswordDialog = ref(false)
-
-function goAdmin() {
-  router.push('/admin')
-}
 
 function reloadPage() {
   window.location.reload()
@@ -149,7 +111,6 @@ defineEmits<{
   changeAgent: [id: string]
   openMobileSidebar: []
   openMobileTools: []
-  logout: []
 }>()
 </script>
 

@@ -11,7 +11,6 @@
       @change-agent="handleAgentChange"
       @open-mobile-sidebar="openMobileLeft"
       @open-mobile-tools="openMobileRight"
-      @logout="handleLogout"
     />
 
     <div
@@ -243,16 +242,6 @@ async function handleAgentChange(agentId: string) {
   chatStore.disconnect()
   await router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: agentId } })
   closeMobileDrawers()
-}
-
-async function handleLogout() {
-  chatStore.disconnect()
-  closeMobileDrawers()
-  try {
-    await authStore.logout()
-  } finally {
-    await router.replace('/login')
-  }
 }
 
 function editCurrentAgent() {
