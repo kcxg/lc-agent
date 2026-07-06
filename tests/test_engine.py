@@ -198,7 +198,7 @@ class TestAgentEngine:
     async def test_chat_stream_accepts_replay_history(self, sample_config, monkeypatch):
         from lc_agent.core.engine import AgentEngine
 
-        engine = AgentEngine(sample_config)
+        engine = AgentEngine(sample_config, store=object())
         captured = {}
 
         class FakeAgent:
@@ -244,7 +244,7 @@ class TestAgentEngine:
         from lc_agent.core.memory import AgentRuntimeContext
 
         captured = {}
-        engine = AgentEngine(sample_config)
+        engine = AgentEngine(sample_config, store=object())
 
         class FakeAgent:
             async def astream_events(self, payload, *, config, context, version):
@@ -269,6 +269,35 @@ class TestAgentEngine:
         assert captured["context"] == AgentRuntimeContext(user_id="user-123")
         assert captured["config"]["configurable"]["thread_id"] == "thread-1"
         assert captured["version"] == "v2"
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_omits_memory_context_without_store(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine
+
+        captured = {}
+        engine = AgentEngine(sample_config)
+
+        class FakeAgent:
+            async def astream_events(self, payload, **kwargs):
+                captured["payload"] = payload
+                captured["kwargs"] = kwargs
+                if False:
+                    yield {}
+
+        monkeypatch.setattr(engine, "_get_or_build_agent", lambda *args, **kwargs: FakeAgent())
+
+        events = [
+            event async for event in engine.chat_stream(
+                "hello",
+                "thread-1",
+                user_id="user-123",
+            )
+        ]
+
+        assert events == []
+        assert "context" not in captured["kwargs"]
+        assert captured["kwargs"]["config"]["configurable"]["thread_id"] == "thread-1"
+        assert captured["kwargs"]["version"] == "v2"
 
     @pytest.mark.asyncio
     async def test_reset_thread_uses_checkpointer_delete(self, sample_config):

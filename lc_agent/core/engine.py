@@ -38,6 +38,13 @@ class AgentEngine:
             return memory_conf.get("enabled", True)
         return getattr(memory_conf, "enabled", True)
 
+    def _is_code_agent(self, preset_id: str) -> bool:
+        preset = self._resolve_preset(preset_id)
+        return preset.source == "code" or preset_id in self._custom_presets
+
+    def _should_use_memory_context(self, preset_id: str) -> bool:
+        return self._store is not None and self._memory_enabled() and not self._is_code_agent(preset_id)
+
     def _parse_models(self, config: dict) -> list[ModelInfo]:
         """Extract ModelInfo list from config."""
         models = []
@@ -389,17 +396,15 @@ class AgentEngine:
         user_id: str = "anonymous",
     ) -> str:
         """Send a message and get a response (non-streaming)."""
-        from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
-
         agent = self._get_or_build_agent(preset_id, model_id)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
-        context = AgentRuntimeContext(user_id=normalize_memory_user_id(user_id))
-        result = await agent.ainvoke(
-            {"messages": [{"role": "user", "content": message}]},
-            config=config,
-            context=context,
-        )
+        invoke_kwargs: dict[str, Any] = {"config": config}
+        if self._should_use_memory_context(preset_id):
+            from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
+
+            invoke_kwargs["context"] = AgentRuntimeContext(user_id=normalize_memory_user_id(user_id))
+        result = await agent.ainvoke({"messages": [{"role": "user", "content": message}]}, **invoke_kwargs)
         messages = result.get("messages", [])
         if messages:
             return messages[-1].content
@@ -416,19 +421,19 @@ class AgentEngine:
         user_id: str = "anonymous",
     ) -> AsyncIterator[dict]:
         """Stream chat responses as events."""
-        from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
-
         agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
-        context = AgentRuntimeContext(user_id=normalize_memory_user_id(user_id))
         input_messages = list(history or [])
         input_messages.append({"role": "user", "content": message})
+        stream_kwargs: dict[str, Any] = {"config": config, "version": "v2"}
+        if self._should_use_memory_context(preset_id):
+            from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
+
+            stream_kwargs["context"] = AgentRuntimeContext(user_id=normalize_memory_user_id(user_id))
         async for event in agent.astream_events(
             {"messages": input_messages},
-            config=config,
-            context=context,
-            version="v2",
+            **stream_kwargs,
         ):
             yield event
 

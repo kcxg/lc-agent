@@ -167,3 +167,35 @@ def test_code_agent_resolution_returns_registered_graph_without_rebuild(monkeypa
 
     assert resolved is graph
     assert "research::model::some-ui-model" not in app.engine._agents
+
+
+@pytest.mark.asyncio
+async def test_code_agent_chat_stream_does_not_receive_framework_memory_context():
+    from lc_agent.app import LcAgentApp
+
+    captured = {}
+
+    class DummyGraph:
+        async def astream_events(self, payload, **kwargs):
+            captured["payload"] = payload
+            captured["kwargs"] = kwargs
+            if False:
+                yield {}
+
+    app = LcAgentApp({"agent": {"default_model": "model-a"}})
+    app.engine._store = object()
+    app.add_agent("research", DummyGraph(), "Research graph")
+
+    events = [
+        event async for event in app.engine.chat_stream(
+            "hello",
+            "thread-1",
+            preset_id="research",
+            user_id="user-123",
+        )
+    ]
+
+    assert events == []
+    assert "context" not in captured["kwargs"]
+    assert captured["kwargs"]["config"]["configurable"]["thread_id"] == "thread-1"
+    assert captured["kwargs"]["version"] == "v2"
