@@ -19,6 +19,7 @@ from lc_agent.core.http_trace import (
     bind_http_trace_collector,
     reset_http_trace_collector,
 )
+from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
 from lc_agent.server import persistence, stream_utils
 
 router = APIRouter(prefix="/api/threads", tags=["chat-sse"])
@@ -274,7 +275,13 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             trace_token = bind_http_trace_collector(trace_collector)
 
             try:
-                stream = engine.chat_stream(content, thread_id, preset_id, **stream_kwargs)
+                stream = engine.chat_stream(
+                    content,
+                    thread_id,
+                    preset_id,
+                    user_id=user.id if user else "anonymous",
+                    **stream_kwargs,
+                )
                 async for event in stream:
                     if _cancel_flags.get(thread_id):
                         yield stream_utils.format_sse_event("cancelled", {})
@@ -441,6 +448,9 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 async for event in agent.astream_events(
                     Command(resume=resume_value),
                     config=config,
+                    context=AgentRuntimeContext(
+                        user_id=normalize_memory_user_id(user.id if user else "anonymous"),
+                    ),
                     version="v2",
                 ):
                     if _cancel_flags.get(thread_id):
