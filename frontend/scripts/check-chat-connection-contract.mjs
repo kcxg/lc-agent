@@ -33,11 +33,8 @@ expectIncludes('App.vue', files.app, 'const sameRouteSession = route.params.sess
 expectIncludes('App.vue', files.app, 'if (sameRouteSession) {')
 expectIncludes('App.vue', files.app, 'await restoreSession(session.id)')
 
-expectIncludes('chat.ts', files.chatStore, "ws.value.on('disconnected'")
 expectIncludes('chat.ts', files.chatStore, 'threadId.value = null')
-
-expectIncludes('AppHeader.vue', files.appHeader, "connected ? '已连接' : '待连接'")
-expectIncludes('AppHeader.vue', files.appHeader, "connected ? 'WebSocket 已连接' : '发送消息时自动连接'")
+expectIncludes('chat.ts', files.chatStore, 'ChatSseClient')
 
 if (failures.length > 0) {
   console.error('聊天连接恢复契约测试失败:')

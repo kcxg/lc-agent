@@ -3,7 +3,6 @@ import httpx
 from httpx import ASGITransport
 from unittest.mock import AsyncMock, MagicMock
 from lc_agent.app import LcAgentApp
-from lc_agent.server.websocket import ChatWebSocketHandler
 
 
 @pytest.fixture
@@ -85,26 +84,3 @@ async def test_api_custom_agent_not_deletable(app_instance):
         assert resp.status_code == 403
 
 
-@pytest.mark.asyncio
-async def test_websocket_uses_custom_agent(app_instance):
-    """WebSocket should use pre-built graph for custom agent."""
-    mock_graph = MagicMock()
-
-    async def fake_stream(*args, **kwargs):
-        chunk = MagicMock(content="custom response")
-        chunk.additional_kwargs = {}
-        yield {"event": "on_chat_model_stream", "data": {"chunk": chunk}}
-
-    mock_graph.astream_events = fake_stream
-    app_instance.add_agent("ws_agent", mock_graph, description="WS test")
-
-    handler = ChatWebSocketHandler(app_instance.engine)
-    ws = AsyncMock()
-
-    data = {"type": "message", "content": "hello", "preset_id": "ws_agent"}
-    await handler.handle_message(ws, "thread-1", data)
-
-    calls = ws.send_json.call_args_list
-    token_calls = [c for c in calls if c[0][0].get("type") == "token"]
-    assert len(token_calls) >= 1
-    assert "custom response" in token_calls[0][0][0]["content"]

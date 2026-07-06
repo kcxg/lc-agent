@@ -12,7 +12,8 @@
 
 ## 3.1 写 langchain / langgraph / deepagents 代码时，禁止使用ai预训练的过时的语法写法。
   要使用最新的框架语法。 写代码时候要用 `docs-langchain` 和 `reference-langchain` 这个两个langchain官方文档的mcp工具查询框架最新用法。
-
+以及使用`context7`这个mcp工具查询框架最新用法。
+要尽量符合langchian框架教程最佳实践用法，不重复造轮子
 
 ## 3.2 如果有必要，要用 nb_rag mcp查询 langchain / langgraph / deepagents  用法
   如果官方的文档，不够用，ai要调用 `nbrag` mcp的一些列工具来查询用法，要多次多轮深入调用nbrag的一系列工具，不要浅尝辄止，没检索足够足够的资料就开始回答。

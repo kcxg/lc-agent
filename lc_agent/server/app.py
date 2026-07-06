@@ -21,6 +21,8 @@ from lc_agent.server.routes.tools import router as tools_router
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 from lc_agent.server.routes.settings import router as settings_router
+from lc_agent.server.routes.permissions import router as permissions_router
+from lc_agent.server.sse import router as sse_router
 
 
 def create_app(config: dict, lifespan=None) -> FastAPI:
@@ -55,6 +57,8 @@ def create_app(config: dict, lifespan=None) -> FastAPI:
     app.include_router(skills_router, prefix="/api", dependencies=protected_dependencies)
     app.include_router(mcp_router, prefix="/api", dependencies=protected_dependencies)
     app.include_router(settings_router, prefix="/api", dependencies=protected_dependencies)
+    app.include_router(permissions_router, prefix="/api", dependencies=protected_dependencies)
+    app.include_router(sse_router)
 
     return app
 

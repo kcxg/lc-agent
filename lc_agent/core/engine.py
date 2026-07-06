@@ -146,11 +146,21 @@ class AgentEngine:
         if self._checkpointer:
             kwargs["checkpointer"] = self._checkpointer
 
-        if preset.dangerous_tools:
-            kwargs["interrupt_before"] = ["tools"]
-
         middleware = [TodoListMiddleware()]
         middleware.extend(self._build_summarization_middleware(preset))
+
+        if hasattr(self, '_permissions_service') and self._permissions_service:
+            from langchain.agents.middleware import HumanInTheLoopMiddleware
+            interrupt_on = {
+                tool.name: {
+                    "allowed_decisions": ["approve", "reject"],
+                    "when": self._permissions_service.should_interrupt,
+                }
+                for tool in tools
+                if tool.name != "ask_user"
+            }
+            if interrupt_on:
+                middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
 
         agent = create_agent(
             model=llm,

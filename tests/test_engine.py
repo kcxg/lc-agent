@@ -15,7 +15,6 @@ class TestAgentPreset:
         assert preset.allowed_tool_groups is None
         assert preset.allowed_mcp_servers is None
         assert preset.allowed_skills is None
-        assert preset.dangerous_tools == []
 
     def test_three_value_semantics_none_means_all(self):
         preset = AgentPreset(

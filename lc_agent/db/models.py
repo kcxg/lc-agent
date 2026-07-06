@@ -20,7 +20,6 @@ class AgentPresetDB(SQLModel, table=True):
     allowed_tool_groups: list[str] | None = Field(default=None, sa_column=Column(JSON))
     allowed_mcp_servers: list[str] | None = Field(default=None, sa_column=Column(JSON))
     allowed_skills: list[str] | None = Field(default=None, sa_column=Column(JSON))
-    dangerous_tools: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

@@ -241,7 +241,7 @@ nul
 .tmp_pytest_run/
 .tmp/bfzs-runlogs
 
-# Local feature worktrees
+# Git worktrees
 .worktrees/
 
 # Local agent memory/state
@@ -250,4 +250,3 @@ nul
 # Local tool state
 .codegraph/
 .nezha/
->>>>>>> main

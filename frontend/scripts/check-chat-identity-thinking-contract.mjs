@@ -12,7 +12,7 @@ const files = {
   chatView: read('src/views/ChatView.vue'),
   toolCallCard: read('src/components/chat/ToolCallCard.vue'),
   chatStore: read('src/stores/chat.ts'),
-  websocket: read('src/api/websocket.ts'),
+  sseClient: read('src/api/sse-client.ts'),
   chatInput: read('src/components/chat/ChatInput.vue'),
 }
 
@@ -43,7 +43,7 @@ expectIncludes('ChatView.vue', files.chatView, '<summary class="thinking-summary
 expectIncludes('ChatView.vue', files.chatView, 'hasStructuredSegments')
 expectIncludes('ChatView.vue', files.chatView, 'open')
 expectMatch('ChatView.vue', files.chatView, /marker === '<!--THINK_START-->'[\s\S]*type: 'thinking'/, '没有把 THINK 标记解析成 thinking segment')
-expectMatch('ChatView.vue', files.chatView, /class="thinking-block"[\s\S]*\n\s+open[\s\S]*<summary class="thinking-summary"/, '思考块没有默认展开，用户会看不到思考正文')
+expectMatch('ChatView.vue', files.chatView, /class="thinking-block"[\s\S]*:?open[\s\S]*<summary class="thinking-summary"/, '思考块没有默认展开，用户会看不到思考正文')
 if (files.chatView.includes(':open="item.loading"')) {
   failures.push('ChatView.vue 思考块仍绑定 item.loading；thinking 一写入 content 后 loading 会变 false')
 }
@@ -55,11 +55,11 @@ expectIncludes('ToolCallCard.vue', files.toolCallCard, 'watch')
 expectIncludes('ToolCallCard.vue', files.toolCallCard, 'userToggled')
 expectMatch('ToolCallCard.vue', files.toolCallCard, /watch\(\(\) => props\.collapsed[\s\S]*isCollapsed\.value = collapsed/, '工具完成后不会跟随 collapsed prop 自动折叠')
 
-expectIncludes('websocket.ts', files.websocket, 'reasoning_tokens?: number')
+expectIncludes('sse-client.ts', files.sseClient, 'reasoning_tokens?: number')
 expectIncludes('chat.ts', files.chatStore, 'function mergeFinalUsageRounds')
 expectIncludes('chat.ts', files.chatStore, 'reasoningTokens: msg.reasoning_tokens || 0')
 expectIncludes('chat.ts', files.chatStore, 'mergeFinalUsageRounds(last.usage.rounds, usageData)')
-expectIncludes('chat.ts', files.chatStore, 'model: modelId')
+expectIncludes('chat.ts', files.chatStore, 'client.sendMessage(content.trim(), presetId, modelId')
 expectMatch(
   'ChatView.vue',
   files.chatView,

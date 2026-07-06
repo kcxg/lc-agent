@@ -101,15 +101,6 @@
           </div>
         </div>
       </el-form-item>
-
-      <el-form-item label="危险工具（需要审批）">
-        <el-input
-          v-model="dangerousToolsStr"
-          type="textarea"
-          :autosize="{ minRows: 2, maxRows: 4 }"
-          placeholder="每行一个工具名, 例如: filesystem__delete_file"
-        />
-      </el-form-item>
     </el-form>
 
     <template #footer>
@@ -152,8 +143,6 @@ const form = ref({
   default_model: '',
 })
 
-const dangerousToolsStr = ref('')
-
 function open(agent?: AgentPreset) {
   if (agent) {
     isEdit.value = true
@@ -163,7 +152,6 @@ function open(agent?: AgentPreset) {
     form.value.name = agent.name
     form.value.system_prompt = agent.system_prompt
     form.value.default_model = agent.default_model
-    dangerousToolsStr.value = (agent.dangerous_tools || []).join('\n')
 
     if (agent.allowed_tool_groups === null) {
       toolGroupMode.value = 'all'
@@ -203,7 +191,6 @@ function open(agent?: AgentPreset) {
     editingSource.value = 'user'
     isCodeAgent.value = false
     form.value = { name: '', system_prompt: '', default_model: toolsStore.currentModel }
-    dangerousToolsStr.value = ''
     toolGroupMode.value = 'all'
     selectedGroups.value = []
     mcpMode.value = 'all'
@@ -239,7 +226,6 @@ async function handleSave() {
       allowed_tool_groups,
       allowed_mcp_servers,
       allowed_skills,
-      dangerous_tools: dangerousToolsStr.value.split('\n').map(s => s.trim()).filter(Boolean),
     }
 
     if (isEdit.value) {
