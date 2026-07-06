@@ -18,6 +18,23 @@ class DatabaseConfig(BaseModel):
     checkpoint_path: str = "./lc_agent_checkpoints.db"
 
 
+class MemorySemanticSearchConfig(BaseModel):
+    enabled: bool = True
+    api_key: str = "{env:NBRAG_API_KEY}"
+    base_url: str = "https://api.siliconflow.cn/v1"
+    model: str = "BAAI/bge-m3"
+    dims: int = 1024
+
+
+class MemoryConfig(BaseModel):
+    enabled: bool = True
+    type: str = "sqlite"
+    path: str = "./lc_agent_memory.db"
+    save_policy: str = "explicit"
+    retrieval_policy: str = "manual"
+    semantic_search: MemorySemanticSearchConfig = Field(default_factory=MemorySemanticSearchConfig)
+
+
 class McpServerConfig(BaseModel):
     type: str = "local"  # "local", "sse", "http"
     command: str | list[str] = ""
@@ -44,6 +61,7 @@ class AppConfig(BaseModel):
     })
     mcp: dict = Field(default_factory=dict)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     session: dict = Field(default_factory=lambda: {"db_path": ""})
     ui: dict = Field(default_factory=dict)
