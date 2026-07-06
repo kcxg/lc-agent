@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { ChatWebSocket, type WsMessage } from '@/api/websocket'
+import { ChatSseClient, type SseMessage } from '@/api/sse-client'
 import { useSessionsStore } from '@/stores/sessions'
 import { api } from '@/api/http'
 import { createClientId } from '@/utils/client-id'
@@ -47,6 +47,14 @@ export interface HttpTrace {
   request: HttpTraceMessagePart
   response: HttpTraceResponsePart
   error?: string | null
+}
+
+export interface ErrorInfo {
+  title: string
+  detail: string
+  suggestions?: string[]
+  techDetail?: string
+  errorCode?: string
 }
 
 export interface ContentSegment {
@@ -253,23 +261,29 @@ export interface TodoItem {
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
   const isStreaming = ref(false)
-  const isConnected = ref(false)
+  const isConnected = computed(() => !!threadId.value)
   const threadId = ref<string | null>(null)
   const interrupt = ref<InterruptInfo | null>(null)
-  const ws = ref<ChatWebSocket | null>(null)
+  let sseClient: ChatSseClient | null = null
   const todos = ref<TodoItem[]>([])
+  const errorMessage = ref<ErrorInfo | null>(null)
 
   const lastMessage = computed(() => messages.value[messages.value.length - 1])
 
   let streamStartTime = 0
   let currentRoundStart = 0
+  let inThinking = false
 
-  async function connect(existingThreadId?: string) {
-    ws.value = new ChatWebSocket()
+  function _ensureClient(): ChatSseClient {
+    if (!sseClient) {
+      sseClient = new ChatSseClient()
+      _registerHandlers(sseClient)
+    }
+    return sseClient
+  }
 
-    let inThinking = false
-
-    ws.value.on('thinking', (msg: WsMessage) => {
+  function _registerHandlers(client: ChatSseClient) {
+    client.on('thinking', (msg: SseMessage) => {
       if (!isStreaming.value) {
         isStreaming.value = true
         streamStartTime = Date.now()
@@ -293,7 +307,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
 
-    ws.value.on('token', (msg: WsMessage) => {
+    client.on('token', (msg: SseMessage) => {
       if (!isStreaming.value) {
         isStreaming.value = true
         streamStartTime = Date.now()
@@ -317,14 +331,14 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
 
-    ws.value.on('content', (msg: WsMessage) => {
+    client.on('content', (msg: SseMessage) => {
       const last = messages.value[messages.value.length - 1]
       if (last && last.role === 'assistant') {
         last.content += msg.content || ''
       }
     })
 
-    ws.value.on('llm_usage', (msg: WsMessage) => {
+    client.on('llm_usage', (msg: SseMessage) => {
       const last = messages.value[messages.value.length - 1]
       if (last?.usage) {
         const roundDuration = currentRoundStart ? Date.now() - currentRoundStart : undefined
@@ -340,8 +354,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
 
-
-    ws.value.on('tool_call', (msg: WsMessage) => {
+    client.on('tool_call', (msg: SseMessage) => {
       if (!isStreaming.value) {
         isStreaming.value = true
         streamStartTime = Date.now()
@@ -363,7 +376,6 @@ export const useChatStore = defineStore('chat', () => {
         }
         if (!last.toolCalls) last.toolCalls = []
 
-        // If resuming from interrupt, reuse existing running tool card instead of creating duplicate
         const existingRunning = last.toolCalls.find(
           t => t.name === msg.name && t.status === 'running',
         )
@@ -391,7 +403,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
 
-    ws.value.on('tool_result', (msg: WsMessage) => {
+    client.on('tool_result', (msg: SseMessage) => {
       const last = messages.value[messages.value.length - 1]
       if (last?.toolCalls) {
         const tc = last.toolCalls.find(t => t.name === msg.name && t.status === 'running')
@@ -404,7 +416,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
 
-    ws.value.on('interrupt', (msg: WsMessage) => {
+    client.on('interrupt', (msg: SseMessage) => {
       interrupt.value = {
         actionRequests: msg.action_requests || [],
         reviewConfigs: msg.review_configs || [],
@@ -412,13 +424,15 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
 
-    ws.value.on('done', (msg: WsMessage) => {
+    client.on('done', (msg: SseMessage) => {
+      errorMessage.value = null
       isStreaming.value = false
+      inThinking = false
       const last = messages.value[messages.value.length - 1]
       if (last) {
         last.isStreaming = false
-        const isResume = !!(msg as any).is_resume
-        const usageData = (msg as any).usage as any[] | undefined
+        const isResume = !!msg.is_resume
+        const usageData = msg.usage as any[] | undefined
         if (usageData && usageData.length > 0) {
           if (last.usage && streamStartTime) {
             last.usage.totalDuration = Date.now() - streamStartTime
@@ -460,47 +474,67 @@ export const useChatStore = defineStore('chat', () => {
           }
         }
       }
+      if (threadId.value) {
+        setTimeout(() => {
+          const sessionsStore = useSessionsStore()
+          sessionsStore.refreshSessionTitle(threadId.value!)
+        }, 3000)
+      }
     })
 
-    ws.value.on('cancelled', () => {
+    client.on('cancelled', () => {
+      errorMessage.value = null
       isStreaming.value = false
+      inThinking = false
       const last = messages.value[messages.value.length - 1]
       if (last) last.isStreaming = false
     })
 
-    ws.value.on('disconnected', () => {
-      if (ws.value?.connected) return
-      isConnected.value = false
+    client.on('error', (msg: SseMessage) => {
       isStreaming.value = false
-      threadId.value = null
-      const last = messages.value[messages.value.length - 1]
-      if (last) last.isStreaming = false
+      if (inThinking) {
+        const last = messages.value[messages.value.length - 1]
+        if (last && last.role === 'assistant') {
+          last.content += '<!--THINK_END-->'
+        }
+        inThinking = false
+      }
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant') {
+        lastMsg.isStreaming = false
+      }
+      if (msg.title) {
+        errorMessage.value = {
+          title: msg.title,
+          detail: msg.detail || '',
+          suggestions: msg.suggestions,
+          techDetail: msg.tech_detail,
+          errorCode: msg.error_code,
+        }
+      } else {
+        errorMessage.value = {
+          title: 'AI 模型接口请求失败',
+          detail: msg.message || '',
+          suggestions: ['请稍后重试，如问题持续请联系管理员'],
+          errorCode: 'UNKNOWN',
+        }
+      }
+      console.error('[Chat] Error:', msg.message || msg.title)
     })
 
-    ws.value.on('error', (msg: WsMessage) => {
-      isStreaming.value = false
-      console.error('[Chat] Error:', msg.message)
-    })
-
-    ws.value.on('history', (msg: WsMessage) => {
-      const historyMessages = (msg as any).messages || []
-      messages.value = normalizeHistoryMessages(historyMessages)
-    })
-
-    ws.value.on('title_update', (msg: WsMessage) => {
+    client.on('title_update', (msg: SseMessage) => {
       if (msg.thread_id && msg.title) {
         const sessionsStore = useSessionsStore()
         sessionsStore.updateTitleLocal(msg.thread_id, msg.title)
       }
     })
+  }
 
-    try {
-      const tid = await ws.value.connect(existingThreadId)
-      threadId.value = tid
-      isConnected.value = true
-    } catch (e) {
-      console.error('[Chat] Failed to connect:', e)
-      isConnected.value = false
+  async function connect(existingThreadId?: string) {
+    const client = _ensureClient()
+    if (existingThreadId) {
+      client.setThreadId(existingThreadId)
+      threadId.value = existingThreadId
     }
   }
 
@@ -512,23 +546,22 @@ export const useChatStore = defineStore('chat', () => {
   ) {
     if (!content.trim()) return
 
+    errorMessage.value = null
     const sessionsStore = useSessionsStore()
     const sessionId = sessionsStore.currentSessionId
     if (sessionId && sessionsStore.isLocalSession(sessionId)) {
       const isFirstMessage = sessionsStore.currentSession?.message_count === 0
       const realId = await sessionsStore.persistSession(sessionId, modelId)
-      // Always reconnect with the persisted session ID
-      ws.value?.disconnect()
       await connect(realId)
-      // Immediately show user's message as title for new conversations
       if (isFirstMessage) {
         sessionsStore.updateTitleLocal(realId, content.trim().slice(0, 30))
       }
-    } else if (!ws.value || !isConnected.value) {
+    } else if (!threadId.value) {
       if (sessionId) await connect(sessionId)
     }
 
-    if (!ws.value) return
+    const client = _ensureClient()
+    if (!threadId.value) return
 
     messages.value.push({
       id: createClientId(),
@@ -537,23 +570,35 @@ export const useChatStore = defineStore('chat', () => {
       timestamp: Date.now(),
     })
 
-    ws.value.send({
-      type: 'message',
-      content: content.trim(),
-      preset_id: presetId,
-      model: modelId,
-      replace_from_message_id: options.replaceFromMessageId,
+    client.sendMessage(content.trim(), presetId, modelId, {
+      replaceFromMessageId: options.replaceFromMessageId,
       history: options.history,
     })
   }
 
-  function respondToInterrupt(approved: boolean, presetId: string = '__chat__') {
-    ws.value?.sendInterruptResponse(approved, presetId)
+  function respondToInterrupt(approved: boolean, presetId: string = '__chat__', permanentlyAllow?: string) {
+    const client = _ensureClient()
+    const count = interrupt.value?.actionRequests?.length || 1
+    const decisions = Array.from({ length: count }, () => ({
+      type: approved ? 'approve' : 'reject',
+    }))
+    const resumePayload: Record<string, any> = { decisions }
+    if (permanentlyAllow) {
+      resumePayload.permanently_allow = permanentlyAllow
+    }
+    client.sendInterruptResume(resumePayload, presetId)
     interrupt.value = null
+    isStreaming.value = true
+    currentRoundStart = Date.now()
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant') {
+      last.isStreaming = true
+    }
   }
 
   function resumeInterrupt(resumeValue: any, presetId: string = '__chat__', model?: string) {
-    ws.value?.sendInterruptResume(resumeValue, presetId, model)
+    const client = _ensureClient()
+    client.sendInterruptResume(resumeValue, presetId, model)
     interrupt.value = null
     isStreaming.value = true
     currentRoundStart = Date.now()
@@ -575,8 +620,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function stopGeneration() {
-    if (ws.value && isStreaming.value) {
-      ws.value.sendCancel()
+    if (sseClient && isStreaming.value) {
+      sseClient.sendCancel()
     }
   }
 
@@ -592,11 +637,13 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function disconnect() {
-    ws.value?.disconnect()
-    isConnected.value = false
+    sseClient?.disconnect()
+    sseClient = null
+    errorMessage.value = null
     isStreaming.value = false
     threadId.value = null
     todos.value = []
+    inThinking = false
   }
 
   return {
@@ -607,6 +654,7 @@ export const useChatStore = defineStore('chat', () => {
     interrupt,
     lastMessage,
     todos,
+    errorMessage,
     connect,
     loadMessages,
     sendMessage,

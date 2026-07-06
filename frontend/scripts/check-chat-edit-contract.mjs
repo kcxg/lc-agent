@@ -12,6 +12,7 @@ const files = {
   chatView: read('src/views/ChatView.vue'),
   chatInput: read('src/components/chat/ChatInput.vue'),
   chatStore: read('src/stores/chat.ts'),
+  sseClient: read('src/api/sse-client.ts'),
 }
 
 const failures = []
@@ -59,7 +60,8 @@ expectIncludes('chat.ts', files.chatStore, 'messages.value = messages.value.slic
 expectIncludes('chat.ts', files.chatStore, 'truncateAfterMessage')
 expectIncludes('chat.ts', files.chatStore, 'export interface ReplayMessage')
 expectIncludes('chat.ts', files.chatStore, 'export interface SendMessageOptions')
-expectIncludes('chat.ts', files.chatStore, 'replace_from_message_id: options.replaceFromMessageId')
+expectIncludes('chat.ts', files.chatStore, 'replaceFromMessageId: options.replaceFromMessageId')
+expectIncludes('sse-client.ts', files.sseClient, 'replace_from_message_id = options.replaceFromMessageId')
 expectIncludes('chat.ts', files.chatStore, 'history: options.history')
 
 if (failures.length > 0) {

@@ -36,10 +36,18 @@
 
     <!-- 标准工具审批模式 -->
     <template v-else>
-      <div v-for="(action, idx) in interrupt?.actionRequests ?? []" :key="idx" class="action-item">
+      <div v-for="(action, idx) in allActions" :key="idx" class="action-item" :class="{ compact: !showDetails }">
         <p><strong>工具:</strong> {{ action.name }}</p>
-        <pre class="action-args">{{ JSON.stringify(action.arguments, null, 2) }}</pre>
+        <pre v-if="showDetails" class="action-args">{{ JSON.stringify(action.args ?? action.arguments, null, 2) }}</pre>
       </div>
+      <el-button
+        link
+        :type="showDetails ? 'info' : 'primary'"
+        class="expand-btn"
+        @click="showDetails = !showDetails"
+      >
+        {{ showDetails ? '收起详情' : `展开详情（${allActions.length} 个工具调用）` }}
+      </el-button>
     </template>
 
     <template #footer>
@@ -50,6 +58,7 @@
       </template>
       <template v-else>
         <el-button @click="reject">拒绝</el-button>
+        <el-button type="success" @click="allowPermanently" :disabled="!firstToolName">永久允许此工具</el-button>
         <el-button type="primary" @click="approve">批准执行</el-button>
       </template>
     </template>
@@ -72,6 +81,7 @@ const props = defineProps<{ interrupt: InterruptInfo | null }>()
 const emit = defineEmits<{
   decide: [decision: { type: string; message?: string }]
   resume: [value: any]
+  'allow-permanently': [toolName: string]
 }>()
 
 const visible = computed({
@@ -82,7 +92,9 @@ const visible = computed({
 const freeInput = ref('')
 const selectedOption = ref<string | null>(null)
 const selectedOptions = ref<string[]>([])
+const showDetails = ref(false)
 
+const allActions = computed(() => props.interrupt?.actionRequests ?? [])
 const askPayload = computed<AskUserPayload | null>(() => {
   if (!props.interrupt) return null
   const data = props.interrupt.data
@@ -99,6 +111,20 @@ const isAskUser = computed(() => askPayload.value !== null)
 
 const dialogTitle = computed(() => isAskUser.value ? '💬 请回答' : '⚠️ 工具需要审批')
 
+const firstToolName = computed<string | null>(() => {
+  if (!props.interrupt) return null
+  const reqs = props.interrupt.actionRequests
+  if (reqs && reqs.length > 0) return reqs[0].name
+  const data = props.interrupt.data
+  if (data && data.length > 0) {
+    const value = data[0]?.value
+    if (typeof value === 'object' && value?.action_requests?.length > 0) {
+      return value.action_requests[0].name
+    }
+  }
+  return null
+})
+
 const canSubmitAskUser = computed(() => {
   return selectedOption.value !== null || selectedOptions.value.length > 0 || freeInput.value.trim() !== ''
 })
@@ -107,6 +133,7 @@ watch(() => props.interrupt, () => {
   freeInput.value = ''
   selectedOption.value = null
   selectedOptions.value = []
+  showDetails.value = false
 })
 
 function isOptionSelected(label: string): boolean {
@@ -148,6 +175,13 @@ function submitAskUser() {
   const answer = parts.join('; ')
   if (!answer) return
   emit('resume', answer)
+}
+
+function allowPermanently() {
+  const toolName = firstToolName.value
+  if (toolName) {
+    emit('allow-permanently', toolName)
+  }
 }
 
 function approve() {
@@ -214,6 +248,11 @@ function reject() {
   border-radius: 8px;
 }
 
+.action-item.compact {
+  margin-bottom: 6px;
+  padding: 8px 12px;
+}
+
 .action-args {
   background: var(--el-fill-color);
   padding: 10px;
@@ -223,5 +262,9 @@ function reject() {
   margin-top: 8px;
   border: 1px solid var(--el-border-color);
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.expand-btn {
+  margin-top: 4px;
 }
 </style>

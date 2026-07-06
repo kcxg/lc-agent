@@ -162,6 +162,10 @@
           </div>
           <p v-if="!toolsStore.skills.length" class="empty-hint">暂无 Skills</p>
         </div>
+
+        <div class="panel-section">
+          <PermissionsPanel />
+        </div>
       </template>
 
       <div v-if="agentsStore.isChatAgent" class="panel-section chat-only-hint">
@@ -172,15 +176,9 @@
         </div>
       </div>
 
-      <div class="panel-section status-section">
-        <h4>状态</h4>
+      <div v-if="chatStore.threadId" class="panel-section status-section">
+        <h4>会话</h4>
         <div class="status-item">
-          <span>连接:</span>
-          <el-tag :type="chatStore.isConnected ? 'success' : 'warning'" size="small">
-            {{ chatStore.isConnected ? '已连接' : '待连接' }}
-          </el-tag>
-        </div>
-        <div v-if="chatStore.threadId" class="status-item">
           <span>Thread:</span>
           <code>{{ chatStore.threadId.slice(0, 8) }}...</code>
         </div>
@@ -207,6 +205,7 @@ import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
 import DetailModal from '@/components/panels/DetailModal.vue'
 import TodoList from '@/components/panels/TodoList.vue'
+import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()

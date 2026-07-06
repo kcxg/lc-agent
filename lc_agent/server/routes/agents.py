@@ -30,7 +30,6 @@ class AgentCreateRequest(BaseModel):
     allowed_tool_groups: list[str] | None = None
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
-    dangerous_tools: list[str] = []
 
 
 class AgentUpdateRequest(BaseModel):
@@ -40,7 +39,6 @@ class AgentUpdateRequest(BaseModel):
     allowed_tool_groups: list[str] | None = None
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
-    dangerous_tools: list[str] | None = None
 
 
 def _preset_to_dict(p: AgentPreset) -> dict:
@@ -52,7 +50,6 @@ def _preset_to_dict(p: AgentPreset) -> dict:
         "allowed_tool_groups": p.allowed_tool_groups,
         "allowed_mcp_servers": p.allowed_mcp_servers,
         "allowed_skills": p.allowed_skills,
-        "dangerous_tools": p.dangerous_tools,
         "source": p.source,
         "default_enabled": p.default_enabled,
     }
@@ -80,7 +77,6 @@ async def list_agents(engine: AgentEngine = Depends(get_engine), db=Depends(get_
             "allowed_tool_groups": row.allowed_tool_groups,
             "allowed_mcp_servers": row.allowed_mcp_servers,
             "allowed_skills": row.allowed_skills,
-            "dangerous_tools": row.dangerous_tools,
             "source": "user",
             "default_enabled": True,
         })
@@ -99,7 +95,6 @@ async def create_agent(body: AgentCreateRequest, engine: AgentEngine = Depends(g
         allowed_tool_groups=body.allowed_tool_groups,
         allowed_mcp_servers=body.allowed_mcp_servers,
         allowed_skills=body.allowed_skills,
-        dangerous_tools=body.dangerous_tools,
     )
     db.add(preset_db)
     await db.commit()
@@ -113,7 +108,6 @@ async def create_agent(body: AgentCreateRequest, engine: AgentEngine = Depends(g
         allowed_tool_groups=preset_db.allowed_tool_groups,
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,
-        dangerous_tools=preset_db.dangerous_tools,
     )
     engine._presets[preset.id] = preset
 
@@ -132,7 +126,7 @@ async def update_agent(agent_id: str, body: AgentUpdateRequest, engine: AgentEng
     update_data = body.model_dump(exclude_unset=True)
 
     if agent_id in engine._custom_presets:
-        allowed_fields = {"allowed_tool_groups", "allowed_mcp_servers", "allowed_skills", "dangerous_tools"}
+        allowed_fields = {"allowed_tool_groups", "allowed_mcp_servers", "allowed_skills"}
         invalid_fields = set(update_data.keys()) - allowed_fields
         if invalid_fields:
             raise HTTPException(
@@ -165,7 +159,6 @@ async def update_agent(agent_id: str, body: AgentUpdateRequest, engine: AgentEng
         allowed_tool_groups=preset_db.allowed_tool_groups,
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,
-        dangerous_tools=preset_db.dangerous_tools,
     )
     engine._presets[preset.id] = preset
     engine.invalidate_agent_cache(agent_id)

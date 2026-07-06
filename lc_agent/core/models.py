@@ -1,5 +1,5 @@
 # lc_agent/core/models.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class ModelInfo(BaseModel):
@@ -34,6 +34,5 @@ class AgentPreset(BaseModel):
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
 
-    dangerous_tools: list[str] = Field(default_factory=list)
     source: str = "user"
     default_enabled: bool = True
