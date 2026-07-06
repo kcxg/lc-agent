@@ -91,6 +91,21 @@
         "checkpoint_path": "./lc_agent_checkpoints.db"
     },
 
+    "memory": {
+        "enabled": true,
+        "type": "sqlite",
+        "path": "./lc_agent_memory.db",
+        "save_policy": "explicit",
+        "retrieval_policy": "manual",
+        "semantic_search": {
+            "enabled": true,
+            "api_key": "{env:NBRAG_API_KEY}",
+            "base_url": "https://api.siliconflow.cn/v1",
+            "model": "BAAI/bge-m3",
+            "dims": 1024
+        }
+    },
+
     
     // ----- Skills -----
     // 技能扫描目录列表，支持多个目录
