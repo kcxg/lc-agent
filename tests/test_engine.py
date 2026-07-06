@@ -208,7 +208,10 @@ class TestAgentEngine:
                 {"role": "user", "content": "新问题"},
             ]
         }
-        assert captured["config"] == {"configurable": {"thread_id": "thread-1"}}
+        assert captured["config"] == {
+            "configurable": {"thread_id": "thread-1"},
+            "recursion_limit": 100,
+        }
         assert captured["version"] == "v2"
         assert events == []
 

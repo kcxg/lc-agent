@@ -7,6 +7,7 @@ from sqlmodel import SQLModel
 from alembic import context
 
 import lc_agent.db.models  # noqa: F401  — register all table models
+from lc_agent.db.models_auth import User, UserAgentAccess  # noqa: F401
 
 config = context.config
 

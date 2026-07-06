@@ -20,6 +20,7 @@ class AgentPresetDB(SQLModel, table=True):
     allowed_tool_groups: list[str] | None = Field(default=None, sa_column=Column(JSON))
     allowed_mcp_servers: list[str] | None = Field(default=None, sa_column=Column(JSON))
     allowed_skills: list[str] | None = Field(default=None, sa_column=Column(JSON))
+    llm_params: dict | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -31,6 +32,7 @@ class SessionMeta(SQLModel, table=True):
     title: str = "新对话"
     agent_id: str = "__chat__"
     model: str = ""
+    user_id: str = Field(default="", index=True)
     message_count: int = 0
     is_pinned: bool = False
     pinned_at: datetime | None = None

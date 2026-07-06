@@ -8,20 +8,29 @@ description: >-
 
 # Restart bfzs Server
 
-Run the unified restart script to build frontend and start the server.
+## ⚠️ 核心判断规则（必须首先判断）
 
-## Quick Start
+在执行任何操作前，AI 必须先判断改动类型：
 
-### 禁止无脑重启python服务
-如果只修改了前端代码，不要无脑重启python服务。只需要npm run build编译前端。
+| 改动类型 | 操作 |
+|---------|------|
+| **仅前端代码**（.vue / .ts / .css 等 frontend/ 目录下的文件） | **只运行 npm run build，不重启 Python 服务** |
+| **后端代码**（.py 文件）或 **config.jsonc** | 运行完整重启脚本 |
+| **前端 + 后端都改了** | 运行完整重启脚本 |
+
+### 仅前端编译（不重启服务）
+
 ```powershell
-cd /d/codes/lc-agent/frontend && npm run build
+# working_directory: D:\codes\lc-agent\frontend
+npm run build
 ```
 
+### 完整重启（前端编译 + 停旧服务 + 启新服务）
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\restart-bfzs\scripts\restart.ps1"
 # working_directory: D:\codes\lc-agent
 # block_until_ms: 0 (background — server is long-running)
+powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\restart-bfzs\scripts\restart.ps1"
 ```
 
 ## Verify Startup

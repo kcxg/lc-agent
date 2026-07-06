@@ -127,7 +127,7 @@ lc-agent
 ### 作为框架使用（在用户项目中）
 
 ```python
-from lc_agent import LcAgentApp, load_config, tool
+from lc_agent import LcAgentApp, load_config, tool, create_traced_chat_openai
 
 # 1. 注册自定义工具
 @tool(group="my_tools", group_description="我的工具")
@@ -145,6 +145,38 @@ app.add_agent("my_agent", build_my_agent(config), description="自定义Agent")
 
 app.run()  # 启动 web 服务。桌面客户端需单独启动（见 lc_agent/desktop.py）。
 ```
+
+
+
+### 代码 Agent 显示 HTTP Traces
+
+`app.add_agent()` 注册的代码型 Agent 是用户自定义 graph，框架不会强行改写 graph 内部的 LLM。若希望这类 Agent 也在前端显示完整 HTTP request / response 报文，请用 `create_traced_chat_openai()` 创建 LLM，再传给 `StateGraph` 节点、`langchain.agents.create_agent(model=llm)` 或 deepagents。
+
+```python
+from langchain.agents import create_agent
+from lc_agent import LcAgentApp, create_traced_chat_openai, load_config
+
+llm = create_traced_chat_openai(
+    provider="litellm",
+    model="go-deepseek-v4-flash",
+    base_url="http://localhost:4000/v1",
+    api_key="not_need_key_because_litellm",
+    temperature=0.3,
+)
+
+graph = create_agent(
+    model=llm,
+    tools=[],
+    system_prompt="你是一个有用的助手",
+)
+
+config = load_config("./config.jsonc")
+app = LcAgentApp(config, host="127.0.0.1", port=8001)
+app.add_agent("my_code_agent", graph, description="代码 Agent")
+app.run()
+```
+
+只要底层 LLM 使用这个 helper，本轮对话结束时前端就会显示 HTTP 交互卡片；敏感 header、token、api_key 会自动脱敏。普通内置 Agent 和网页创建的 Agent 已自动接入 tracing，不需要手动配置。
 
 ## 启动客户端
 

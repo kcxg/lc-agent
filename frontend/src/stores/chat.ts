@@ -5,6 +5,8 @@ import { useSessionsStore } from '@/stores/sessions'
 import { api } from '@/api/http'
 import { createClientId } from '@/utils/client-id'
 
+const INITIAL_MESSAGE_LIMIT = 6
+
 export interface LlmRoundUsage {
   inputTokens: number
   outputTokens: number
@@ -73,6 +75,7 @@ export interface ChatMessage {
   isStreaming?: boolean
   usage?: MessageUsage
   httpTraces?: HttpTrace[]
+  httpTracesCount?: number
 }
 
 export interface ToolCall {
@@ -100,6 +103,7 @@ export interface ReplayMessage {
 export interface SendMessageOptions {
   replaceFromMessageId?: string
   history?: ReplayMessage[]
+  llmParams?: Record<string, any> | null
 }
 
 function normalizeToolStatus(status: any): ToolCall['status'] {
@@ -196,9 +200,10 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
   }
 
   const httpTraces = normalizeHttpTraces(msg.http_traces || msg.httpTraces)
+  const httpTracesCount = msg.http_traces_count ?? msg.httpTracesCount ?? httpTraces?.length ?? 0
   let content = role === 'assistant' ? ensureToolMarkers(msg.content || '', toolCalls) : msg.content || ''
-  if (role === 'assistant' && httpTraces?.length) {
-    content = ensureHttpMarkers(content, httpTraces.length)
+  if (role === 'assistant' && httpTracesCount > 0) {
+    content = ensureHttpMarkers(content, httpTracesCount)
   }
 
   return {
@@ -209,6 +214,7 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     usage,
     httpTraces,
+    httpTracesCount,
   }
 }
 
@@ -573,10 +579,16 @@ export const useChatStore = defineStore('chat', () => {
     client.sendMessage(content.trim(), presetId, modelId, {
       replaceFromMessageId: options.replaceFromMessageId,
       history: options.history,
+      llmParams: options.llmParams,
     })
   }
 
-  function respondToInterrupt(approved: boolean, presetId: string = '__chat__', permanentlyAllow?: string) {
+  function respondToInterrupt(
+    approved: boolean,
+    presetId: string = '__chat__',
+    permanentlyAllow?: string,
+    llmParams?: Record<string, any> | null,
+  ) {
     const client = _ensureClient()
     const count = interrupt.value?.actionRequests?.length || 1
     const decisions = Array.from({ length: count }, () => ({
@@ -586,7 +598,7 @@ export const useChatStore = defineStore('chat', () => {
     if (permanentlyAllow) {
       resumePayload.permanently_allow = permanentlyAllow
     }
-    client.sendInterruptResume(resumePayload, presetId)
+    client.sendInterruptResume(resumePayload, presetId, undefined, llmParams)
     interrupt.value = null
     isStreaming.value = true
     currentRoundStart = Date.now()
@@ -596,9 +608,14 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function resumeInterrupt(resumeValue: any, presetId: string = '__chat__', model?: string) {
+  function resumeInterrupt(
+    resumeValue: any,
+    presetId: string = '__chat__',
+    model?: string,
+    llmParams?: Record<string, any> | null,
+  ) {
     const client = _ensureClient()
-    client.sendInterruptResume(resumeValue, presetId, model)
+    client.sendInterruptResume(resumeValue, presetId, model, llmParams)
     interrupt.value = null
     isStreaming.value = true
     currentRoundStart = Date.now()
@@ -607,15 +624,53 @@ export const useChatStore = defineStore('chat', () => {
       last.isStreaming = true
     }
   }
+
+  const totalMessageCount = ref(0)
+  const hasOlderMessages = computed(() => {
+    const loaded = messages.value.length
+    return totalMessageCount.value > loaded
+  })
+  const loadingOlder = ref(false)
+  let _currentOffset = 0
 
   async function loadMessages(sessionId: string) {
     try {
-      const rawMessages = await api.getSessionMessages(sessionId)
+      const resp = await api.getSessionMessages(sessionId, { limit: INITIAL_MESSAGE_LIMIT })
+      const total = resp?.total ?? 0
+      const rawMessages = resp?.messages ?? resp
+      totalMessageCount.value = total
+      _currentOffset = resp?.offset ?? 0
+
       if (!rawMessages || rawMessages.length === 0) return
 
-      messages.value = normalizeHistoryMessages(rawMessages)
+      messages.value = normalizeHistoryMessages(
+        Array.isArray(rawMessages) ? rawMessages : []
+      )
     } catch (e) {
       console.error('[Chat] Failed to load messages:', e)
+    }
+  }
+
+  async function loadOlderMessages(sessionId: string) {
+    if (!hasOlderMessages.value || loadingOlder.value || _currentOffset <= 0) return
+    loadingOlder.value = true
+    try {
+      const olderPageSize = INITIAL_MESSAGE_LIMIT
+      const newOffset = Math.max(0, _currentOffset - olderPageSize)
+      const newLimit = _currentOffset - newOffset
+      if (newLimit <= 0) return
+
+      const resp = await api.getSessionMessages(sessionId, { limit: newLimit, offset: newOffset })
+      const olderRaw = resp?.messages ?? []
+      if (olderRaw.length === 0) return
+
+      _currentOffset = newOffset
+      const olderNormalized = normalizeHistoryMessages(olderRaw)
+      messages.value = [...olderNormalized, ...messages.value]
+    } catch (e) {
+      console.error('[Chat] Failed to load older messages:', e)
+    } finally {
+      loadingOlder.value = false
     }
   }
 
@@ -655,8 +710,12 @@ export const useChatStore = defineStore('chat', () => {
     lastMessage,
     todos,
     errorMessage,
+    totalMessageCount,
+    hasOlderMessages,
+    loadingOlder,
     connect,
     loadMessages,
+    loadOlderMessages,
     sendMessage,
     stopGeneration,
     respondToInterrupt,

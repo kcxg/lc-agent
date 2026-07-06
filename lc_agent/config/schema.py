@@ -27,6 +27,11 @@ class McpServerConfig(BaseModel):
     enabled: bool = True
 
 
+class AuthConfig(BaseModel):
+    secret: str = ""
+    token_expire_days: int = 7
+
+
 class AppConfig(BaseModel):
     """Application configuration schema."""
 
@@ -39,6 +44,7 @@ class AppConfig(BaseModel):
     })
     mcp: dict = Field(default_factory=dict)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     session: dict = Field(default_factory=lambda: {"db_path": ""})
     ui: dict = Field(default_factory=dict)
     skills: list[str] = Field(default_factory=lambda: ["./skills"])

@@ -2,8 +2,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from lc_agent.app import LcAgentApp
+from lc_agent.db.engine import init_db, reset_engine
 from lc_agent.skills.scanner import SkillScanner
-
+from tests.conftest import setup_test_auth
 
 @pytest.fixture
 def skills_dir(tmp_path):
@@ -63,7 +64,11 @@ def test_empty_directory(tmp_path):
 
 
 @pytest.fixture
-def app_with_skills(skills_dir):
+async def app_with_skills(skills_dir, tmp_path):
+    reset_engine()
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'auth.db'}"
+    await init_db(db_url)
+
     config = {
         "provider": {
             "openai": {
@@ -73,18 +78,22 @@ def app_with_skills(skills_dir):
             }
         },
         "agent": {"default_model": "gpt-4", "system_prompt": "You are helpful."},
-        "skills": {"directory": str(skills_dir)},
+        "skills": [str(skills_dir)],
+        "database": {"url": db_url, "checkpoint_path": ":memory:"},
     }
-    return LcAgentApp(config)
-
+    app = LcAgentApp(config)
+    headers = await setup_test_auth(app.fastapi_app, db_url)
+    yield app, headers
+    reset_engine()
 
 @pytest.mark.asyncio
 async def test_toggle_skill_increments_mcp_generation(app_with_skills):
-    transport = ASGITransport(app=app_with_skills.fastapi_app)
-    gen_before = app_with_skills.engine._mcp_generation
+    app, headers = app_with_skills
+    transport = ASGITransport(app=app.fastapi_app)
+    gen_before = app.engine._mcp_generation
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/api/skills/coding-assistant/toggle")
+        resp = await client.post("/api/skills/coding-assistant/toggle", headers=headers)
 
     assert resp.status_code == 200
-    assert app_with_skills.engine._mcp_generation == gen_before + 1
+    assert app.engine._mcp_generation == gen_before + 1

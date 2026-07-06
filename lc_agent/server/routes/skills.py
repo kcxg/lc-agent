@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from langchain_agentskills import SkillsToolkit
 
+from lc_agent.db.models_auth import User
+from lc_agent.server.auth_middleware import get_current_user
 from lc_agent.skills.filtered_loader import FilteredSkillLoader
 
 router = APIRouter(tags=["skills"])
@@ -16,7 +18,10 @@ def _get_loader(request: Request) -> FilteredSkillLoader | None:
 
 
 @router.get("/skills")
-def list_skills(request: Request):
+def list_skills(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
     """List all skills with their enabled state (tier 1 metadata)."""
     loader = _get_loader(request)
     if loader is None:
@@ -35,7 +40,11 @@ def list_skills(request: Request):
 
 
 @router.post("/skills/{name}/toggle")
-def toggle_skill(name: str, request: Request):
+def toggle_skill(
+    name: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
     """Toggle a skill's enabled state at runtime."""
     loader = _get_loader(request)
     if loader is None:
@@ -51,7 +60,11 @@ def toggle_skill(name: str, request: Request):
 
 
 @router.get("/skills/{name}")
-def get_skill(name: str, request: Request):
+def get_skill(
+    name: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
     """Load a skill's full content (tier 2)."""
     loader = _get_loader(request)
     if loader is None:
@@ -70,7 +83,12 @@ def get_skill(name: str, request: Request):
 
 
 @router.get("/skills/{name}/resources/{resource_name:path}")
-def read_skill_resource(name: str, resource_name: str, request: Request):
+def read_skill_resource(
+    name: str,
+    resource_name: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
     """Read a skill resource file (tier 3)."""
     loader = _get_loader(request)
     if loader is None:

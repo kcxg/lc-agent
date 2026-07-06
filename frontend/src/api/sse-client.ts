@@ -34,6 +34,23 @@ export interface SseMessage {
 
 export type SseEventHandler = (msg: SseMessage) => void
 
+
+function getSseAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = localStorage.getItem('token')
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  return headers
+}
+
+function appendTokenToUrl(url: string): string {
+  const token = localStorage.getItem('token') || ''
+  if (!token) return url
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}token=${encodeURIComponent(token)}`
+}
+
 export class ChatSseClient {
   private baseUrl: string
   private handlers: Map<string, SseEventHandler[]> = new Map()
@@ -57,7 +74,7 @@ export class ChatSseClient {
     content: string,
     presetId?: string,
     model?: string,
-    options?: { replaceFromMessageId?: string; history?: any[] },
+    options?: { replaceFromMessageId?: string; history?: any[]; llmParams?: Record<string, any> | null },
   ): Promise<void> {
     if (!this._threadId) throw new Error('threadId not set')
 
@@ -70,6 +87,9 @@ export class ChatSseClient {
       body.replace_from_message_id = options.replaceFromMessageId
       body.history = options.history || []
     }
+    if (options?.llmParams && Object.keys(options.llmParams).length > 0) {
+      body.llm_params = options.llmParams
+    }
 
     await this._startStream(body)
   }
@@ -79,13 +99,21 @@ export class ChatSseClient {
     await this.sendInterruptResume({ decisions }, presetId, model)
   }
 
-  async sendInterruptResume(resumeValue: any, presetId: string, model?: string): Promise<void> {
+  async sendInterruptResume(
+    resumeValue: any,
+    presetId: string,
+    model?: string,
+    llmParams?: Record<string, any> | null,
+  ): Promise<void> {
     if (!this._threadId) throw new Error('threadId not set')
 
-    const body = {
+    const body: Record<string, any> = {
       command: { resume: resumeValue },
       preset_id: presetId || '__chat__',
       model: model || '',
+    }
+    if (llmParams && Object.keys(llmParams).length > 0) {
+      body.llm_params = llmParams
     }
 
     await this._startStream(body)
@@ -101,9 +129,10 @@ export class ChatSseClient {
     this.emit('cancelled', { type: 'cancelled' })
 
     try {
-      await fetch(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`, {
+      const cancelUrl = appendTokenToUrl(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`)
+      await fetch(cancelUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getSseAuthHeaders(),
         body: JSON.stringify({}),
       })
     } catch (e) {
@@ -113,7 +142,8 @@ export class ChatSseClient {
 
   async getState(): Promise<any> {
     if (!this._threadId) return { has_interrupts: false }
-    const resp = await fetch(`${this.baseUrl}/api/threads/${this._threadId}/state`)
+    const stateUrl = appendTokenToUrl(`${this.baseUrl}/api/threads/${this._threadId}/state`)
+    const resp = await fetch(stateUrl, { headers: getSseAuthHeaders() })
     return resp.json()
   }
 
@@ -146,9 +176,9 @@ export class ChatSseClient {
       console.warn('[SSE] Already streaming, aborting previous')
       this._abortController?.abort()
       if (this._threadId) {
-        fetch(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`, {
+        fetch(appendTokenToUrl(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getSseAuthHeaders(),
           body: JSON.stringify({}),
         }).catch(() => {})
       }
@@ -158,17 +188,22 @@ export class ChatSseClient {
     this._abortController = controller
     this._streaming = true
 
-    const url = `${this.baseUrl}/api/threads/${this._threadId}/runs/stream`
+    const url = appendTokenToUrl(`${this.baseUrl}/api/threads/${this._threadId}/runs/stream`)
 
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getSseAuthHeaders(),
         body: JSON.stringify(body),
         signal: controller.signal,
       })
 
       if (!response.ok) {
+        if (response.status === 401) {
+          window.dispatchEvent(new CustomEvent('auth:expired'))
+          this.emit('error', { type: 'error', title: '认证已过期', detail: '请重新登录' })
+          return
+        }
         const text = await response.text()
         this.emit('error', {
           type: 'error',
