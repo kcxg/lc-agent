@@ -55,31 +55,44 @@ class TestAgentEngine:
         engine = AgentEngine(sample_config)
         assert engine.config == sample_config
 
-    def test_build_agent_passes_long_term_memory_store(self, sample_config, monkeypatch):
+    def test_build_agent_passes_memory_store_and_context_schema(self, sample_config, monkeypatch):
         from lc_agent.core.engine import AgentEngine
+        from lc_agent.core.memory import AgentRuntimeContext
 
         captured = {}
         store = object()
         engine = AgentEngine(sample_config, store=store)
 
-        monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id: object())
-        monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+        class FakeAgent:
+            pass
 
         def fake_create_agent(**kwargs):
             captured.update(kwargs)
-            return object()
+            return FakeAgent()
 
         monkeypatch.setattr("langchain.agents.create_agent", fake_create_agent)
 
-        engine.build_agent()
+        engine.build_agent(cache_key="memory-test")
 
         assert captured["store"] is store
+        assert captured["context_schema"] is AgentRuntimeContext
 
     def test_build_agent_adds_memory_tools_when_store_enabled(self, sample_config, monkeypatch):
         from lc_agent.core.engine import AgentEngine
 
         captured = {}
-        engine = AgentEngine(sample_config, store=object())
+        config = {
+            **sample_config,
+            "memory": {
+                "enabled": True,
+                "type": "sqlite",
+                "path": "./lc_agent_memory.db",
+                "save_policy": "explicit",
+                "retrieval_policy": "manual",
+                "semantic_search": {"enabled": False},
+            },
+        }
+        engine = AgentEngine(config, store=object())
 
         monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id: object())
         monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
@@ -92,12 +105,15 @@ class TestAgentEngine:
 
         engine.build_agent()
 
-        tool_names = {tool.name for tool in captured["tools"]}
-        assert {
-            "memory__save_memory",
+        expected = {
+            "memory__insert_memory",
+            "memory__update_memory",
+            "memory__get_memory",
             "memory__search_memories",
+            "memory__list_memories",
             "memory__delete_memory",
-        }.issubset(tool_names)
+        }
+        assert expected.issubset({tool.name for tool in captured["tools"]})
         assert "跨会话长期记忆" in captured["system_prompt"]
 
     def test_parses_models_from_config(self, sample_config):
@@ -135,7 +151,7 @@ class TestAgentEngine:
         engine = AgentEngine(config)
         built: list[tuple[str, str | None]] = []
 
-        def fake_build_agent(preset, cache_key=None):
+        def fake_build_agent(preset, cache_key=None, llm_params=None):
             built.append((preset.default_model, cache_key))
             agent = object()
             engine._agents[cache_key or preset.id] = agent
@@ -192,7 +208,11 @@ class TestAgentEngine:
                 if False:
                     yield {}
 
-        monkeypatch.setattr(engine, "_get_or_build_agent", lambda preset_id, model_id="": FakeAgent())
+        monkeypatch.setattr(
+            engine,
+            "_get_or_build_agent",
+            lambda preset_id, model_id="", llm_params=None: FakeAgent(),
+        )
 
         events = []
         async for event in engine.chat_stream(
@@ -214,6 +234,38 @@ class TestAgentEngine:
         }
         assert captured["version"] == "v2"
         assert events == []
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_passes_user_context(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine
+        from lc_agent.core.memory import AgentRuntimeContext
+
+        captured = {}
+        engine = AgentEngine(sample_config)
+
+        class FakeAgent:
+            async def astream_events(self, payload, *, config, context, version):
+                captured["payload"] = payload
+                captured["config"] = config
+                captured["context"] = context
+                captured["version"] = version
+                if False:
+                    yield {}
+
+        monkeypatch.setattr(engine, "_get_or_build_agent", lambda *args, **kwargs: FakeAgent())
+
+        events = [
+            event async for event in engine.chat_stream(
+                "hello",
+                "thread-1",
+                user_id="user-123",
+            )
+        ]
+
+        assert events == []
+        assert captured["context"] == AgentRuntimeContext(user_id="user-123")
+        assert captured["config"]["configurable"]["thread_id"] == "thread-1"
+        assert captured["version"] == "v2"
 
     @pytest.mark.asyncio
     async def test_reset_thread_uses_checkpointer_delete(self, sample_config):
