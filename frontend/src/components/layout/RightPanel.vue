@@ -449,6 +449,12 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.reasoning-effort-select {
+  width: 100%;
 }
 
 .param-reset-btn {
