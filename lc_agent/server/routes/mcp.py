@@ -1,10 +1,16 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from lc_agent.db.models_auth import User
+from lc_agent.server.auth_middleware import get_current_user
 
 router = APIRouter(tags=["mcp"])
 
 
 @router.get("/mcp")
-def list_mcp_servers(request: Request):
+def list_mcp_servers(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
     """List MCP servers with their status."""
     manager = getattr(request.app.state, "mcp_manager", None)
     if manager is None:
@@ -26,7 +32,11 @@ def list_mcp_servers(request: Request):
 
 
 @router.post("/mcp/{name}/toggle")
-def toggle_mcp_server(name: str, request: Request):
+def toggle_mcp_server(
+    name: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
     """Toggle a MCP server's enabled state at runtime."""
     manager = getattr(request.app.state, "mcp_manager", None)
     if manager is None:

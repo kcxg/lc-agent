@@ -1,39 +1,26 @@
 const BASE_URL = '/api'
 
-const AUTH_PATHS = ['/auth/me', '/auth/login', '/auth/logout']
-type UnauthorizedHandler = (path: string) => void | Promise<void>
-let unauthorizedHandler: UnauthorizedHandler | undefined
-
-export class ApiError extends Error {
-  status: number
-
-  constructor(response: Response) {
-    super(`API error: ${response.status} ${response.statusText}`)
-    this.name = 'ApiError'
-    this.status = response.status
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = localStorage.getItem('token')
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
   }
-}
-
-export function setUnauthorizedHandler(handler: UnauthorizedHandler) {
-  unauthorizedHandler = handler
-}
-
-async function handleUnauthorized(path: string) {
-  if (AUTH_PATHS.includes(path)) return
-  await unauthorizedHandler?.(path)
+  return headers
 }
 
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     ...options,
   })
+  if (response.status === 401) {
+    localStorage.removeItem('token')
+    window.dispatchEvent(new CustomEvent('auth:expired'))
+    throw new Error('认证已过期，请重新登录')
+  }
   if (!response.ok) {
-    if (response.status === 401) {
-      await handleUnauthorized(path)
-    }
-    throw new ApiError(response)
+    throw new Error(`API error: ${response.status} ${response.statusText}`)
   }
   if (response.status === 204) return undefined as T
   return response.json()
@@ -41,10 +28,6 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
 
 export const api = {
   health: () => fetchApi<{ status: string; version: string; app_name?: string; config_loaded: boolean }>('/health'),
-  getAuthState: () => fetchApi<{ authenticated: boolean; username: string }>('/auth/me'),
-  login: (data: { username: string; password: string }) =>
-    fetchApi<{ authenticated: boolean; username: string }>('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
-  logout: () => fetchApi<{ authenticated: boolean }>('/auth/logout', { method: 'POST' }),
 
   getTools: () => fetchApi<{ name: string; group: string; group_description: string; description: string }[]>('/tools'),
   getToolGroups: () => fetchApi<{ id: string; description: string; tools: { name: string; description: string }[]; enabled: boolean }[]>('/tools/groups'),
@@ -71,8 +54,17 @@ export const api = {
     fetchApi<any>(`/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSession: (id: string) =>
     fetchApi<void>(`/sessions/${id}`, { method: 'DELETE' }),
-  getSessionMessages: (id: string) =>
-    fetchApi<any[]>(`/sessions/${id}/messages`),
+  getSessionMessages: (id: string, params?: { limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams()
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params?.offset !== undefined) qs.set('offset', String(params.offset))
+    const query = qs.toString()
+    return fetchApi<{ total: number; offset: number; limit: number; messages: any[] }>(
+      `/sessions/${id}/messages${query ? '?' + query : ''}`
+    )
+  },
+  getMessageTraces: (sessionId: string, messageId: string) =>
+    fetchApi<{ traces: any[] }>(`/sessions/${sessionId}/messages/${messageId}/traces`),
 
   getSummarization: () => fetchApi<{ enabled: boolean; default_model: string; trigger: any; keep: any }>('/settings/summarization'),
   updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>

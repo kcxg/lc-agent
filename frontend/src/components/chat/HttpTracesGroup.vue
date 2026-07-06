@@ -1,31 +1,66 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { HttpTrace, LlmRoundUsage } from '@/stores/chat'
+import { api } from '@/api/http'
 import HttpTraceBlock from './HttpTraceBlock.vue'
 
 const props = defineProps<{
-  traces: HttpTrace[]
+  traces?: HttpTrace[]
+  tracesCount?: number
+  sessionId?: string
+  messageId?: string
   rounds?: LlmRoundUsage[]
 }>()
 
+const loadedTraces = ref<HttpTrace[]>([])
+const loading = ref(false)
+const loadError = ref(false)
+
+const effectiveTraces = computed(() => props.traces?.length ? props.traces : loadedTraces.value)
+const displayCount = computed(() => effectiveTraces.value.length || props.tracesCount || 0)
+
 const totalDuration = computed(() => {
-  const ms = props.traces.reduce((sum, t) => sum + (t.durationMs || 0), 0)
+  if (!effectiveTraces.value.length) return ''
+  const ms = effectiveTraces.value.reduce((sum, t) => sum + (t.durationMs || 0), 0)
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
   return `${ms}ms`
 })
 
 const errorCount = computed(() =>
-  props.traces.filter(t => Boolean(t.error) || t.response.ok === false).length,
+  effectiveTraces.value.filter(t => Boolean(t.error) || t.response.ok === false).length,
 )
+
+const isOpen = ref(false)
+
+watch(isOpen, async (open) => {
+  if (!open) return
+  if (effectiveTraces.value.length > 0) return
+  if (!props.sessionId || !props.messageId) return
+
+  loading.value = true
+  loadError.value = false
+  try {
+    const resp = await api.getMessageTraces(props.sessionId, props.messageId)
+    loadedTraces.value = resp.traces || []
+  } catch {
+    loadError.value = true
+  } finally {
+    loading.value = false
+  }
+})
+
+function onToggle(e: Event) {
+  isOpen.value = (e.target as HTMLDetailsElement).open
+}
 </script>
 
 <template>
-  <details class="http-traces-group">
+  <details class="http-traces-group" @toggle="onToggle">
     <summary class="http-group-summary">
       <span class="http-group-icon">🌐</span>
       <span class="http-group-label">HTTP 交互</span>
       <span class="http-group-stats">
-        {{ traces.length }} 步 · {{ totalDuration }}
+        {{ displayCount }} 步<template v-if="totalDuration"> · {{ totalDuration }}</template>
       </span>
       <span v-if="errorCount > 0" class="http-group-errors">
         {{ errorCount }} 失败
@@ -33,12 +68,16 @@ const errorCount = computed(() =>
       <span class="http-group-toggle" />
     </summary>
     <div class="http-group-body">
-      <HttpTraceBlock
-        v-for="(trace, idx) in traces"
-        :key="trace.id"
-        :trace="trace"
-        :usage-round="rounds?.[idx]"
-      />
+      <div v-if="loading" class="http-loading">加载中...</div>
+      <div v-else-if="loadError" class="http-load-error">加载失败</div>
+      <template v-else>
+        <HttpTraceBlock
+          v-for="(trace, idx) in effectiveTraces"
+          :key="trace.id"
+          :trace="trace"
+          :usage-round="rounds?.[idx]"
+        />
+      </template>
     </div>
   </details>
 </template>
@@ -97,5 +136,14 @@ const errorCount = computed(() =>
 
 .http-group-body {
   padding: 4px 8px 8px;
+}
+.http-loading, .http-load-error {
+  padding: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+.http-load-error {
+  color: var(--el-color-danger);
 }
 </style>

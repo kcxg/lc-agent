@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends
 
 from lc_agent.core.engine import AgentEngine
+from lc_agent.db.models_auth import User
+from lc_agent.server.auth_middleware import get_current_user
 from lc_agent.server.dependencies import get_engine, get_registry
 from lc_agent.tools.registry import ToolRegistry
 
@@ -8,7 +10,10 @@ router = APIRouter(tags=["tools"])
 
 
 @router.get("/tools")
-def list_tools(registry: ToolRegistry = Depends(get_registry)):
+def list_tools(
+    user: User = Depends(get_current_user),
+    registry: ToolRegistry = Depends(get_registry),
+):
     """List all registered tools."""
     tools = []
     for name, entry in registry._global_tools.items():
@@ -23,7 +28,10 @@ def list_tools(registry: ToolRegistry = Depends(get_registry)):
 
 
 @router.get("/tools/groups")
-def list_tool_groups(registry: ToolRegistry = Depends(get_registry)):
+def list_tool_groups(
+    user: User = Depends(get_current_user),
+    registry: ToolRegistry = Depends(get_registry),
+):
     """List tool groups with their tools."""
     groups: dict[str, list] = {}
     for name, entry in registry._global_tools.items():
@@ -57,6 +65,7 @@ def list_tool_groups(registry: ToolRegistry = Depends(get_registry)):
 @router.post("/tools/groups/{group_id}/toggle")
 def toggle_tool_group(
     group_id: str,
+    user: User = Depends(get_current_user),
     registry: ToolRegistry = Depends(get_registry),
     engine: AgentEngine = Depends(get_engine),
 ):

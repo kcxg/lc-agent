@@ -12,11 +12,36 @@ from langchain_agentskills.loaders import CompositeSkillLoader, DirectorySkillLo
 from lc_agent.core.auth import AuthService
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.permissions import PermissionsService
-from lc_agent.db.engine import init_db
+from lc_agent.db.engine import get_async_session, init_db
+from lc_agent.db.models_auth import User
 from lc_agent.mcp.manager import McpManager
 from lc_agent.server.app import create_app, mount_static_files
 from lc_agent.server import sse as sse_module
 from lc_agent.skills.filtered_loader import FilteredSkillLoader
+
+
+def _resolve_sqlite_url(url: str, root: Path) -> str:
+    prefixes = ("sqlite+aiosqlite:///", "sqlite:///")
+    for prefix in prefixes:
+        if not url.startswith(prefix):
+            continue
+        path_part = url[len(prefix):]
+        if path_part in (":memory:", ""):
+            return url
+        path = Path(path_part)
+        if path.is_absolute():
+            return url
+        return f"{prefix}{(root / path).resolve().as_posix()}"
+    return url
+
+
+def _resolve_file_path(path: str, root: Path) -> str:
+    if path == ":memory:":
+        return path
+    file_path = Path(path)
+    if file_path.is_absolute():
+        return str(file_path)
+    return str((root / file_path).resolve())
 
 
 class LcAgentApp:
@@ -24,10 +49,20 @@ class LcAgentApp:
 
     def __init__(self, config: dict, host: str = "127.0.0.1", port: int = 8000):
         self.config = config
+        project_root = Path(config.get("_project_root") or Path.cwd())
+        database_config = self.config.setdefault("database", {})
+        database_config["url"] = _resolve_sqlite_url(
+            database_config.get("url", "sqlite+aiosqlite:///./lc_agent_data.db"),
+            project_root,
+        )
+        database_config["checkpoint_path"] = _resolve_file_path(
+            database_config.get("checkpoint_path", "./lc_agent_checkpoints.db"),
+            project_root,
+        )
         self.host = host
         self.port = port
-        self._db_url = config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
-        self._checkpoint_path = config.get("database", {}).get("checkpoint_path", "./lc_agent_checkpoints.db")
+        self._db_url = database_config["url"]
+        self._checkpoint_path = database_config["checkpoint_path"]
         permissions_path = config.get("permissions", {}).get("path", "./permissions.jsonc")
         self._permissions_service = PermissionsService(permissions_path=Path(permissions_path))
         self.engine = AgentEngine(config)
@@ -52,17 +87,6 @@ class LcAgentApp:
         self.fastapi_app.state.engine = self.engine
         self.fastapi_app.state.permissions = self._permissions_service
         self.engine._permissions_service = self._permissions_service
-        # JWT auth service (replaces old cookie-based auth)
-        auth_config = config.get("auth", {})
-        if auth_config.get("enabled", False):
-            auth_secret = auth_config.get("secret", "")
-            if len(auth_secret) >= 16:
-                self.fastapi_app.state.auth_service = AuthService(
-                    secret=auth_secret,
-                    token_expire_days=auth_config.get("token_expire_days", 7),
-                )
-            else:
-                print("[Auth] WARNING: auth.enabled=true but secret is too short (<16 chars), auth disabled")
         sse_module.configure(self.engine, self._db_url)
         mount_static_files(self.fastapi_app)
 
@@ -75,8 +99,7 @@ class LcAgentApp:
         import asyncio
 
         await init_db(self._db_url)
-        # Ensure default admin user exists if auth is enabled
-        await self._ensure_default_admin()
+        await self._init_auth(app)
         try:
             from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
             import aiosqlite
@@ -104,6 +127,47 @@ class LcAgentApp:
         finally:
             await self.mcp_manager.shutdown()
 
+    async def _init_auth(self, app: FastAPI) -> None:
+        """Initialize auth service and ensure at least one admin exists."""
+        auth_config = self.config.get("auth", {})
+        secret = auth_config.get("secret", "")
+        if not secret:
+            print("[Auth] WARNING: auth.secret not configured, authentication DISABLED")
+            return
+        if len(secret) < 16:
+            raise ValueError("Auth secret must be at least 16 characters")
+
+        token_expire_days = auth_config.get("token_expire_days", 7)
+        auth_service = AuthService(secret=secret, token_expire_days=token_expire_days)
+        app.state.auth_service = auth_service
+
+        from lc_agent.db.models import SessionMeta
+        from sqlalchemy import select
+
+        db = get_async_session(self._db_url)
+        try:
+            result = await db.execute(select(User).where(User.role == "admin"))
+            admin = result.scalar_one_or_none()
+            if admin is None:
+                password = "123456"
+                admin = User(
+                    username="admin",
+                    password_hash=auth_service.hash_password(password),
+                    role="admin",
+                )
+                db.add(admin)
+
+                await db.execute(
+                    SessionMeta.__table__.update().where(SessionMeta.user_id == "").values(user_id=admin.id)
+                )
+
+                await db.commit()
+                print(f"[Auth] Created initial admin: admin / {password}")
+            else:
+                print(f"[Auth] Admin user exists: {admin.username}")
+        finally:
+            await db.close()
+
     async def _load_presets_from_db(self):
         """Load user-created presets from database on startup."""
         from lc_agent.db.engine import get_async_session
@@ -124,6 +188,7 @@ class LcAgentApp:
                     allowed_tool_groups=row.allowed_tool_groups,
                     allowed_mcp_servers=row.allowed_mcp_servers,
                     allowed_skills=row.allowed_skills,
+                    llm_params=row.llm_params,
                 )
                 self.engine._presets[preset.id] = preset
             loaded = len(self.engine._presets)
@@ -131,39 +196,6 @@ class LcAgentApp:
                 print(f"[Agents] Loaded {loaded} user presets from database")
         except Exception as e:
             print(f"[Warning] Failed to load presets from DB: {e}")
-        finally:
-            await session.close()
-
-    async def _ensure_default_admin(self):
-        """Create default admin user if auth is enabled and no users exist."""
-        auth_service = getattr(self.fastapi_app.state, "auth_service", None)
-        if auth_service is None:
-            return
-
-        from lc_agent.db.engine import get_async_session
-        from lc_agent.db.models_auth import User
-        from sqlalchemy import select
-
-        auth_config = self.config.get("auth", {})
-        default_username = auth_config.get("admin_username", "admin")
-        default_password = auth_config.get("admin_password", "admin123")
-
-        session = get_async_session(self._db_url)
-        try:
-            result = await session.execute(select(User).limit(1))
-            if result.first() is not None:
-                return  # Users already exist
-
-            user = User(
-                username=default_username,
-                password_hash=auth_service.hash_password(default_password),
-                role="admin",
-            )
-            session.add(user)
-            await session.commit()
-            print(f"[Auth] Created default admin user: {default_username}")
-        except Exception as e:
-            print(f"[Warning] Failed to create default admin: {e}")
         finally:
             await session.close()
 
@@ -187,7 +219,11 @@ class LcAgentApp:
             name=name,
             system_prompt=description or f"Custom agent: {name}",
             default_model="custom",
+            allowed_tool_groups=[],
+            allowed_mcp_servers=[],
+            allowed_skills=[],
             source="code",
+            default_enabled=False,
         )
         self.engine._custom_presets[name] = preset
 
@@ -199,3 +235,5 @@ class LcAgentApp:
         print(f"  Web UI: http://{self.host}:{self.port}")
         print(f"  API Docs: http://{self.host}:{self.port}/api/docs\n")
         uvicorn.run(self.fastapi_app, host=self.host, port=self.port)
+
+

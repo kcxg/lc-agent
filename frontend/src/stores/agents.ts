@@ -10,6 +10,7 @@ export interface AgentPreset {
   allowed_tool_groups: string[] | null
   allowed_mcp_servers: string[] | null
   allowed_skills: string[] | null
+  llm_params: Record<string, any> | null
   source: 'builtin' | 'code' | 'user'
   default_enabled: boolean
 }
@@ -27,6 +28,8 @@ export const useAgentsStore = defineStore('agents', () => {
   const isBuiltin = computed(() => BUILTIN_IDS.has(currentAgentId.value))
 
   const isChatAgent = computed(() => currentAgentId.value === '__chat__')
+
+  const isCodeAgent = computed(() => currentAgent.value?.source === 'code')
 
   async function init() {
     try {
@@ -80,6 +83,7 @@ export const useAgentsStore = defineStore('agents', () => {
     currentAgent,
     isBuiltin,
     isChatAgent,
+    isCodeAgent,
     init,
     createAgent,
     updateAgent,

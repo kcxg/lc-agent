@@ -1,10 +1,10 @@
 <template>
   <ConfigProvider :theme="isDark ? 'dark' : 'light'">
-  <router-view v-if="route.name === 'login'" />
-  <div v-else-if="!authStore.authRequired || authStore.isAuthenticated" class="app-container">
+    <router-view v-if="isPublicRoute" />
+    <div v-else class="app-container">
     <AppHeader
       :app-name="appName"
-      :model-name="toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A'"
+      :model-name="agentsStore.isCodeAgent ? '代码内定义' : (toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A')"
       @edit-agent="editCurrentAgent"
       @new-agent="createNewAgent"
       @new-chat="handleNewChat"
@@ -42,18 +42,16 @@
       <RightPanel
         class="mobile-right-panel"
         :class="{ 'is-mobile-open': mobileRightOpen }"
-        :collapsed="mobileRightOpen ? false : rightPanelCollapsed"
-        @toggle-collapse="rightPanelCollapsed = !rightPanelCollapsed"
       />
     </div>
 
     <AgentEditorDialog ref="agentEditorRef" />
-  </div>
+    </div>
   </ConfigProvider>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ConfigProvider } from 'vue-element-plus-x'
 import { useTheme } from '@/composables/useTheme'
@@ -62,7 +60,6 @@ import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore } from '@/stores/agents'
 import { useSessionsStore } from '@/stores/sessions'
-import { useAuthStore } from '@/stores/auth'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import LeftSidebar from '@/components/layout/LeftSidebar.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'
@@ -76,38 +73,18 @@ const chatStore = useChatStore()
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
 const sessionsStore = useSessionsStore()
-const authStore = useAuthStore()
 const agentEditorRef = ref<InstanceType<typeof AgentEditorDialog>>()
 const sidebarCollapsed = ref(false)
-const rightPanelCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
-const protectedStoresReady = ref(false)
 const appName = ref('lc_agent')
 
-onMounted(async () => {
-  try {
-    const health = await api.health()
-    if (health.app_name) {
-      appName.value = health.app_name
-    }
-  } catch { /* use default */ }
-  if (!authStore.authRequired || authStore.isAuthenticated) {
-    await initializeProtectedStores()
-  }
-})
+const isPublicRoute = computed(() => !!route.meta.public)
+const appInitialized = ref(false)
 
-watch(() => authStore.isAuthenticated, async authenticated => {
-  if (!authStore.authRequired || authenticated) {
-    await initializeProtectedStores()
-  } else {
-    protectedStoresReady.value = false
-  }
-})
-
-async function initializeProtectedStores() {
-  if (protectedStoresReady.value) return
-  protectedStoresReady.value = true
+async function initApp() {
+  if (appInitialized.value || isPublicRoute.value) return
+  appInitialized.value = true
 
   await Promise.all([
     toolsStore.init(),
@@ -134,15 +111,13 @@ async function initializeProtectedStores() {
   const routeSessionId = typeof sessionId === 'string' ? sessionId : ''
   const agentQuery = route.query.agent as string
   if (routeSessionId && agentQuery && agentsStore.agents.find(a => a.id === agentQuery)) {
-    const defaultModel = agentsStore.agents.find(a => a.id === agentQuery)?.default_model || ''
-    sessionsStore.ensureLocalSession(routeSessionId, agentQuery, defaultModel)
+    const sessionModel = getSessionModelForAgent(agentQuery)
+    sessionsStore.ensureLocalSession(routeSessionId, agentQuery, sessionModel)
     sessionsStore.selectSession(routeSessionId)
     if (agentQuery !== agentsStore.currentAgentId) {
       await agentsStore.selectAgent(agentQuery)
     }
-    if (defaultModel) {
-      toolsStore.setModel(defaultModel)
-    }
+    applySessionModel(sessionModel)
     return
   }
 
@@ -151,8 +126,32 @@ async function initializeProtectedStores() {
   }
 }
 
+
+function getSessionModelForAgent(agentId: string): string {
+  const agent = agentsStore.agents.find(a => a.id === agentId)
+  if (agent?.source === 'code') return ''
+  return agent?.default_model || toolsStore.currentModel || ''
+}
+
+function applySessionModel(model: string) {
+  if (model) {
+    toolsStore.setModel(model)
+  }
+}
+
+onMounted(async () => {
+  await initApp()
+})
+
+watch(isPublicRoute, async (isPublic) => {
+  if (!isPublic) {
+    appInitialized.value = false
+    await initApp()
+  }
+})
+
 watch(() => route.params.sessionId, (newId) => {
-  if (authStore.isAuthenticated && newId && typeof newId === 'string') {
+  if (newId && typeof newId === 'string') {
     restoreSession(newId)
   }
 })
@@ -165,7 +164,10 @@ async function restoreSession(sessionId: string) {
     if (session.agent_id && session.agent_id !== agentsStore.currentAgentId) {
       await agentsStore.selectAgent(session.agent_id)
     }
-    if (session.model) {
+    const sessionAgent = agentsStore.agents.find(a => a.id === session.agent_id)
+    if (sessionAgent?.source === 'code') {
+      toolsStore.syncModelWithAgentDefault()
+    } else if (session.model) {
       toolsStore.setModel(session.model)
     }
     chatStore.clearMessages()
@@ -177,22 +179,21 @@ async function restoreSession(sessionId: string) {
 
   const agentQuery = route.query.agent as string
   if (agentQuery && agentsStore.agents.find(a => a.id === agentQuery)) {
-    const defaultModel = agentsStore.agents.find(a => a.id === agentQuery)?.default_model || ''
-    sessionsStore.ensureLocalSession(sessionId, agentQuery, defaultModel)
+    const sessionModel = getSessionModelForAgent(agentQuery)
+    sessionsStore.ensureLocalSession(sessionId, agentQuery, sessionModel)
     sessionsStore.selectSession(sessionId)
     if (agentQuery !== agentsStore.currentAgentId) {
       await agentsStore.selectAgent(agentQuery)
     }
-    if (defaultModel) {
-      toolsStore.setModel(defaultModel)
-    }
+    applySessionModel(sessionModel)
     chatStore.clearMessages()
     chatStore.disconnect()
   }
 }
 
 async function handleNewChat() {
-  const session = sessionsStore.createLocalSession(agentsStore.currentAgentId, toolsStore.currentModel)
+  const sessionModel = getSessionModelForAgent(agentsStore.currentAgentId)
+  const session = sessionsStore.createLocalSession(agentsStore.currentAgentId, sessionModel)
   const sameRouteSession = route.params.sessionId === session.id
   chatStore.clearMessages()
   chatStore.disconnect()
@@ -206,24 +207,30 @@ async function handleNewChat() {
 async function handleSwitchSession(sessionId: string) {
   if (chatStore.threadId === sessionId && chatStore.isConnected) {
     const session = sessionsStore.sessions.find(s => s.id === sessionId)
-    if (session?.model) {
+    const agentId = session?.agent_id || agentsStore.currentAgentId
+    const sessionAgent = agentsStore.agents.find(a => a.id === agentId)
+    if (sessionAgent?.source === 'code') {
+      toolsStore.syncModelWithAgentDefault()
+    } else if (session?.model) {
       toolsStore.setModel(session.model)
     }
-    const agentId = session?.agent_id || agentsStore.currentAgentId
     router.push({ name: 'chat', params: { sessionId }, query: { agent: agentId } })
     closeMobileDrawers()
     return
   }
   const session = sessionsStore.sessions.find(s => s.id === sessionId)
   sessionsStore.selectSession(sessionId)
-  if (session?.model) {
+  const agentId = session?.agent_id || agentsStore.currentAgentId
+  const sessionAgent = agentsStore.agents.find(a => a.id === agentId)
+  if (sessionAgent?.source === 'code') {
+    toolsStore.syncModelWithAgentDefault()
+  } else if (session?.model) {
     toolsStore.setModel(session.model)
   }
   chatStore.clearMessages()
   chatStore.disconnect()
   await chatStore.loadMessages(sessionId)
   await chatStore.connect(sessionId)
-  const agentId = session?.agent_id || agentsStore.currentAgentId
   if (session?.agent_id && session.agent_id !== agentsStore.currentAgentId) {
     await agentsStore.selectAgent(session.agent_id)
   }
@@ -233,11 +240,9 @@ async function handleSwitchSession(sessionId: string) {
 
 async function handleAgentChange(agentId: string) {
   await agentsStore.selectAgent(agentId)
-  const defaultModel = agentsStore.currentAgent?.default_model
-  if (defaultModel) {
-    toolsStore.setModel(defaultModel)
-  }
-  const session = sessionsStore.createLocalSession(agentId, toolsStore.currentModel)
+  const sessionModel = getSessionModelForAgent(agentId)
+  applySessionModel(sessionModel)
+  const session = sessionsStore.createLocalSession(agentId, sessionModel)
   chatStore.clearMessages()
   chatStore.disconnect()
   await router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: agentId } })
@@ -312,9 +317,9 @@ function closeMobileDrawers() {
     display: block;
     position: fixed;
     inset: 52px 0 0;
-    background: color-mix(in srgb, var(--el-color-black) 35%, transparent);
+    background: rgba(15, 23, 42, 0.35);
     backdrop-filter: blur(2px);
-    z-index: var(--z-backdrop);
+    z-index: 180;
   }
 
   .mobile-left-panel,
@@ -323,7 +328,7 @@ function closeMobileDrawers() {
     top: 52px;
     bottom: 0;
     height: calc(100dvh - 52px);
-    z-index: var(--z-drawer);
+    z-index: 200;
     pointer-events: none;
     box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
     transition: transform 0.24s ease, box-shadow 0.24s ease;
