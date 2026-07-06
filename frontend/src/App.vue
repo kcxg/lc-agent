@@ -42,6 +42,8 @@
       <RightPanel
         class="mobile-right-panel"
         :class="{ 'is-mobile-open': mobileRightOpen }"
+        :collapsed="mobileRightOpen ? false : rightPanelCollapsed"
+        @toggle-collapse="rightPanelCollapsed = !rightPanelCollapsed"
       />
     </div>
 
@@ -77,6 +79,7 @@ const agentEditorRef = ref<InstanceType<typeof AgentEditorDialog>>()
 const sidebarCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
+const rightPanelCollapsed = ref(false)
 const appName = ref('lc_agent')
 
 const isPublicRoute = computed(() => !!route.meta.public)
