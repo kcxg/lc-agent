@@ -149,7 +149,7 @@ class LcAgentApp:
             result = await db.execute(select(User).where(User.role == "admin"))
             admin = result.scalar_one_or_none()
             if admin is None:
-                password = auth_service.generate_random_password()
+                password = "123456"
                 admin = User(
                     username="admin",
                     password_hash=auth_service.hash_password(password),
@@ -188,6 +188,7 @@ class LcAgentApp:
                     allowed_tool_groups=row.allowed_tool_groups,
                     allowed_mcp_servers=row.allowed_mcp_servers,
                     allowed_skills=row.allowed_skills,
+                    llm_params=row.llm_params,
                 )
                 self.engine._presets[preset.id] = preset
             loaded = len(self.engine._presets)

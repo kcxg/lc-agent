@@ -25,6 +25,66 @@
         </el-select>
       </el-form-item>
 
+      <el-form-item label="Temperature">
+        <div class="llm-param-item">
+          <el-checkbox
+            :model-value="form.llm_params?.temperature !== undefined"
+            :disabled="isCodeAgent"
+            @update:model-value="toggleTemperature"
+          >为此预设固定温度值</el-checkbox>
+          <div v-if="form.llm_params?.temperature !== undefined" class="temperature-preset-control">
+            <el-slider
+              :model-value="form.llm_params.temperature"
+              :min="0"
+              :max="2"
+              :step="0.05"
+              :disabled="isCodeAgent"
+              class="temp-slider"
+              @update:model-value="setTemperature"
+            />
+            <el-input-number
+              :model-value="form.llm_params.temperature"
+              :min="0"
+              :max="2"
+              :step="0.05"
+              :precision="2"
+              size="small"
+              controls-position="right"
+              :disabled="isCodeAgent"
+              style="width: 80px"
+              @update:model-value="setTemperature"
+            />
+          </div>
+          <span v-else class="param-hint">留空时运行时默认 0.7</span>
+        </div>
+      </el-form-item>
+
+      <el-form-item label="思考级别（reasoning_effort）">
+        <div class="llm-param-item">
+          <el-checkbox
+            :model-value="form.llm_params?.reasoning_effort !== undefined"
+            :disabled="isCodeAgent"
+            @update:model-value="toggleReasoningEffort"
+          >为此预设固定思考级别</el-checkbox>
+          <el-select
+            v-if="form.llm_params?.reasoning_effort !== undefined"
+            :model-value="form.llm_params.reasoning_effort"
+            size="small"
+            :disabled="isCodeAgent"
+            style="width: 140px; margin-top: 6px"
+            @update:model-value="setReasoningEffort"
+          >
+            <el-option
+              v-for="effort in REASONING_EFFORTS"
+              :key="effort"
+              :label="effort"
+              :value="effort"
+            />
+          </el-select>
+          <span v-else class="param-hint">留空时由模型决定</span>
+        </div>
+      </el-form-item>
+
       <el-form-item label="系统提示词">
         <el-input
           v-model="form.system_prompt"
@@ -139,6 +199,8 @@ import { ref } from 'vue'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore, type AgentPreset } from '@/stores/agents'
 
+const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
 
@@ -160,6 +222,7 @@ const form = ref({
   name: '',
   system_prompt: '',
   default_model: '',
+  llm_params: null as Record<string, any> | null,
 })
 
 function open(agent?: AgentPreset) {
@@ -171,6 +234,7 @@ function open(agent?: AgentPreset) {
     form.value.name = agent.name
     form.value.system_prompt = agent.system_prompt
     form.value.default_model = agent.default_model
+    form.value.llm_params = agent.llm_params ?? null
 
     if (agent.allowed_tool_groups === null) {
       toolGroupMode.value = 'all'
@@ -209,7 +273,7 @@ function open(agent?: AgentPreset) {
     editingId.value = ''
     editingSource.value = 'user'
     isCodeAgent.value = false
-    form.value = { name: '', system_prompt: '', default_model: toolsStore.currentModel }
+    form.value = { name: '', system_prompt: '', default_model: toolsStore.currentModel, llm_params: null }
     toolGroupMode.value = 'all'
     selectedGroups.value = []
     mcpMode.value = 'all'
@@ -245,6 +309,7 @@ async function handleSave() {
       allowed_tool_groups,
       allowed_mcp_servers,
       allowed_skills,
+      llm_params: form.value.llm_params || null,
     }
 
     if (isEdit.value) {
@@ -263,10 +328,79 @@ async function handleDelete() {
   visible.value = false
 }
 
+function _ensureLlmParams() {
+  if (!form.value.llm_params) form.value.llm_params = {}
+}
+
+function _cleanLlmParams() {
+  if (form.value.llm_params && !Object.keys(form.value.llm_params).length) {
+    form.value.llm_params = null
+  }
+}
+
+function toggleTemperature(v: boolean) {
+  if (v) {
+    _ensureLlmParams()
+    form.value.llm_params!.temperature = 0.7
+  } else {
+    if (form.value.llm_params) {
+      delete form.value.llm_params.temperature
+      _cleanLlmParams()
+    }
+  }
+}
+
+function setTemperature(v: number | undefined) {
+  if (v === undefined) return
+  _ensureLlmParams()
+  form.value.llm_params!.temperature = v
+}
+
+function toggleReasoningEffort(v: boolean) {
+  if (v) {
+    _ensureLlmParams()
+    form.value.llm_params!.reasoning_effort = 'medium'
+  } else {
+    if (form.value.llm_params) {
+      delete form.value.llm_params.reasoning_effort
+      _cleanLlmParams()
+    }
+  }
+}
+
+function setReasoningEffort(v: string) {
+  _ensureLlmParams()
+  form.value.llm_params!.reasoning_effort = v
+}
+
 defineExpose({ open })
 </script>
 
 <style scoped>
+.llm-param-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.temperature-preset-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.temp-slider {
+  flex: 1;
+}
+
+.param-hint {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  margin-left: 2px;
+}
+
 .tool-group-select {
   width: 100%;
 }

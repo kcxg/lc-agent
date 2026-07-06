@@ -9,21 +9,72 @@
             :current-model="toolsStore.currentModel"
             @change="toolsStore.setModel"
           />
-          <div class="reasoning-effort-control">
-            <span class="reasoning-effort-label">reasoning_effort</span>
-            <el-select
-              :model-value="toolsStore.reasoningEffort"
-              size="small"
-              class="reasoning-effort-select"
-              @update:model-value="toolsStore.setReasoningEffort"
-            >
-              <el-option
-                v-for="effort in ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']"
-                :key="effort"
-                :label="effort"
-                :value="effort"
-              />
-            </el-select>
+          <div class="llm-params-controls">
+            <div class="param-row">
+              <div class="param-label-group">
+                <span class="param-label">思考级别</span>
+                <span v-if="reasoningFromPreset" class="param-source-hint">预设</span>
+                <span v-else-if="hasReasoningOverride" class="param-source-hint override">覆盖</span>
+              </div>
+              <div class="param-control-group">
+                <el-select
+                  :model-value="effectiveReasoningEffort ?? 'default'"
+                  size="small"
+                  class="reasoning-effort-select"
+                  @update:model-value="(v: string) => toolsStore.setLlmParam('reasoning_effort', v === 'default' ? null : v)"
+                >
+                  <el-option
+                    v-for="effort in ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']"
+                    :key="effort"
+                    :label="effort"
+                    :value="effort"
+                  />
+                </el-select>
+                <button
+                  v-if="hasReasoningOverride"
+                  class="param-reset-btn"
+                  type="button"
+                  title="清除覆盖，恢复预设/默认"
+                  @click="toolsStore.setLlmParam('reasoning_effort', null)"
+                >×</button>
+              </div>
+            </div>
+            <div class="param-row param-row-slider">
+              <div class="param-label-group">
+                <span class="param-label">温度</span>
+                <span v-if="temperatureFromPreset" class="param-source-hint">预设</span>
+                <span v-else-if="hasTemperatureOverride" class="param-source-hint override">覆盖</span>
+              </div>
+              <div class="temperature-control">
+                <el-slider
+                  :model-value="effectiveTemperature"
+                  :min="0"
+                  :max="2"
+                  :step="0.1"
+                  size="small"
+                  class="temperature-slider"
+                  @update:model-value="(v: number) => toolsStore.setLlmParam('temperature', v)"
+                />
+                <el-input-number
+                  :model-value="effectiveTemperature"
+                  :min="0"
+                  :max="2"
+                  :step="0.1"
+                  :precision="1"
+                  size="small"
+                  controls-position="right"
+                  class="temperature-input"
+                  @update:model-value="(v: number | undefined) => toolsStore.setLlmParam('temperature', v ?? null)"
+                />
+                <button
+                  v-if="hasTemperatureOverride"
+                  class="param-reset-btn"
+                  type="button"
+                  title="清除覆盖，恢复预设/默认"
+                  @click="toolsStore.setLlmParam('temperature', null)"
+                >×</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -221,7 +272,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { useToolsStore } from '@/stores/tools'
 import { api } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
@@ -236,6 +287,27 @@ import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
+
+const presetLlmParams = computed(() => agentsStore.currentAgent?.llm_params ?? null)
+
+const effectiveTemperature = computed(() =>
+  toolsStore.llmParams?.temperature
+    ?? presetLlmParams.value?.temperature
+    ?? 0.7
+)
+const effectiveReasoningEffort = computed(() =>
+  toolsStore.llmParams?.reasoning_effort
+    ?? presetLlmParams.value?.reasoning_effort
+    ?? null
+)
+const hasTemperatureOverride = computed(() => toolsStore.llmParams?.temperature !== undefined)
+const hasReasoningOverride = computed(() => toolsStore.llmParams?.reasoning_effort !== undefined)
+const temperatureFromPreset = computed(() =>
+  !hasTemperatureOverride.value && presetLlmParams.value?.temperature !== undefined
+)
+const reasoningFromPreset = computed(() =>
+  !hasReasoningOverride.value && presetLlmParams.value?.reasoning_effort !== undefined
+)
 const { markdownTheme, currentOption, setMarkdownTheme } = useMarkdownTheme()
 
 const summEnabled = ref(true)
@@ -322,6 +394,101 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 .window-trim-section,
 .markdown-theme-section {
   margin-bottom: 14px;
+}
+
+.llm-params-controls {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.param-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.param-row-slider {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.param-label-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.param-label {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+
+.param-source-hint {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-placeholder);
+  border: 1px solid var(--el-border-color-lighter);
+  white-space: nowrap;
+}
+
+.param-source-hint.override {
+  background: color-mix(in srgb, var(--el-color-primary) 10%, transparent);
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-7);
+}
+
+.param-control-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.param-reset-btn {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 50%;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.param-reset-btn:hover {
+  background: var(--el-color-danger-light-8);
+  border-color: var(--el-color-danger-light-5);
+  color: var(--el-color-danger);
+}
+
+.temperature-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.temperature-slider {
+  flex: 1;
+}
+
+.temperature-input {
+  width: 68px;
+  flex-shrink: 0;
 }
 
 .window-trim-control {

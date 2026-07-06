@@ -101,7 +101,7 @@ class AgentEngine:
         self,
         preset: AgentPreset | None = None,
         cache_key: str | None = None,
-        reasoning_effort: str | None = None,
+        llm_params: dict | None = None,
     ):
         """Build a LangGraph ReAct agent from preset."""
         if preset is None:
@@ -141,7 +141,8 @@ class AgentEngine:
             tools = tools + mcp_tools
 
         model_info = self._find_model(preset.default_model)
-        llm = self._create_llm(model_info, preset.default_model, reasoning_effort=reasoning_effort)
+        effective_params = {**(preset.llm_params or {}), **(llm_params or {})}
+        llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
 
         from langchain.agents import create_agent
 
@@ -192,7 +193,7 @@ class AgentEngine:
         self,
         model_info: ModelInfo | None,
         model_id: str,
-        reasoning_effort: str | None = None,
+        llm_params: dict | None = None,
     ):
         """Create a chat model instance.
 
@@ -200,15 +201,23 @@ class AgentEngine:
         from any provider that returns it (DeepSeek, GLM, etc).
         Uses init_chat_model for standard providers (handles provider routing).
         """
+        params = llm_params or {}
+        temperature = params.get("temperature", 0.7)
+        reasoning_effort = params.get("reasoning_effort")
+        # passthrough: top_p, top_k, presence_penalty, frequency_penalty, max_tokens, etc.
+        HANDLED_KEYS = {"temperature", "reasoning_effort"}
+        extra_params = {k: v for k, v in params.items() if k not in HANDLED_KEYS and v is not None}
+
         if model_info and model_info.base_url:
             from lc_agent.core.chat_model import ChatOpenAIReasoning
             kwargs: dict[str, Any] = dict(
                 model=model_info.id,
                 base_url=model_info.base_url,
                 api_key=model_info.api_key or "not-set",
-                temperature=0.7,
+                temperature=temperature,
                 stream_usage=True,
                 http_async_client=self._build_tracing_async_client(model_info, model_id),
+                **extra_params,
             )
             if model_info.max_output_tokens > 0:
                 kwargs["max_tokens"] = model_info.max_output_tokens
@@ -222,14 +231,15 @@ class AgentEngine:
             model_str = f"{model_info.provider}:{model_info.id}" if model_info.provider else model_info.id
             kwargs: dict[str, Any] = dict(
                 api_key=model_info.api_key or "not-set",
-                temperature=0.7,
+                temperature=temperature,
                 stream_usage=True,
+                **extra_params,
             )
             if reasoning_effort:
                 kwargs["reasoning_effort"] = reasoning_effort
             return init_chat_model(model_str, **kwargs)
 
-        kwargs: dict[str, Any] = dict(api_key="not-set", temperature=0.7, stream_usage=True)
+        kwargs: dict[str, Any] = dict(api_key="not-set", temperature=temperature, stream_usage=True, **extra_params)
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
         return init_chat_model(model_id, **kwargs)
@@ -291,15 +301,16 @@ class AgentEngine:
             return self._presets[preset_id]
         return self.get_default_preset()
 
-    def _get_agent_cache_key(self, preset_id: str, model_id: str = "", reasoning_effort: str | None = None) -> str:
+    def _get_agent_cache_key(self, preset_id: str, model_id: str = "", llm_params: dict | None = None) -> str:
         key = f"{preset_id}::model::{model_id}" if model_id else preset_id
-        if reasoning_effort:
-            key = f"{key}::reasoning_effort::{reasoning_effort}"
+        if llm_params:
+            import json
+            key = f"{key}::llm::{json.dumps(llm_params, sort_keys=True)}"
         return key
 
     def invalidate_agent_cache(self, preset_id: str, keep_exact: bool = False) -> None:
-        """Remove cached agents for a preset, including model override variants."""
-        prefix = f"{preset_id}::model::"
+        """Remove cached agents for a preset, including model/llm_params override variants."""
+        prefix = f"{preset_id}::"
         keys = [
             key
             for key in self._agents
@@ -324,7 +335,7 @@ class AgentEngine:
         self,
         preset_id: str,
         model_id: str = "",
-        reasoning_effort: str | None = None,
+        llm_params: dict | None = None,
     ):
         """Get cached agent or build a new one. Rebuilds preset agents if MCP state changed."""
         preset = self._resolve_preset(preset_id)
@@ -339,13 +350,13 @@ class AgentEngine:
         cache_key = self._get_agent_cache_key(
             preset_id,
             model_id if preset.default_model == model_id else "",
-            reasoning_effort=reasoning_effort,
+            llm_params=llm_params,
         )
         mcp_gen = getattr(self, '_mcp_generation', 0)
         cached = self._agents.get(cache_key)
         cached_gen = self._agent_mcp_gen.get(cache_key, -1)
         if cached is None or cached_gen != mcp_gen:
-            agent = self.build_agent(preset, cache_key=cache_key, reasoning_effort=reasoning_effort)
+            agent = self.build_agent(preset, cache_key=cache_key, llm_params=llm_params)
             self._agent_mcp_gen[cache_key] = mcp_gen
             return agent
         return cached
@@ -371,10 +382,10 @@ class AgentEngine:
         preset_id: str = "__chat__",
         model_id: str = "",
         history: list[dict[str, str]] | None = None,
-        reasoning_effort: str | None = None,
+        llm_params: dict | None = None,
     ) -> AsyncIterator[dict]:
         """Stream chat responses as events."""
-        agent = self._get_or_build_agent(preset_id, model_id, reasoning_effort=reasoning_effort)
+        agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
         input_messages = list(history or [])

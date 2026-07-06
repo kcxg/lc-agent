@@ -50,15 +50,13 @@ export interface ModelInfo {
   context_limit: number
 }
 
-export type ReasoningEffort = 'default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
-
 export const useToolsStore = defineStore('tools', () => {
   const groups = ref<ToolGroup[]>([])
   const models = ref<ModelInfo[]>([])
   const mcpServers = ref<McpServer[]>([])
   const skills = ref<Skill[]>([])
   const currentModel = ref('')
-  const reasoningEffort = ref<ReasoningEffort>('default')
+  const llmParams = ref<Record<string, any> | null>(null)
   const mcpRefreshing = ref(false)
 
   const localOverrides = reactive<Record<string, boolean>>({})
@@ -129,6 +127,22 @@ export const useToolsStore = defineStore('tools', () => {
     }
   }
 
+  function setLlmParam(key: string, value: any) {
+    if (value === null || value === undefined || value === '') {
+      if (llmParams.value) {
+        delete llmParams.value[key]
+        if (Object.keys(llmParams.value).length === 0) llmParams.value = null
+      }
+    } else {
+      if (!llmParams.value) llmParams.value = {}
+      llmParams.value[key] = value
+    }
+  }
+
+  function resetLlmParams() {
+    llmParams.value = null
+  }
+
   async function refreshMcpServers() {
     mcpRefreshing.value = true
     try {
@@ -158,6 +172,7 @@ export const useToolsStore = defineStore('tools', () => {
       watch(() => agentsStore.currentAgentId, () => {
         _clearOverrides()
         syncModelWithAgentDefault()
+        resetLlmParams()
       })
     } catch (e) {
       console.error('[ToolsStore] Failed to fetch:', e)
@@ -220,13 +235,10 @@ export const useToolsStore = defineStore('tools', () => {
     }
   }
 
-  function setReasoningEffort(value: ReasoningEffort) {
-    reasoningEffort.value = value
-  }
-
   return {
-    groups, models, mcpServers, skills, currentModel, reasoningEffort, mcpRefreshing,
+    groups, models, mcpServers, skills, currentModel, llmParams, mcpRefreshing,
     filteredGroups, filteredMcp, filteredSkills,
-    init, refreshMcpServers, toggleGroup, toggleMcp, toggleSkill, setModel, setReasoningEffort, syncModelWithAgentDefault,
+    init, refreshMcpServers, toggleGroup, toggleMcp, toggleSkill,
+    setModel, setLlmParam, resetLlmParams, syncModelWithAgentDefault,
   }
 })

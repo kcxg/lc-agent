@@ -95,6 +95,9 @@ async def init_db(url: str = "sqlite+aiosqlite:///./lc_agent_data.db"):
 
         if has_revisions:
             command.upgrade(alembic_cfg, "head")
+            engine = get_async_engine(url)
+            async with engine.begin() as conn:
+                await conn.run_sync(_add_missing_columns)
             return
     except Exception as e:
         print(f"[DB] Alembic migration failed, falling back to create_all: {e}")

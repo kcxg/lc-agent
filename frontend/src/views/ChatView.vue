@@ -174,6 +174,13 @@
 </template>
 
 <script setup lang="ts">
+// Workaround: avoid '<!--' directly in string literals (Rolldown WASM parser bug with HTML comment-like strings)
+const C = '\x3c!--'  // '<' + '!--' = '<!--'
+const THINK_START = `${C}THINK_START-->`
+const THINK_END = `${C}THINK_END-->`
+const HTTP_MARKER = `${C}HTTP:`
+const TOOL_MARKER = `${C}TOOL:`
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { BubbleList, Thinking, Welcome } from 'vue-element-plus-x'
@@ -356,9 +363,9 @@ function cancelEdit() {
 function hasStructuredSegments(content: string, toolCalls?: ToolCall[]): boolean {
   return Boolean(
     toolCalls?.length
-    || content.includes('<!--THINK_START-->')
-    || content.includes('<!--THINK_END-->')
-    || content.includes('<!--HTTP:'),
+    || content.includes(THINK_START)
+    || content.includes(THINK_END)
+    || content.includes(HTTP_MARKER),
   )
 }
 
@@ -416,7 +423,7 @@ function parseSegments(content: string, toolCalls?: ToolCall[]): ContentSegment[
     const textBefore = content.slice(lastIndex, match.index).trim()
     const marker = match[0]
 
-    if (marker === '<!--THINK_START-->') {
+    if (marker === THINK_START) {
       if (textBefore) {
         segments.push({ type: inThinking ? 'thinking' : 'text', text: stripThinkingMarkers(textBefore) })
       }
@@ -425,7 +432,7 @@ function parseSegments(content: string, toolCalls?: ToolCall[]): ContentSegment[
       continue
     }
 
-    if (marker === '<!--THINK_END-->') {
+    if (marker === THINK_END) {
       if (textBefore) {
         segments.push({ type: 'thinking', text: stripThinkingMarkers(textBefore) })
       }
@@ -472,7 +479,7 @@ function handleSend(content: string) {
   chatStore.sendMessage(content, agentsStore.currentAgentId, modelOverride, {
     replaceFromMessageId: editMessageId || undefined,
     history,
-    reasoningEffort: toolsStore.reasoningEffort,
+    llmParams: toolsStore.llmParams,
   })
 }
 
@@ -534,15 +541,15 @@ watch(() => messages.value[messages.value.length - 1]?.id, () => {
 }, { flush: 'post' })
 
 function handleAllowPermanently(toolName: string) {
-  chatStore.respondToInterrupt(true, agentsStore.currentAgentId, toolName)
+  chatStore.respondToInterrupt(true, agentsStore.currentAgentId, toolName, toolsStore.llmParams)
 }
 
 function handleInterruptDecide(decision: { type: string }) {
-  chatStore.respondToInterrupt(decision.type === 'approve', agentsStore.currentAgentId)
+  chatStore.respondToInterrupt(decision.type === 'approve', agentsStore.currentAgentId, undefined, toolsStore.llmParams)
 }
 
 function handleInterruptResume(value: any) {
-  chatStore.resumeInterrupt(value, agentsStore.currentAgentId, toolsStore.currentModel)
+  chatStore.resumeInterrupt(value, agentsStore.currentAgentId, toolsStore.currentModel, toolsStore.llmParams)
 }
 
 function getCodeToCopy(button: HTMLButtonElement): string {

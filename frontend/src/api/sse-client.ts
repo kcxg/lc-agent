@@ -34,7 +34,6 @@ export interface SseMessage {
 
 export type SseEventHandler = (msg: SseMessage) => void
 
-export type ReasoningEffort = 'default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
 function getSseAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -75,7 +74,7 @@ export class ChatSseClient {
     content: string,
     presetId?: string,
     model?: string,
-    options?: { replaceFromMessageId?: string; history?: any[]; reasoningEffort?: ReasoningEffort },
+    options?: { replaceFromMessageId?: string; history?: any[]; llmParams?: Record<string, any> | null },
   ): Promise<void> {
     if (!this._threadId) throw new Error('threadId not set')
 
@@ -88,8 +87,8 @@ export class ChatSseClient {
       body.replace_from_message_id = options.replaceFromMessageId
       body.history = options.history || []
     }
-    if (options?.reasoningEffort && options.reasoningEffort !== 'default') {
-      body.reasoning_effort = options.reasoningEffort
+    if (options?.llmParams && Object.keys(options.llmParams).length > 0) {
+      body.llm_params = options.llmParams
     }
 
     await this._startStream(body)
@@ -100,13 +99,21 @@ export class ChatSseClient {
     await this.sendInterruptResume({ decisions }, presetId, model)
   }
 
-  async sendInterruptResume(resumeValue: any, presetId: string, model?: string): Promise<void> {
+  async sendInterruptResume(
+    resumeValue: any,
+    presetId: string,
+    model?: string,
+    llmParams?: Record<string, any> | null,
+  ): Promise<void> {
     if (!this._threadId) throw new Error('threadId not set')
 
-    const body = {
+    const body: Record<string, any> = {
       command: { resume: resumeValue },
       preset_id: presetId || '__chat__',
       model: model || '',
+    }
+    if (llmParams && Object.keys(llmParams).length > 0) {
+      body.llm_params = llmParams
     }
 
     await this._startStream(body)

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { ChatSseClient, type ReasoningEffort, type SseMessage } from '@/api/sse-client'
+import { ChatSseClient, type SseMessage } from '@/api/sse-client'
 import { useSessionsStore } from '@/stores/sessions'
 import { api } from '@/api/http'
 import { createClientId } from '@/utils/client-id'
@@ -103,7 +103,7 @@ export interface ReplayMessage {
 export interface SendMessageOptions {
   replaceFromMessageId?: string
   history?: ReplayMessage[]
-  reasoningEffort?: ReasoningEffort
+  llmParams?: Record<string, any> | null
 }
 
 function normalizeToolStatus(status: any): ToolCall['status'] {
@@ -579,11 +579,16 @@ export const useChatStore = defineStore('chat', () => {
     client.sendMessage(content.trim(), presetId, modelId, {
       replaceFromMessageId: options.replaceFromMessageId,
       history: options.history,
-      reasoningEffort: options.reasoningEffort,
+      llmParams: options.llmParams,
     })
   }
 
-  function respondToInterrupt(approved: boolean, presetId: string = '__chat__', permanentlyAllow?: string) {
+  function respondToInterrupt(
+    approved: boolean,
+    presetId: string = '__chat__',
+    permanentlyAllow?: string,
+    llmParams?: Record<string, any> | null,
+  ) {
     const client = _ensureClient()
     const count = interrupt.value?.actionRequests?.length || 1
     const decisions = Array.from({ length: count }, () => ({
@@ -593,7 +598,7 @@ export const useChatStore = defineStore('chat', () => {
     if (permanentlyAllow) {
       resumePayload.permanently_allow = permanentlyAllow
     }
-    client.sendInterruptResume(resumePayload, presetId)
+    client.sendInterruptResume(resumePayload, presetId, undefined, llmParams)
     interrupt.value = null
     isStreaming.value = true
     currentRoundStart = Date.now()
@@ -603,9 +608,14 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function resumeInterrupt(resumeValue: any, presetId: string = '__chat__', model?: string) {
+  function resumeInterrupt(
+    resumeValue: any,
+    presetId: string = '__chat__',
+    model?: string,
+    llmParams?: Record<string, any> | null,
+  ) {
     const client = _ensureClient()
-    client.sendInterruptResume(resumeValue, presetId, model)
+    client.sendInterruptResume(resumeValue, presetId, model, llmParams)
     interrupt.value = null
     isStreaming.value = true
     currentRoundStart = Date.now()
