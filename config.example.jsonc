@@ -59,6 +59,8 @@
         "streaming": true,
         // LangGraph 最大递归步数（agent 调用工具的最大轮数），默认 100
         "recursion_limit": 100,
+        // 子Agent最大嵌套深度，0 表示禁用子Agent
+        "max_subagent_depth": 2,
 
         // ----- 上下文摘要（自动压缩对话历史） -----
         // 当对话超过 trigger 阈值时，自动用 LLM 生成旧消息的摘要，

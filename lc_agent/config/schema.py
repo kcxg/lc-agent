@@ -58,6 +58,7 @@ class AppConfig(BaseModel):
         "default_model": "",
         "streaming": True,
         "recursion_limit": 100,
+        "max_subagent_depth": 2,
     })
     mcp: dict = Field(default_factory=dict)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
