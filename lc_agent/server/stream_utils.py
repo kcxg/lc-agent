@@ -9,6 +9,23 @@ import time
 from typing import Any
 
 
+def _get_checkpoint_ns(event: dict) -> str:
+    """Return the langgraph_checkpoint_ns metadata string (empty = main agent)."""
+    return event.get("metadata", {}).get("langgraph_checkpoint_ns", "")
+
+
+def _extract_subagent_tool_call_id(checkpoint_ns: str) -> str | None:
+    """Extract tool_call_id from a nested namespace, or None if main-agent event.
+
+    Namespace format: "tools:abc123" or "tools:abc123|model:def456".
+    Returns the ID portion after "tools:".
+    """
+    for segment in checkpoint_ns.split("|"):
+        if segment.startswith("tools:"):
+            return segment.split(":", 1)[1]
+    return None
+
+
 def format_sse_event(event_type: str, data: dict) -> str:
     """Format a single SSE event frame.
 
@@ -24,7 +41,10 @@ def format_sse_event(event_type: str, data: dict) -> str:
 SSE_HEARTBEAT = ": heartbeat\n\n"
 
 
-def convert_stream_event(event: dict) -> list[tuple[str, dict]]:
+def convert_stream_event(
+    event: dict,
+    subagent_tool_names: set[str] | None = None,
+) -> list[tuple[str, dict]]:
     """Convert an astream_events v2 event into SSE event tuples.
 
     Returns a list of (event_type, payload_dict) for each client-visible
@@ -32,6 +52,9 @@ def convert_stream_event(event: dict) -> list[tuple[str, dict]]:
     if the event has no client-visible representation.
     """
     results: list[tuple[str, dict]] = []
+    checkpoint_ns = _get_checkpoint_ns(event)
+    sa_tool_call_id = _extract_subagent_tool_call_id(checkpoint_ns)
+    is_in_subagent = sa_tool_call_id is not None
     kind = event.get("event", "")
 
     if kind == "on_chat_model_stream":
@@ -39,26 +62,54 @@ def convert_stream_event(event: dict) -> list[tuple[str, dict]]:
         if chunk:
             additional = getattr(chunk, "additional_kwargs", None) or {}
             reasoning = additional.get("reasoning_content") or additional.get("reasoning")
-            if reasoning:
-                results.append(("thinking", {"content": reasoning}))
+            text = ""
             if hasattr(chunk, "content") and chunk.content:
                 content = chunk.content
                 if isinstance(content, list):
                     content = "".join(
                         p.get("text", "") if isinstance(p, dict) else str(p) for p in content
                     )
-                results.append(("token", {"content": content}))
+                text = content
+            if is_in_subagent:
+                if reasoning:
+                    results.append(("subagent_thinking", {"tool_call_id": sa_tool_call_id, "content": reasoning}))
+                if text:
+                    results.append(("subagent_token", {"tool_call_id": sa_tool_call_id, "content": text}))
+            else:
+                if reasoning:
+                    results.append(("thinking", {"content": reasoning}))
+                if text:
+                    results.append(("token", {"content": text}))
 
     elif kind == "on_tool_start":
         tool_name = event.get("name", "")
         tool_input = event.get("data", {}).get("input", {})
         if not isinstance(tool_input, (dict, list, str, int, float, bool, type(None))):
             tool_input = str(tool_input)
-        results.append(("tool_call", {
-            "name": tool_name,
-            "run_id": event.get("run_id", ""),
-            "args": tool_input,
-        }))
+        if is_in_subagent:
+            results.append(("subagent_tool_call", {
+                "tool_call_id": sa_tool_call_id,
+                "name": tool_name,
+                "args": tool_input,
+            }))
+        elif subagent_tool_names and tool_name in subagent_tool_names:
+            results.append(("tool_call", {
+                "name": tool_name,
+                "run_id": event.get("run_id", ""),
+                "args": tool_input,
+                "is_subagent": True,
+            }))
+            results.append(("subagent_start", {
+                "name": tool_name,
+                "tool_call_id": event.get("run_id", ""),
+                "query": tool_input.get("query", str(tool_input)) if isinstance(tool_input, dict) else str(tool_input),
+            }))
+        else:
+            results.append(("tool_call", {
+                "name": tool_name,
+                "run_id": event.get("run_id", ""),
+                "args": tool_input,
+            }))
 
     elif kind == "on_tool_end":
         tool_name = event.get("name", "")
@@ -67,10 +118,22 @@ def convert_stream_event(event: dict) -> list[tuple[str, dict]]:
             result_str = output.content if isinstance(output.content, str) else str(output.content)
         else:
             result_str = str(output)
-        results.append(("tool_result", {
-            "name": tool_name,
-            "result": result_str,
-        }))
+        if is_in_subagent:
+            results.append(("subagent_tool_result", {
+                "tool_call_id": sa_tool_call_id,
+                "name": tool_name,
+                "result": result_str,
+            }))
+        elif subagent_tool_names and tool_name in subagent_tool_names:
+            results.append(("subagent_done", {
+                "tool_call_id": event.get("run_id", ""),
+                "result_preview": result_str[:150],
+            }))
+        else:
+            results.append(("tool_result", {
+                "name": tool_name,
+                "result": result_str,
+            }))
 
     return results
 
@@ -80,79 +143,88 @@ def accumulate_display_state(
     content_parts: list[str],
     tool_calls: list[dict[str, Any]],
     in_thinking: bool,
+    subagent_tool_names: set[str] | None = None,
 ) -> bool:
     """Mirror the client display markers so history can replay the same layout.
 
     Mutates content_parts and tool_calls in place. Returns updated in_thinking flag.
     """
     kind = event.get("event", "")
+    checkpoint_ns = _get_checkpoint_ns(event)
+    sa_tool_call_id = _extract_subagent_tool_call_id(checkpoint_ns)
+    is_in_subagent = sa_tool_call_id is not None
 
     if kind == "on_chat_model_stream":
         chunk = event.get("data", {}).get("chunk")
         if not chunk:
             return in_thinking
 
-        additional = getattr(chunk, "additional_kwargs", None) or {}
-        reasoning = additional.get("reasoning_content") or additional.get("reasoning")
-        if reasoning:
-            if not in_thinking:
-                content_parts.append("<!--THINK_START-->")
-                in_thinking = True
-            content_parts.append(reasoning)
+        if not is_in_subagent:
+            additional = getattr(chunk, "additional_kwargs", None) or {}
+            reasoning = additional.get("reasoning_content") or additional.get("reasoning")
+            if reasoning:
+                if not in_thinking:
+                    content_parts.append("<!--THINK_START-->")
+                    in_thinking = True
+                content_parts.append(reasoning)
 
-        if hasattr(chunk, "content") and chunk.content:
+            if hasattr(chunk, "content") and chunk.content:
+                if in_thinking:
+                    content_parts.append("<!--THINK_END-->")
+                    in_thinking = False
+                text = chunk.content
+                if isinstance(text, list):
+                    text = "".join(
+                        p.get("text", "") if isinstance(p, dict) else str(p) for p in text
+                    )
+                content_parts.append(text)
+
+    elif kind == "on_tool_start":
+        tool_name = event.get("name", "")
+        if not is_in_subagent and tool_name not in (subagent_tool_names or set()):
             if in_thinking:
                 content_parts.append("<!--THINK_END-->")
                 in_thinking = False
-            text = chunk.content
-            if isinstance(text, list):
-                text = "".join(
-                    p.get("text", "") if isinstance(p, dict) else str(p) for p in text
-                )
-            content_parts.append(text)
 
-    elif kind == "on_tool_start":
-        if in_thinking:
-            content_parts.append("<!--THINK_END-->")
-            in_thinking = False
-
-        tool_idx = len(tool_calls)
-        tool_input = event.get("data", {}).get("input", {})
-        if not isinstance(tool_input, (dict, list, str, int, float, bool, type(None))):
-            tool_input = str(tool_input)
-        tool_calls.append({
-            "name": event.get("name", ""),
-            "runId": event.get("run_id", ""),
-            "args": tool_input,
-            "status": "running",
-            "startTime": int(time.time() * 1000),
-        })
-        content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
+            tool_idx = len(tool_calls)
+            tool_input = event.get("data", {}).get("input", {})
+            if not isinstance(tool_input, (dict, list, str, int, float, bool, type(None))):
+                tool_input = str(tool_input)
+            tool_calls.append({
+                "name": tool_name,
+                "runId": event.get("run_id", ""),
+                "args": tool_input,
+                "status": "running",
+                "startTime": int(time.time() * 1000),
+            })
+            content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
 
     elif kind == "on_tool_end":
-        raw_output = event.get("data", {}).get("output", "")
-        if hasattr(raw_output, "content"):
-            result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
-        else:
-            result_str = str(raw_output)
-        run_id = event.get("run_id", "")
-        name = event.get("name", "")
-        tool_call = None
-        if run_id:
-            tool_call = next(
-                (tc for tc in tool_calls if tc.get("runId") == run_id), None,
-            )
-        if tool_call is None:
-            tool_call = next(
-                (tc for tc in tool_calls if tc.get("name") == name and tc.get("status") == "running"),
-                None,
-            )
-        if tool_call:
-            start_time = tool_call.get("startTime")
-            tool_call["result"] = result_str
-            tool_call["status"] = "done"
-            tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
-            tool_call["resultLength"] = len(result_str)
+        tool_name = event.get("name", "")
+        if not is_in_subagent and tool_name not in (subagent_tool_names or set()):
+            raw_output = event.get("data", {}).get("output", "")
+            if hasattr(raw_output, "content"):
+                result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
+            else:
+                result_str = str(raw_output)
+            run_id = event.get("run_id", "")
+            name = event.get("name", "")
+            tool_call = None
+            if run_id:
+                tool_call = next(
+                    (tc for tc in tool_calls if tc.get("runId") == run_id), None,
+                )
+            if tool_call is None:
+                tool_call = next(
+                    (tc for tc in tool_calls if tc.get("name") == name and tc.get("status") == "running"),
+                    None,
+                )
+            if tool_call:
+                start_time = tool_call.get("startTime")
+                tool_call["result"] = result_str
+                tool_call["status"] = "done"
+                tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
+                tool_call["resultLength"] = len(result_str)
 
     return in_thinking
 
