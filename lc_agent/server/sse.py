@@ -18,6 +18,8 @@ from lc_agent.core.engine import AgentEngine
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
     bind_http_trace_collector,
+    init_subagent_collector_registry,
+    pop_subagent_traces,
     reset_http_trace_collector,
 )
 from lc_agent.server import persistence, stream_utils
@@ -264,6 +266,11 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             )
             subagent_tool_names = set(subagent_display_map.keys())
             _sa_writers: dict[str, dict] = {}
+            _sa_finalize_tasks: list[asyncio.Task] = []
+            _sa_create_tasks: list[asyncio.Task] = []
+
+            # Initialize sub-agent HTTP trace collector registry for this stream
+            init_subagent_collector_registry()
 
             if is_first:
                 preliminary_title = content[:30].strip()
@@ -321,8 +328,34 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                             evt_data = {
                                 **evt_data,
                                 "name": display_name,
-                                "sub_session_id": f"{thread_id}/sa/{sa_tid_pre}",
+                                "sub_session_id": f"{thread_id}--sa--{sa_tid_pre}",
                             }
+                        elif evt_type == "tool_call" and evt_data.get("is_subagent"):
+                            # Replace internal tool name with friendly display name
+                            raw_name = evt_data.get("name", "")
+                            evt_data = {
+                                **evt_data,
+                                "name": subagent_display_map.get(raw_name) or raw_name,
+                            }
+                        elif evt_type == "subagent_done":
+                            # Pre-yield: pop traces so they can be attached to the event
+                            # and front-end live mode can display them immediately.
+                            sa_tid_done = evt_data["tool_call_id"]
+                            if sa_tid_done in _sa_writers:
+                                writer_done = _sa_writers.pop(sa_tid_done)
+                                if writer_done["in_thinking"]:
+                                    writer_done["content_parts"].append("<!--THINK_END-->")
+                                sa_content_done = "".join(writer_done["content_parts"])
+                                sub_sid_done = writer_done["sub_session_id"]
+                                sa_http_traces = pop_subagent_traces(sub_sid_done) or None
+                                if sa_http_traces:
+                                    evt_data = {**evt_data, "http_traces": sa_http_traces}
+                                _t = asyncio.create_task(persistence.finalize_subsession_message(
+                                    _db_url, sub_sid_done, sa_content_done,
+                                    tool_calls=writer_done["tool_calls"] or None,
+                                    http_traces=sa_http_traces,
+                                ))
+                                _sa_finalize_tasks.append(_t)
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()
 
@@ -331,62 +364,77 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                             sa_query = evt_data.get("query", "")
                             sa_name = evt_data.get("name", "sub-agent")
                             parent_tid = thread_id
-                            sub_sid = f"{parent_tid}/sa/{sa_tid}"
+                            sub_sid = f"{parent_tid}--sa--{sa_tid}"
                             _sa_writers[sa_tid] = {
                                 "content_parts": [],
                                 "tool_calls": [],
                                 "query": sa_query,
                                 "sub_session_id": sub_sid,
+                                "in_thinking": False,
                             }
-                            asyncio.create_task(persistence.create_subsession(
+                            _sa_create_tasks.append(asyncio.create_task(persistence.create_subsession(
                                 _db_url, sub_sid, parent_tid, sa_tid,
                                 agent_id=sa_name,
                                 title=f"{sa_name}: {sa_query[:30]}",
                                 user_id=user.id if user else "",
-                            ))
-                            asyncio.create_task(persistence.save_subsession_delegation_message(
+                            )))
+                            _sa_create_tasks.append(asyncio.create_task(persistence.save_subsession_delegation_message(
                                 _db_url, sub_sid, sa_query,
-                            ))
+                            )))
                             for tc in tool_calls:
                                 if tc.get("runId") == sa_tid or tc.get("run_id") == sa_tid:
                                     tc["is_subagent"] = True
                                     tc["sub_session_id"] = sub_sid
+                                    tc["name"] = sa_name  # use display_name (already enriched)
                                     break
+
+                        elif evt_type == "subagent_thinking":
+                            sa_tid = evt_data["tool_call_id"]
+                            if sa_tid in _sa_writers:
+                                writer = _sa_writers[sa_tid]
+                                if not writer["in_thinking"]:
+                                    writer["content_parts"].append("<!--THINK_START-->")
+                                    writer["in_thinking"] = True
+                                writer["content_parts"].append(evt_data.get("content", ""))
 
                         elif evt_type == "subagent_token":
                             sa_tid = evt_data["tool_call_id"]
                             if sa_tid in _sa_writers:
-                                _sa_writers[sa_tid]["content_parts"].append(evt_data["content"])
+                                writer = _sa_writers[sa_tid]
+                                if writer["in_thinking"]:
+                                    writer["content_parts"].append("<!--THINK_END-->")
+                                    writer["in_thinking"] = False
+                                writer["content_parts"].append(evt_data.get("content", ""))
 
                         elif evt_type == "subagent_tool_call":
                             sa_tid = evt_data["tool_call_id"]
                             if sa_tid in _sa_writers:
-                                _sa_writers[sa_tid]["tool_calls"].append({
+                                writer = _sa_writers[sa_tid]
+                                if writer["in_thinking"]:
+                                    writer["content_parts"].append("<!--THINK_END-->")
+                                    writer["in_thinking"] = False
+                                tool_idx = len(writer["tool_calls"])
+                                writer["content_parts"].append(f"\n<!--TOOL:{tool_idx}-->\n")
+                                writer["tool_calls"].append({
                                     "name": evt_data["name"],
                                     "args": evt_data.get("args"),
                                     "status": "running",
+                                    "startTime": int(time.time() * 1000),
                                 })
 
                         elif evt_type == "subagent_tool_result":
                             sa_tid = evt_data["tool_call_id"]
                             if sa_tid in _sa_writers:
                                 name = evt_data["name"]
-                                for tc in _sa_writers[sa_tid]["tool_calls"]:
+                                for tc in reversed(_sa_writers[sa_tid]["tool_calls"]):
                                     if tc["name"] == name and tc.get("status") == "running":
                                         tc["result"] = evt_data.get("result")
                                         tc["status"] = "done"
+                                        tc["duration"] = int(time.time() * 1000) - tc.get("startTime", int(time.time() * 1000))
                                         break
 
                         elif evt_type == "subagent_done":
-                            sa_tid = evt_data["tool_call_id"]
-                            if sa_tid in _sa_writers:
-                                writer = _sa_writers.pop(sa_tid)
-                                sa_content = "".join(writer["content_parts"])
-                                sub_sid = writer["sub_session_id"]
-                                asyncio.create_task(persistence.finalize_subsession_message(
-                                    _db_url, sub_sid, sa_content,
-                                    tool_calls=writer["tool_calls"] or None,
-                                ))
+                            pass  # Handled in pre-yield block above
 
                     prev_len = len(usage_rounds)
                     stream_utils.accumulate_usage(event, usage_rounds)
@@ -424,7 +472,15 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                         first_value = all_interrupts[0].get("value")
                         if isinstance(first_value, dict):
                             if "action_requests" in first_value:
-                                interrupt_payload["action_requests"] = first_value["action_requests"]
+                                reqs = first_value["action_requests"]
+                                # Enrich with display_name for sub-agent tools
+                                if subagent_display_map:
+                                    reqs = [
+                                        {**r, "display_name": subagent_display_map.get(r.get("name", ""))}
+                                        if r.get("name") in subagent_display_map else r
+                                        for r in reqs
+                                    ]
+                                interrupt_payload["action_requests"] = reqs
                             if "review_configs" in first_value:
                                 interrupt_payload["review_configs"] = first_value["review_configs"]
                         yield stream_utils.format_sse_event("interrupt", interrupt_payload)
@@ -444,6 +500,11 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 done_payload["usage"] = usage_rounds
             if http_traces:
                 done_payload["http_traces"] = http_traces
+
+            # Ensure all sub-agent create/finalize tasks complete before persisting main message
+            all_sa_tasks = _sa_create_tasks + _sa_finalize_tasks
+            if all_sa_tasks:
+                await asyncio.gather(*all_sa_tasks, return_exceptions=True)
 
             if content_parts or tool_calls or usage_rounds or http_traces:
                 await persistence.save_ui_message(
@@ -579,7 +640,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                             evt_data = {
                                 **evt_data,
                                 "name": display_name,
-                                "sub_session_id": f"{thread_id}/sa/{sa_tid_pre}",
+                                "sub_session_id": f"{thread_id}--sa--{sa_tid_pre}",
                             }
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()
@@ -618,7 +679,14 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                         first_value = all_interrupts[0].get("value")
                         if isinstance(first_value, dict):
                             if "action_requests" in first_value:
-                                interrupt_payload["action_requests"] = first_value["action_requests"]
+                                reqs = first_value["action_requests"]
+                                if subagent_display_map:
+                                    reqs = [
+                                        {**r, "display_name": subagent_display_map.get(r.get("name", ""))}
+                                        if r.get("name") in subagent_display_map else r
+                                        for r in reqs
+                                    ]
+                                interrupt_payload["action_requests"] = reqs
                             if "review_configs" in first_value:
                                 interrupt_payload["review_configs"] = first_value["review_configs"]
                         yield stream_utils.format_sse_event("interrupt", interrupt_payload)

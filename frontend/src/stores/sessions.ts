@@ -33,6 +33,8 @@ export const useSessionsStore = defineStore('sessions', () => {
   })
 
   function pushSubSession(sub_session_id: string, label: string) {
+    const last = sessionNavStack.value[sessionNavStack.value.length - 1]
+    if (last?.session_id === sub_session_id) return  // prevent duplicate push on repeated clicks
     sessionNavStack.value.push({ session_id: sub_session_id, label })
   }
 

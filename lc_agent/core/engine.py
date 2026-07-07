@@ -8,7 +8,13 @@ from typing import Annotated, Any, AsyncIterator
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
 
-from lc_agent.core.http_trace import get_http_trace_collector
+from lc_agent.core.http_trace import (
+    HttpTraceCollector,
+    bind_http_trace_collector,
+    get_http_trace_collector,
+    register_subagent_collector,
+    reset_http_trace_collector,
+)
 from lc_agent.core.http_trace_httpx import TracingAsyncClient
 from lc_agent.core.models import AgentPreset, ModelInfo
 from langchain_core.runnables import RunnableConfig
@@ -187,9 +193,16 @@ class AgentEngine:
                 config: RunnableConfig,
             ) -> str:
                 """Invoke a specialist sub-agent. Pass the full task as query."""
-                tc_id = tool_call_id
-                parent_tid = (config or {}).get("configurable", {}).get("thread_id") or ""
-                sub_thread_id = f"{parent_tid}/sa/{tc_id}"
+                configurable = (config or {}).get("configurable", {})
+                parent_tid = configurable.get("thread_id") or ""
+                # Prefer the LangGraph task UUID extracted from checkpoint_ns
+                # (matches the sa_tid produced by stream_utils.py → sse.py).
+                lg_ns = configurable.get("checkpoint_ns", "")
+                tc_id = next(
+                    (seg.split(":", 1)[1] for seg in lg_ns.split("|") if seg.startswith("tools:")),
+                    tool_call_id,  # fallback to InjectedToolCallId
+                )
+                sub_thread_id = f"{parent_tid}--sa--{tc_id}"
 
                 sub_config = {
                     **(config or {}),
@@ -200,6 +213,10 @@ class AgentEngine:
                     },
                 }
 
+                # Isolate sub-agent HTTP traces so they don't pollute the parent session.
+                # After ainvoke, register collector so SSE can retrieve traces for the sub-session.
+                _sa_collector = HttpTraceCollector(provider=None, model=None)
+                _trace_token = bind_http_trace_collector(_sa_collector)
                 try:
                     result = await sub_agent.ainvoke(
                         {"messages": [{"role": "user", "content": query}]},
@@ -210,15 +227,23 @@ class AgentEngine:
                 except Exception as exc:
                     logger.exception("Subagent %s failed: %s", subagent_id, exc)
                     return f"[Sub-agent error: {exc}]"
+                finally:
+                    reset_http_trace_collector(_trace_token)
+                    register_subagent_collector(sub_thread_id, _sa_collector)
         else:
             @lc_tool(agent_name, description=agent_desc)
             async def _call_subagent(query: str, config: RunnableConfig) -> str:
                 """Invoke a specialist sub-agent. Pass the full task as query."""
                 import uuid
 
-                tc_id = (config or {}).get("configurable", {}).get("tool_call_id") or uuid.uuid4().hex
-                parent_tid = (config or {}).get("configurable", {}).get("thread_id") or ""
-                sub_thread_id = f"{parent_tid}/sa/{tc_id}"
+                configurable = (config or {}).get("configurable", {})
+                parent_tid = configurable.get("thread_id") or ""
+                lg_ns = configurable.get("checkpoint_ns", "")
+                tc_id = next(
+                    (seg.split(":", 1)[1] for seg in lg_ns.split("|") if seg.startswith("tools:")),
+                    configurable.get("tool_call_id") or uuid.uuid4().hex,
+                )
+                sub_thread_id = f"{parent_tid}--sa--{tc_id}"
 
                 sub_config = {
                     **(config or {}),
@@ -229,6 +254,10 @@ class AgentEngine:
                     },
                 }
 
+                # Isolate sub-agent HTTP traces so they don't pollute the parent session.
+                # After ainvoke, register collector so SSE can retrieve traces for the sub-session.
+                _sa_collector = HttpTraceCollector(provider=None, model=None)
+                _trace_token = bind_http_trace_collector(_sa_collector)
                 try:
                     result = await sub_agent.ainvoke(
                         {"messages": [{"role": "user", "content": query}]},
@@ -239,6 +268,9 @@ class AgentEngine:
                 except Exception as exc:
                     logger.exception("Subagent %s failed: %s", subagent_id, exc)
                     return f"[Sub-agent error: {exc}]"
+                finally:
+                    reset_http_trace_collector(_trace_token)
+                    register_subagent_collector(sub_thread_id, _sa_collector)
 
         return _call_subagent
 
@@ -325,7 +357,8 @@ class AgentEngine:
         middleware = [TodoListMiddleware()]
         middleware.extend(self._build_summarization_middleware(preset))
 
-        if hasattr(self, '_permissions_service') and self._permissions_service:
+        # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
+        if hasattr(self, '_permissions_service') and self._permissions_service and _depth == 0:
             from langchain.agents.middleware import HumanInTheLoopMiddleware
             interrupt_on = {
                 tool.name: {

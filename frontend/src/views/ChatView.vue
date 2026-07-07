@@ -141,7 +141,7 @@
                 v-if="item.httpTraces?.length || item.httpTracesCount"
                 :traces="item.httpTraces"
                 :traces-count="item.httpTracesCount"
-                :session-id="chatStore.threadId || undefined"
+                :session-id="sessionsStore.effectiveThreadId || undefined"
                 :message-id="item.messageId"
                 :rounds="item.usage?.rounds"
               />
@@ -191,7 +191,13 @@
       />
     </div>
 
+    <div v-if="sessionsStore.sessionNavStack.length > 0" class="subagent-readonly-bar">
+      <span class="subagent-readonly-icon">👁</span>
+      <span>子 Agent 查看模式 — 如需停止或继续输入，请返回主对话</span>
+      <button class="subagent-readonly-back" @click="sessionsStore.popToRoot()">返回主对话</button>
+    </div>
     <ChatInput
+      v-else
       :is-streaming="isStreaming"
       :edit-content="editingContent"
       :is-editing="Boolean(editingMessageId)"
@@ -306,6 +312,98 @@ const codeModalVisible = ref(false)
 const codeModalSource = ref('')
 const codeModalLanguage = ref('')
 
+// Sub-session live mode: when navigating into a sub-session while streaming,
+// we stay connected to the main SSE and render from SubAgentEntry in the store.
+const subLiveToolCallId = ref<string | null>(null)
+
+const subLiveEntry = computed((): SubAgentEntry | null => {
+  if (!subLiveToolCallId.value) return null
+  for (const msg of messages.value) {
+    const entry = msg.subAgents?.[subLiveToolCallId.value]
+    if (entry) return entry
+  }
+  return null
+})
+
+const subLiveBubbleList = computed((): ChatBubbleItem[] => {
+  const entry = subLiveEntry.value
+  if (!entry) return []
+  const items: ChatBubbleItem[] = []
+
+  // User message: the delegation query
+  if (entry.query) {
+    items.push({
+      key: 'sub-query',
+      messageId: 'sub-query',
+      role: 'user',
+      placement: 'end',
+      content: entry.query,
+      shape: 'corner',
+      variant: 'outlined',
+      isMarkdown: false,
+      isSystem: false,
+      hasThinking: false,
+      hasToolCalls: false,
+      hasAnswer: true,
+      isStreamingMessage: false,
+      loading: false,
+      avatarSize: '28px',
+      avatarGap: '8px',
+    })
+  }
+
+  // Build assistant content with embedded markers
+  let content = ''
+  if (entry.thinking?.trim()) {
+    content += `<!--THINK_START-->${entry.thinking}<!--THINK_END-->`
+  }
+  const toolCalls: ToolCall[] = entry.innerToolCalls.map((tc, i) => {
+    content += `\n<!--TOOL:${i}-->\n`
+    return {
+      name: tc.name,
+      runId: `sub-tc-${i}`,
+      args: (typeof tc.args === 'object' && tc.args !== null) ? tc.args as Record<string, unknown> : {},
+      result: tc.result,
+      status: tc.status as ToolCall['status'],
+      startTime: undefined,
+      duration: undefined,
+      resultLength: tc.result?.length,
+    }
+  })
+  if (entry.tokens) {
+    content += entry.tokens
+  }
+
+  const streamingNow = entry.status === 'running'
+  const hasContent = !!(entry.thinking?.trim() || toolCalls.length || entry.tokens)
+  const segs = hasStructuredSegments(content, toolCalls) ? parseSegments(content, toolCalls) : undefined
+
+  items.push({
+    key: 'sub-response',
+    messageId: 'sub-response',
+    role: 'ai',
+    placement: 'start',
+    content: streamingNow && entry.tokens ? content + '▋' : content,
+    shape: 'corner',
+    variant: 'filled',
+    isMarkdown: true,
+    isSystem: false,
+    isStreamingMessage: streamingNow,
+    loading: streamingNow && !hasContent,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    segments: segs,
+    hasThinking: !!entry.thinking?.trim(),
+    hasToolCalls: toolCalls.length > 0,
+    hasAnswer: !!entry.tokens?.trim(),
+    avatarSize: '28px',
+    avatarGap: '8px',
+    httpTraces: entry.httpTraces?.length ? entry.httpTraces : undefined,
+    httpTracesCount: entry.httpTraces?.length || 0,
+  })
+
+  return items
+})
+
 const isLoading = computed(() => {
   const msgs = messages.value
   if (msgs.length === 0) return false
@@ -325,6 +423,9 @@ function createLoadOlderItem(): LoadOlderBubbleItem {
 }
 
 const bubbleList = computed((): ChatBubbleItem[] => {
+  // When in live sub-session mode, render from SubAgentEntry without touching main SSE
+  if (subLiveToolCallId.value !== null) return subLiveBubbleList.value
+
   const items = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
     .map((msg, idx, arr): MessageBubbleItem => {
@@ -395,6 +496,8 @@ function makeFallbackSubAgentEntry(item: ChatBubbleItem, toolIndex: number): Sub
     toolCallCount: 0,
     tokenCount: 0,
     tokens: '',
+    thinking: '',
+    thinkCount: 0,
     innerToolCalls: [],
     duration: tc?.duration,
   }
@@ -405,10 +508,18 @@ function handleEnterSubAgent(subSessionId: string, name: string) {
 }
 
 function getAssistantLabel(): string {
+  const stack = sessionsStore.sessionNavStack
+  if (stack.length > 0) {
+    return stack[stack.length - 1].label || 'AI'
+  }
   return agentsStore.currentAgent?.name || 'AI'
 }
 
 function getModelLabel(): string {
+  if (sessionsStore.sessionNavStack.length > 0) {
+    // In sub-session view, model info is not available; show nothing
+    return ''
+  }
   if (agentsStore.isCodeAgent) return '代码内定义'
   const model = toolsStore.currentModel || agentsStore.currentAgent?.default_model || ''
   if (!model) return '模型未选择'
@@ -425,6 +536,7 @@ function canEditMessage(item: ChatBubbleItem) {
     && !item.isSystem
     && lastUserMessage.value?.id === item.messageId
     && !isStreaming.value
+    && sessionsStore.sessionNavStack.length === 0
 }
 
 function startEditMessage(item: ChatBubbleItem) {
@@ -622,15 +734,47 @@ watch(
     if (!newId) return
 
     if (newLen > 0) {
+      if (chatStore.isStreaming) {
+        // Live mode: stay connected to main SSE, render from SubAgentEntry in store.
+        // Extract tool_call_id from the sub_session_id (format: parentId--sa--toolCallId)
+        const parts = newId.split('--sa--')
+        if (parts.length >= 2) {
+          subLiveToolCallId.value = parts.slice(1).join('--sa--')
+        }
+        // Do NOT disconnect or load messages — main session continues streaming
+        return
+      }
+      // Historical mode: load sub-session from DB
+      chatStore.clearMessages()
       await chatStore.loadMessages(newId)
     } else {
-      chatStore.clearMessages()
+      // Returning to root
+      if (subLiveToolCallId.value !== null) {
+        // Returning from live mode: just clear live state; main messages are still intact
+        subLiveToolCallId.value = null
+        return
+      }
+      // Returning from historical mode: reconnect main session
       chatStore.disconnect()
       await chatStore.loadMessages(newId)
       await chatStore.connect(newId)
     }
   },
 )
+
+// When streaming ends while in live sub-session, auto-switch to historical mode
+watch(isStreaming, async (newVal, oldVal) => {
+  if (!newVal && oldVal && subLiveToolCallId.value !== null && sessionsStore.sessionNavStack.length > 0) {
+    const subSessionId = sessionsStore.effectiveThreadId
+    // Give backend a moment to persist the sub-session messages
+    await new Promise(resolve => setTimeout(resolve, 600))
+    subLiveToolCallId.value = null
+    if (subSessionId) {
+      chatStore.clearMessages()
+      await chatStore.loadMessages(subSessionId)
+    }
+  }
+})
 
 watch(() => messages.value[messages.value.length - 1]?.id, () => {
   scrollMessagesToBottom()
@@ -816,6 +960,34 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--el-text-color-primary);
   cursor: default;
+}
+
+.subagent-readonly-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--el-color-info-light-9);
+  border-top: 1px solid var(--el-color-info-light-5);
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+.subagent-readonly-icon {
+  font-size: 15px;
+}
+.subagent-readonly-back {
+  margin-left: auto;
+  padding: 4px 12px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 6px;
+  background: var(--el-bg-color);
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.subagent-readonly-back:hover {
+  background: var(--el-color-primary-light-9);
 }
 
 .messages-container {

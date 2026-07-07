@@ -37,7 +37,11 @@
     <!-- 标准工具审批模式 -->
     <template v-else>
       <div v-for="(action, idx) in allActions" :key="idx" class="action-item" :class="{ compact: !showDetails }">
-        <p><strong>工具:</strong> {{ action.name }}</p>
+        <p>
+          <strong>工具:</strong>
+          <span class="tool-display-name">{{ action.display_name || action.name }}</span>
+          <span v-if="action.display_name" class="tool-internal-name">({{ action.name }})</span>
+        </p>
         <pre v-if="showDetails" class="action-args">{{ JSON.stringify(action.args ?? action.arguments, null, 2) }}</pre>
       </div>
       <el-button
@@ -240,6 +244,16 @@ function reject() {
   margin-top: 8px;
 }
 
+.tool-display-name {
+  margin-left: 4px;
+  font-weight: 500;
+}
+.tool-internal-name {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
 .action-item {
   margin-bottom: 14px;
   padding: 12px;

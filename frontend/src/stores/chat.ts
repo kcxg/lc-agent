@@ -75,8 +75,11 @@ export interface SubAgentEntry {
   toolCallCount: number
   tokenCount: number
   tokens: string
+  thinking: string
+  thinkCount: number
   innerToolCalls: Array<{ name: string; status: string; args?: unknown; result?: string }>
   duration?: number
+  httpTraces?: HttpTrace[]
 }
 
 export interface ChatMessage {
@@ -239,10 +242,12 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
         sub_session_id: tc.sub_session_id || '',
         query: typeof tc.args === 'object' ? (tc.args?.query || '') : '',
         status: tc.status === 'running' ? 'running' : (tc.status === 'error' ? 'error' : 'done'),
-        tokenPreview: tc.result ? tc.result.slice(0, 150) : '',
+        tokenPreview: tc.result || '',
         toolCallCount: 0,
         tokenCount: 0,
         tokens: '',
+        thinking: '',
+        thinkCount: 0,
         innerToolCalls: [],
         duration: tc.duration,
       }
@@ -478,7 +483,7 @@ export const useChatStore = defineStore('chat', () => {
 
       const toolCallId = (msg as any).tool_call_id || msg.run_id || ''
       const subSessionId = (msg as any).sub_session_id
-        || (threadId.value ? `${threadId.value}/sa/${toolCallId}` : '')
+        || (threadId.value ? `${threadId.value}--sa--${toolCallId}` : '')
 
       const entry: SubAgentEntry = {
         tool_call_id: toolCallId,
@@ -490,6 +495,8 @@ export const useChatStore = defineStore('chat', () => {
         toolCallCount: 0,
         tokenCount: 0,
         tokens: '',
+        thinking: '',
+        thinkCount: 0,
         innerToolCalls: [],
       }
       if (!last.subAgents) {
@@ -512,14 +519,34 @@ export const useChatStore = defineStore('chat', () => {
       const toolCallId = (msg as any).tool_call_id
       const sa = last.subAgents[toolCallId]
       if (sa) {
-        sa.tokens += msg.content || ''
-        sa.tokenCount++
+        const newCount = sa.tokenCount + 1
+        // Replace object reference so Vue detects prop change in SubAgentCard
+        last.subAgents[toolCallId] = { ...sa, tokens: sa.tokens + (msg.content || ''), tokenCount: newCount }
+        // Throttled re-render: every 3 tokens to balance freshness vs. performance
+        if (newCount % 3 === 0) {
+          messages.value = [...messages.value]
+        }
       }
     })
 
     client.on('subagent_thinking', (msg: SseMessage) => {
-      // Thinking content is not displayed in SubAgentCard for now.
-      void msg
+      const last = messages.value[messages.value.length - 1]
+      if (!last?.subAgents) return
+      const toolCallId = (msg as any).tool_call_id
+      const sa = last.subAgents[toolCallId]
+      if (sa) {
+        const newThinkCount = sa.thinkCount + 1
+        // Replace object reference so Vue prop change is detected
+        last.subAgents[toolCallId] = {
+          ...sa,
+          thinking: sa.thinking + (msg.content || ''),
+          thinkCount: newThinkCount,
+        }
+        // Throttle: trigger re-render every 5 thinking chunks
+        if (newThinkCount % 5 === 0) {
+          messages.value = [...messages.value]
+        }
+      }
     })
 
     client.on('subagent_tool_call', (msg: SseMessage) => {
@@ -528,12 +555,17 @@ export const useChatStore = defineStore('chat', () => {
       const toolCallId = (msg as any).tool_call_id
       const sa = last.subAgents[toolCallId]
       if (sa) {
-        sa.innerToolCalls.push({
-          name: msg.name || '',
-          status: 'running',
-          args: msg.args,
-        })
-        sa.toolCallCount++
+        // Replace the entire entry object so Vue detects the prop change in SubAgentCard
+        last.subAgents[toolCallId] = {
+          ...sa,
+          innerToolCalls: [...sa.innerToolCalls, {
+            name: msg.name || '',
+            status: 'running',
+            args: msg.args,
+          }],
+          toolCallCount: sa.toolCallCount + 1,
+        }
+        messages.value = [...messages.value]
       }
     })
 
@@ -543,12 +575,17 @@ export const useChatStore = defineStore('chat', () => {
       const toolCallId = (msg as any).tool_call_id
       const sa = last.subAgents[toolCallId]
       if (sa) {
-        const tc = [...sa.innerToolCalls].reverse().find(
+        // Find the latest running tool call with this name and mark it done
+        const updatedCalls = [...sa.innerToolCalls]
+        const idx = [...updatedCalls].reverse().findIndex(
           t => t.name === msg.name && t.status === 'running',
         )
-        if (tc) {
-          tc.result = msg.result
-          tc.status = 'done'
+        if (idx !== -1) {
+          const realIdx = updatedCalls.length - 1 - idx
+          updatedCalls[realIdx] = { ...updatedCalls[realIdx], result: msg.result, status: 'done' }
+          // Replace the entire entry object so Vue detects the change
+          last.subAgents[toolCallId] = { ...sa, innerToolCalls: updatedCalls }
+          messages.value = [...messages.value]
         }
       }
     })
@@ -558,18 +595,29 @@ export const useChatStore = defineStore('chat', () => {
       if (!last) return
       const toolCallId = (msg as any).tool_call_id
       const sa = last.subAgents?.[toolCallId]
+      const rawHttpTraces = (msg as any).http_traces
+      const saHttpTraces = rawHttpTraces?.length ? normalizeHttpTraces(rawHttpTraces) : undefined
       if (sa) {
-        sa.status = (msg as any).status === 'error' ? 'error' : 'done'
-        sa.tokenPreview = (msg as any).result_preview || ''
-        if ((msg as any).duration) sa.duration = (msg as any).duration
+        // Replace entry object so Vue re-renders SubAgentCard with final state.
+        // Fall back to accumulated tokens if backend result_preview is empty.
+        last.subAgents![toolCallId] = {
+          ...sa,
+          status: (msg as any).status === 'error' ? 'error' : 'done',
+          // Keep full accumulated tokens so done-state renders complete answer
+          tokens: sa.tokens,
+          tokenPreview: sa.tokens || (msg as any).result_preview || '',
+          duration: (msg as any).duration ?? sa.duration,
+          httpTraces: saHttpTraces,
+        }
       }
       const tc = last.toolCalls?.find(t => t.runId === toolCallId)
       if (tc) {
         tc.status = (msg as any).status === 'error' ? 'error' : 'done'
-        tc.result = (msg as any).result_preview
+        tc.result = sa?.tokens || (msg as any).result_preview || ''
         tc.duration = tc.startTime ? Date.now() - tc.startTime : (msg as any).duration
-        tc.resultLength = ((msg as any).result_preview || '').length
+        tc.resultLength = (tc.result || '').length
       }
+      messages.value = [...messages.value]
     })
 
     client.on('interrupt', (msg: SseMessage) => {
@@ -791,12 +839,13 @@ export const useChatStore = defineStore('chat', () => {
       totalMessageCount.value = total
       _currentOffset = resp?.offset ?? 0
 
-      if (!rawMessages || rawMessages.length === 0) return
-
+      // Always set messages on API success — this ensures session switches always
+      // replace the current messages, even when the target session returns empty.
       messages.value = normalizeHistoryMessages(
         Array.isArray(rawMessages) ? rawMessages : []
       )
     } catch (e) {
+      // On API failure keep current messages (graceful degradation)
       console.error('[Chat] Failed to load messages:', e)
     }
   }

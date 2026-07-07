@@ -52,3 +52,4 @@ lc-agent 是一个框架，是作为python包被导入使用。
 `D:\codes\lc-agent-bfzs\bfzs\main.py` 是演示项目的入口文件。
 
 lc-agent-bfzs的数据库是 `D:\codes\lc-agent-bfzs\bfzs_data.db` 和 `D:\codes\lc-agent-bfzs\bfzs_checkpoints.db` 。不是在lc-agent框架的默认目录`D:\codes\lc-agent\` 下。
+

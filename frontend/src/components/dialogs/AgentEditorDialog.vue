@@ -10,7 +10,7 @@
     </el-alert>
 
     <el-form v-if="!isCodeAgent" :model="form" label-width="100px" label-position="top">
-      <el-tabs>
+      <el-tabs v-model="activeTab">
         <el-tab-pane label="基本设置" name="basic">
       <el-form-item label="名称" required>
         <el-input v-model="form.name" :disabled="isCodeAgent" placeholder="例如：Code Assistant" />
@@ -187,11 +187,7 @@
                     {{ sa.source }}
                   </el-tag>
                 </el-checkbox>
-                <span
-                  v-if="sa.description"
-                  class="sa-item-desc"
-                  style="font-size: 11px; color: var(--el-text-color-secondary); margin-left: 22px; margin-top: 2px;"
-                >
+                <span v-if="sa.description" class="sa-item-desc">
                   {{ sa.description }}
                 </span>
               </div>
@@ -250,6 +246,7 @@ const agentsStore = useAgentsStore()
 
 const visible = ref(false)
 const saving = ref(false)
+const activeTab = ref('basic')
 const isEdit = ref(false)
 const editingId = ref('')
 const editingSource = ref<'builtin' | 'code' | 'user'>('user')
@@ -272,6 +269,7 @@ const form = ref({
 })
 
 async function open(agent?: AgentPreset) {
+  activeTab.value = 'basic'
   const all = await fetchAvailableSubagents()
   availableSubagents.value = all.filter(sa => sa.id !== (agent?.id ?? ''))
 
@@ -324,11 +322,11 @@ async function open(agent?: AgentPreset) {
     editingSource.value = 'user'
     isCodeAgent.value = false
     form.value = { name: '', system_prompt: '', default_model: toolsStore.currentModel, llm_params: null, subagent_ids: [] }
-    toolGroupMode.value = 'all'
+    toolGroupMode.value = 'none'
     selectedGroups.value = []
-    mcpMode.value = 'all'
+    mcpMode.value = 'none'
     selectedMcpServers.value = []
-    skillsMode.value = 'all'
+    skillsMode.value = 'none'
     selectedSkills.value = []
   }
   visible.value = true
@@ -477,6 +475,42 @@ defineExpose({ open })
   color: var(--el-text-color-secondary);
   margin-left: 4px;
   opacity: 0.7;
+}
+
+.subagent-picker {
+  width: 100%;
+}
+
+.subagent-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px;
+  width: 100%;
+}
+
+.subagent-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.subagent-item :deep(.el-checkbox) {
+  display: flex;
+  align-items: center;
+  height: auto;
+  width: 100%;
+}
+
+.sa-item-desc {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin-left: 22px;
+  margin-top: 2px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .code-agent-readonly {
   padding: 12px;

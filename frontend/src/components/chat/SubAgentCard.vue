@@ -24,33 +24,61 @@
       <button
         v-if="entry.sub_session_id"
         class="sa-enter-btn"
+        title="进入子Agent查看详情"
         @click="$emit('enter', entry.sub_session_id, entry.name)"
       >
         ↗
       </button>
     </div>
-    <!-- Body: running state shows streaming tokens -->
-    <div class="sa-body">
-      <div v-if="entry.status === 'running' && entry.tokens" class="sa-tokens">
-        {{ entry.tokens }}▋
+
+    <!-- Body: always 200px scrollable window -->
+    <div ref="bodyRef" class="sa-body">
+      <!-- Thinking block (only while running) -->
+      <div v-if="entry.status === 'running' && entry.thinking?.trim()" class="sa-thinking-block">
+        <div class="sa-thinking-header">
+          <span class="sa-thinking-icon">💭</span>
+          <span>思考中...</span>
+        </div>
+        <div class="sa-thinking-text">{{ entry.thinking }}</div>
       </div>
-      <div v-else-if="entry.status === 'done' && entry.tokenPreview" class="sa-preview">
-        {{ entry.tokenPreview }}
-      </div>
-      <!-- Inner tool calls (compact) -->
-      <div v-if="entry.innerToolCalls.length" class="sa-inner-tools">
+
+      <!-- Inner tool calls (only while running) -->
+      <div v-if="entry.status === 'running' && entry.innerToolCalls.length" class="sa-inner-tools">
         <div v-for="(tc, i) in entry.innerToolCalls" :key="i" class="sa-inner-tool">
           <span class="sa-inner-status" :class="tc.status">●</span>
-          🔧 {{ tc.name }}
+          🔧 <span class="sa-tool-name">{{ tc.name }}</span>
+          <span v-if="tc.status === 'done'" class="sa-tool-done">✓</span>
+          <span v-if="tc.status === 'running'" class="sa-tool-running-dot"></span>
         </div>
+      </div>
+
+      <!-- Streaming tokens (running) -->
+      <div v-if="entry.status === 'running' && entry.tokens" class="sa-tokens">
+        {{ entry.tokens }}<span class="sa-cursor">▋</span>
+      </div>
+
+      <!-- Empty running state -->
+      <div v-if="entry.status === 'running' && !hasContent" class="sa-empty-running">
+        <span class="sa-dots"><span>.</span><span>.</span><span>.</span></span>
+      </div>
+
+      <!-- Done/Error: markdown rendered full answer -->
+      <div
+        v-if="entry.status !== 'running' && bodyText"
+        class="sa-md-body"
+        v-html="renderMarkdown(bodyText)"
+      />
+      <div v-if="entry.status !== 'running' && !bodyText" class="sa-empty-done">
+        (无回答内容)
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { SubAgentEntry } from '@/stores/chat'
+import { renderMarkdown } from '@/utils/markdown'
 
 const props = defineProps<{
   entry: SubAgentEntry
@@ -60,15 +88,38 @@ defineEmits<{
   enter: [sub_session_id: string, name: string]
 }>()
 
+const bodyRef = ref<HTMLElement | null>(null)
+
 const statusClass = computed(() => ({
   'sa-running': props.entry.status === 'running',
   'sa-done': props.entry.status === 'done',
   'sa-error': props.entry.status === 'error',
 }))
 
+/** Text shown in done state: prefer full in-memory tokens, fallback to DB tokenPreview */
+const bodyText = computed(() => props.entry.tokens || props.entry.tokenPreview || '')
+
+const hasContent = computed(() =>
+  !!(props.entry.thinking?.trim() || props.entry.innerToolCalls.length || props.entry.tokens),
+)
+
 function formatDuration(ms: number) {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
+
+function scrollToBottom() {
+  nextTick(() => {
+    const el = bodyRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
+
+watch(() => props.entry.tokens, scrollToBottom)
+watch(() => props.entry.innerToolCalls.length, scrollToBottom)
+watch(() => props.entry.thinkCount, scrollToBottom)
+watch(() => props.entry.status, (newStatus) => {
+  if (newStatus !== 'running') scrollToBottom()
+})
 </script>
 
 <style scoped>
@@ -125,18 +176,147 @@ function formatDuration(ms: number) {
   flex-shrink: 0;
 }
 .sa-enter-btn:hover { background: var(--el-color-primary-light-9); }
-.sa-body { padding: 8px 12px; }
-.sa-tokens { color: var(--el-text-color-regular); font-size: 12px; line-height: 1.6; }
-.sa-preview { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; }
-.sa-inner-tools { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
-.sa-inner-tool {
+
+/* Body: always 200px fixed scrollable window */
+.sa-body {
+  height: 200px;
+  padding: 8px 12px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  box-sizing: border-box;
+}
+
+/* Thinking block */
+.sa-thinking-block {
+  margin-bottom: 8px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 4px;
+  background: var(--el-color-warning-light-9);
   font-size: 11px;
+}
+.sa-thinking-header {
+  padding: 4px 8px;
+  color: var(--el-color-warning-dark-2);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+.sa-thinking-icon { font-size: 12px; }
+.sa-thinking-text {
+  padding: 4px 8px 6px;
+  color: var(--el-text-color-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  line-height: 1.5;
+}
+
+/* Tool calls */
+.sa-inner-tools {
+  margin-bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sa-inner-tool {
+  font-size: 12px;
   color: var(--el-text-color-secondary);
   display: flex;
   align-items: center;
   gap: 5px;
+  padding: 3px 0;
 }
+.sa-tool-name { flex: 1; }
 .sa-inner-status { font-size: 8px; }
 .sa-inner-status.running { color: var(--el-color-warning); }
 .sa-inner-status.done { color: var(--el-color-success); }
+.sa-tool-done { color: var(--el-color-success); font-size: 11px; }
+.sa-tool-running-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--el-color-warning);
+  border-radius: 50%;
+  animation: pulse 0.8s infinite;
+}
+
+/* Response tokens */
+.sa-tokens {
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.sa-cursor { animation: blink 1s step-end infinite; }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* Done state: markdown rendered full answer */
+.sa-md-body {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+  overflow-wrap: break-word;
+}
+.sa-md-body :deep(p) { margin: 0 0 6px; }
+.sa-md-body :deep(p:last-child) { margin-bottom: 0; }
+.sa-md-body :deep(h1), .sa-md-body :deep(h2), .sa-md-body :deep(h3) {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 8px 0 4px;
+}
+.sa-md-body :deep(code) {
+  background: var(--el-fill-color-light);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 11px;
+  font-family: monospace;
+}
+.sa-md-body :deep(pre) {
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  padding: 8px;
+  overflow-x: auto;
+  margin: 4px 0;
+}
+.sa-md-body :deep(pre code) {
+  background: none;
+  padding: 0;
+  font-size: 11px;
+}
+.sa-md-body :deep(ul), .sa-md-body :deep(ol) {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+.sa-md-body :deep(li) { margin: 2px 0; }
+.sa-md-body :deep(blockquote) {
+  border-left: 3px solid var(--el-border-color);
+  margin: 4px 0;
+  padding: 2px 8px;
+  color: var(--el-text-color-secondary);
+}
+.sa-empty-done {
+  color: var(--el-text-color-placeholder);
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+/* Empty running dots animation */
+.sa-empty-running {
+  color: var(--el-text-color-placeholder);
+  font-size: 12px;
+  padding: 8px 0;
+}
+.sa-dots span {
+  animation: dotbounce 1.2s infinite;
+  display: inline-block;
+  font-size: 18px;
+  line-height: 0;
+}
+.sa-dots span:nth-child(2) { animation-delay: 0.2s; }
+.sa-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dotbounce {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-4px); }
+}
 </style>
