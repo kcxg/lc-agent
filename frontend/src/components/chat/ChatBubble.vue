@@ -19,7 +19,12 @@
       <div class="bubble-content">
         <template v-if="message.role === 'assistant'">
           <template v-for="(seg, idx) in renderedSegments" :key="idx">
-            <ToolCallCard v-if="seg.type === 'tool' && seg.toolCall" :tool-call="seg.toolCall" :collapsed="true" />
+            <ToolCallCard v-if="seg.type === 'tool' && seg.toolCall && !shouldShowSubAgentCard(seg.toolCall)" :tool-call="seg.toolCall" :collapsed="true" />
+            <SubAgentCard
+              v-else-if="seg.type === 'tool' && seg.toolCall && shouldShowSubAgentCard(seg.toolCall)"
+              :entry="getSubAgentEntryForTool(seg.toolCall)!"
+              @enter="handleEnterSubAgent"
+            />
             <div v-else-if="seg.type === 'text' && seg.html" :class="seg.cls">
               <div v-if="seg.cls === 'thinking-block'" class="thinking-header">
                 <span class="thinking-icon">💭</span>
@@ -44,8 +49,9 @@ import { computed } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { useToolsStore } from '@/stores/tools'
 import ToolCallCard from './ToolCallCard.vue'
+import SubAgentCard from './SubAgentCard.vue'
 import TokenUsagePanel from './TokenUsagePanel.vue'
-import type { ChatMessage, ToolCall } from '@/stores/chat'
+import type { ChatMessage, ToolCall, SubAgentEntry } from '@/stores/chat'
 
 interface RenderedSegment {
   type: 'text' | 'tool'
@@ -125,6 +131,19 @@ const modelLabel = computed(() => {
   const parts = model.split('/')
   return parts[parts.length - 1] || 'AI'
 })
+
+function shouldShowSubAgentCard(tc: ToolCall): boolean {
+  return Boolean(tc.is_subagent && tc.runId && props.message.subAgents?.get(tc.runId))
+}
+
+function getSubAgentEntryForTool(tc: ToolCall): SubAgentEntry | undefined {
+  if (!tc.runId) return undefined
+  return props.message.subAgents?.get(tc.runId)
+}
+
+function handleEnterSubAgent(subSessionId: string, name: string) {
+  console.log('enter', subSessionId, name)
+}
 </script>
 
 <style scoped>

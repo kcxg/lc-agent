@@ -65,6 +65,20 @@ export interface ContentSegment {
   toolCall?: ToolCall
 }
 
+export interface SubAgentEntry {
+  tool_call_id: string
+  name: string
+  sub_session_id: string
+  query: string
+  status: 'running' | 'done' | 'error'
+  tokenPreview: string
+  toolCallCount: number
+  tokenCount: number
+  tokens: string
+  innerToolCalls: Array<{ name: string; status: string; args?: unknown; result?: string }>
+  duration?: number
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'tool'
@@ -72,6 +86,7 @@ export interface ChatMessage {
   timestamp: number
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
+  subAgents?: Map<string, SubAgentEntry>
   isStreaming?: boolean
   usage?: MessageUsage
   httpTraces?: HttpTrace[]
@@ -87,6 +102,8 @@ export interface ToolCall {
   startTime?: number
   duration?: number
   resultLength?: number
+  is_subagent?: boolean
+  sub_session_id?: string
 }
 
 export interface InterruptInfo {
@@ -397,6 +414,8 @@ export const useChatStore = defineStore('chat', () => {
           args: msg.args,
           status: 'running',
           startTime: Date.now(),
+          is_subagent: (msg as any).is_subagent,
+          sub_session_id: (msg as any).sub_session_id,
         }
         last.toolCalls.push(tc)
         last.content += `\n<!--TOOL:${tcIdx}-->\n`
@@ -419,6 +438,103 @@ export const useChatStore = defineStore('chat', () => {
           tc.duration = tc.startTime ? Date.now() - tc.startTime : undefined
           tc.resultLength = msg.result?.length || 0
         }
+      }
+    })
+
+    client.on('subagent_start', (msg: SseMessage) => {
+      const last = messages.value[messages.value.length - 1]
+      if (!last || last.role !== 'assistant') return
+
+      const toolCallId = (msg as any).tool_call_id || msg.run_id || ''
+      const subSessionId = (msg as any).sub_session_id
+        || (threadId.value ? `${threadId.value}/sa/${toolCallId}` : '')
+
+      const entry: SubAgentEntry = {
+        tool_call_id: toolCallId,
+        name: msg.name || '',
+        sub_session_id: subSessionId,
+        query: (msg as any).query || '',
+        status: 'running',
+        tokenPreview: '',
+        toolCallCount: 0,
+        tokenCount: 0,
+        tokens: '',
+        innerToolCalls: [],
+      }
+      if (!last.subAgents) {
+        last.subAgents = new Map()
+      }
+      last.subAgents.set(toolCallId, entry)
+
+      const tc = last.toolCalls?.find(t => t.runId === toolCallId)
+      if (tc) {
+        tc.is_subagent = true
+        tc.sub_session_id = subSessionId
+      }
+    })
+
+    client.on('subagent_token', (msg: SseMessage) => {
+      const last = messages.value[messages.value.length - 1]
+      if (!last?.subAgents) return
+      const toolCallId = (msg as any).tool_call_id
+      const sa = last.subAgents.get(toolCallId)
+      if (sa) {
+        sa.tokens += msg.content || ''
+        sa.tokenCount++
+      }
+    })
+
+    client.on('subagent_thinking', (msg: SseMessage) => {
+      // Thinking content is not displayed in SubAgentCard for now.
+      void msg
+    })
+
+    client.on('subagent_tool_call', (msg: SseMessage) => {
+      const last = messages.value[messages.value.length - 1]
+      if (!last?.subAgents) return
+      const toolCallId = (msg as any).tool_call_id
+      const sa = last.subAgents.get(toolCallId)
+      if (sa) {
+        sa.innerToolCalls.push({
+          name: msg.name || '',
+          status: 'running',
+          args: msg.args,
+        })
+        sa.toolCallCount++
+      }
+    })
+
+    client.on('subagent_tool_result', (msg: SseMessage) => {
+      const last = messages.value[messages.value.length - 1]
+      if (!last?.subAgents) return
+      const toolCallId = (msg as any).tool_call_id
+      const sa = last.subAgents.get(toolCallId)
+      if (sa) {
+        const tc = [...sa.innerToolCalls].reverse().find(
+          t => t.name === msg.name && t.status === 'running',
+        )
+        if (tc) {
+          tc.result = msg.result
+          tc.status = 'done'
+        }
+      }
+    })
+
+    client.on('subagent_done', (msg: SseMessage) => {
+      const last = messages.value[messages.value.length - 1]
+      if (!last) return
+      const toolCallId = (msg as any).tool_call_id
+      const sa = last.subAgents?.get(toolCallId)
+      if (sa) {
+        sa.status = 'done'
+        sa.tokenPreview = (msg as any).result_preview || ''
+      }
+      const tc = last.toolCalls?.find(t => t.runId === toolCallId)
+      if (tc) {
+        tc.status = 'done'
+        tc.result = (msg as any).result_preview
+        tc.duration = tc.startTime ? Date.now() - tc.startTime : undefined
+        tc.resultLength = ((msg as any).result_preview || '').length
       }
     })
 

@@ -87,6 +87,11 @@
                     v-if="item.toolCalls[seg.toolIndex!]?.name === 'write_todos'"
                     :tool-call="item.toolCalls[seg.toolIndex!]"
                   />
+                  <SubAgentCard
+                    v-else-if="item.toolCalls[seg.toolIndex!]?.is_subagent && getSubAgentEntry(item, seg.toolIndex!)"
+                    :entry="getSubAgentEntry(item, seg.toolIndex!)!"
+                    @enter="handleEnterSubAgent"
+                  />
                   <ToolCallCard
                     v-else
                     :tool-call="item.toolCalls[seg.toolIndex!]"
@@ -188,13 +193,14 @@ import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
 import { Cpu, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
-import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo } from '@/stores/chat'
+import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
 import { renderMarkdown } from '@/utils/markdown'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import InterruptDialog from '@/components/chat/InterruptDialog.vue'
 import ToolCallCard from '@/components/chat/ToolCallCard.vue'
+import SubAgentCard from '@/components/chat/SubAgentCard.vue'
 import TodoProgressCard from '@/components/chat/TodoProgressCard.vue'
 import HttpTracesGroup from '@/components/chat/HttpTracesGroup.vue'
 import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
@@ -325,6 +331,17 @@ const sessionModel = computed(() => getModelLabel())
 
 function getOriginalMessage(messageId: string) {
   return messages.value.find(m => m.id === messageId)
+}
+
+function getSubAgentEntry(item: ChatBubbleItem, toolIndex: number): SubAgentEntry | undefined {
+  const msg = getOriginalMessage(item.messageId)
+  const tc = item.toolCalls?.[toolIndex]
+  if (!msg?.subAgents || !tc?.runId) return undefined
+  return msg.subAgents.get(tc.runId)
+}
+
+function handleEnterSubAgent(subSessionId: string, name: string) {
+  console.log('enter', subSessionId, name)
 }
 
 function getAssistantLabel(): string {
