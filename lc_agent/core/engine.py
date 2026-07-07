@@ -154,17 +154,22 @@ class AgentEngine:
         middleware.extend(self._build_summarization_middleware(preset))
 
         if hasattr(self, '_permissions_service') and self._permissions_service:
-            from langchain.agents.middleware import HumanInTheLoopMiddleware
-            interrupt_on = {
-                tool.name: {
-                    "allowed_decisions": ["approve", "reject"],
-                    "when": self._permissions_service.should_interrupt,
+            dangerous = preset.dangerous_tools
+            # dangerous_tools 为空列表 [] 表示"没有危险工具"，全部自动通过
+            if dangerous is not None and len(dangerous) == 0:
+                pass  # 不添加 HumanInTheLoopMiddleware，全部工具自动执行
+            else:
+                from langchain.agents.middleware import HumanInTheLoopMiddleware
+                interrupt_on = {
+                    tool.name: {
+                        "allowed_decisions": ["approve", "reject"],
+                        "when": self._permissions_service.should_interrupt,
+                    }
+                    for tool in tools
+                    if tool.name != "ask_user"
                 }
-                for tool in tools
-                if tool.name != "ask_user"
-            }
-            if interrupt_on:
-                middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
+                if interrupt_on:
+                    middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
 
         agent = create_agent(
             model=llm,
