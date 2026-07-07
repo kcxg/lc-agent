@@ -133,12 +133,12 @@ const modelLabel = computed(() => {
 })
 
 function shouldShowSubAgentCard(tc: ToolCall): boolean {
-  return Boolean(tc.is_subagent && tc.runId && props.message.subAgents?.get(tc.runId))
+  return Boolean(tc.is_subagent && tc.runId && props.message.subAgents?.[tc.runId])
 }
 
 function getSubAgentEntryForTool(tc: ToolCall): SubAgentEntry | undefined {
   if (!tc.runId) return undefined
-  return props.message.subAgents?.get(tc.runId)
+  return props.message.subAgents?.[tc.runId]
 }
 
 function handleEnterSubAgent(subSessionId: string, name: string) {

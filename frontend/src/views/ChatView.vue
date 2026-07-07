@@ -54,6 +54,15 @@
         </template>
         <template #avatar="{ item }">
           <div
+            v-if="item.isSystem"
+            class="role-avatar is-system"
+            title="委托任务"
+            aria-label="委托任务"
+          >
+            <span class="system-avatar-icon">📋</span>
+          </div>
+          <div
+            v-else
             class="role-avatar"
             :class="item.role === 'user' ? 'is-user' : 'is-ai'"
             :title="item.role === 'user' ? '你' : getAssistantLabel()"
@@ -66,7 +75,10 @@
           </div>
         </template>
         <template #header="{ item }">
-          <div v-if="item.role === 'user'" class="role-header is-user">
+          <div v-if="item.isSystem" class="role-header is-system">
+            <span class="role-name">委托任务</span>
+          </div>
+          <div v-else-if="item.role === 'user'" class="role-header is-user">
             <button
               v-if="canEditMessage(item)"
               class="message-edit-btn"
@@ -86,8 +98,11 @@
           </div>
         </template>
         <template #content="{ item }">
-          <div class="bubble-content-wrap">
-            <template v-if="item.segments && item.segments.length > 0">
+          <div class="bubble-content-wrap" :class="{ 'is-system-delegation': item.isSystem }">
+            <div v-if="item.isSystem" class="system-delegation-msg">
+              <div class="markdown-body" v-html="renderMarkdown(item.content || '')" />
+            </div>
+            <template v-else-if="item.segments && item.segments.length > 0">
               <template v-for="(seg, segIdx) in item.segments" :key="segIdx">
                 <div
                   v-if="seg.type === 'text' && seg.text"
@@ -140,7 +155,7 @@
               <span v-else class="user-plain-text">{{ item.content }}</span>
             </template>
             <div
-              v-if="shouldShowReasoningNotice(item)"
+              v-if="!item.isSystem && shouldShowReasoningNotice(item)"
               class="thinking-unavailable"
             >
               <el-icon><Cpu /></el-icon>
@@ -153,7 +168,7 @@
               </div>
             </div>
             <MessageToolbar
-              v-if="getOriginalMessage(item.messageId) && !item.loading"
+              v-if="!item.isSystem && getOriginalMessage(item.messageId) && !item.loading"
               :message="getOriginalMessage(item.messageId)!"
               :model-name="sessionModel"
               :has-thinking="item.hasThinking"
@@ -244,6 +259,7 @@ type MessageBubbleItem = BubbleListItemProps & {
   role: 'user' | 'ai'
   messageId: string
   isMarkdown?: boolean
+  isSystem?: boolean
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
   usage?: MessageUsage
@@ -263,6 +279,7 @@ type LoadOlderBubbleItem = BubbleListItemProps & {
   messageId: string
   content: string
   isMarkdown?: boolean
+  isSystem?: boolean
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
   usage?: MessageUsage
@@ -326,7 +343,8 @@ const bubbleList = computed((): ChatBubbleItem[] => {
         content: msg.content || '',
         shape: 'corner' as const,
         variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
-        isMarkdown: msg.role !== 'user',
+        isMarkdown: msg.role !== 'user' && !msg.isSystem,
+        isSystem: msg.isSystem,
         toolCalls: msg.toolCalls,
         usage: msg.usage,
         segments: segs,
@@ -362,7 +380,7 @@ function getSubAgentEntry(item: ChatBubbleItem, toolIndex: number): SubAgentEntr
   const msg = getOriginalMessage(item.messageId)
   const tc = item.toolCalls?.[toolIndex]
   if (!msg?.subAgents || !tc?.runId) return undefined
-  return msg.subAgents.get(tc.runId)
+  return msg.subAgents[tc.runId]
 }
 
 function handleEnterSubAgent(subSessionId: string, name: string) {
@@ -387,6 +405,7 @@ function isThinkingExpanded(item: ChatBubbleItem): boolean {
 
 function canEditMessage(item: ChatBubbleItem) {
   return item.role === 'user'
+    && !item.isSystem
     && lastUserMessage.value?.id === item.messageId
     && !isStreaming.value
 }
@@ -584,11 +603,15 @@ watch(
     if (newLen === 0 && oldLen === 0) return
     const newId = sessionsStore.effectiveThreadId
     if (!newId) return
-    if (chatStore.threadId === newId && chatStore.isConnected) return
-    chatStore.clearMessages()
-    chatStore.disconnect()
-    await chatStore.loadMessages(newId)
-    await chatStore.connect(newId)
+
+    if (newLen > 0) {
+      await chatStore.loadMessages(newId)
+    } else {
+      chatStore.clearMessages()
+      chatStore.disconnect()
+      await chatStore.loadMessages(newId)
+      await chatStore.connect(newId)
+    }
   },
 )
 
@@ -921,6 +944,34 @@ onBeforeUnmount(() => {
   color: #d8f3dc;
   background: linear-gradient(135deg, #15382a, #0b2119);
   border-color: rgba(74, 222, 128, 0.32);
+}
+
+.role-avatar.is-system {
+  background: color-mix(in srgb, var(--el-color-info) 14%, var(--el-bg-color));
+  border-color: color-mix(in srgb, var(--el-color-info) 35%, var(--el-border-color));
+}
+
+.system-avatar-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.role-header.is-system {
+  color: var(--el-color-info);
+  font-weight: 600;
+}
+
+.system-delegation-msg {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed color-mix(in srgb, var(--el-color-info) 40%, var(--el-border-color));
+  background: color-mix(in srgb, var(--el-color-info) 8%, var(--el-bg-color));
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.bubble-content-wrap.is-system-delegation {
+  max-width: 100%;
 }
 
 .role-header {

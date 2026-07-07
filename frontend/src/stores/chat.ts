@@ -86,8 +86,9 @@ export interface ChatMessage {
   timestamp: number
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
-  subAgents?: Map<string, SubAgentEntry>
+  subAgents?: Record<string, SubAgentEntry>
   isStreaming?: boolean
+  isSystem?: boolean
   usage?: MessageUsage
   httpTraces?: HttpTrace[]
   httpTracesCount?: number
@@ -198,6 +199,17 @@ function normalizeHttpTraces(raw: any): HttpTrace[] | undefined {
 }
 
 function normalizeHistoryMessage(msg: any): ChatMessage | null {
+  if (msg.role === 'system') {
+    const content = msg.content || ''
+    return {
+      id: msg.id || createClientId(),
+      role: 'user',
+      content,
+      timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now(),
+      isSystem: true,
+    }
+  }
+
   const role = msg.role === 'human' ? 'user' : msg.role === 'ai' ? 'assistant' : msg.role
   if (!['user', 'assistant', 'tool'].includes(role)) return null
 
@@ -210,10 +222,31 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     startTime: tc.startTime ?? tc.start_time,
     duration: tc.duration,
     resultLength: tc.resultLength ?? tc.result_length ?? tc.result?.length,
+    is_subagent: tc.is_subagent || false,
+    sub_session_id: tc.sub_session_id || '',
   }))
   const usage = normalizeHistoryUsage(msg.usage)
   if (usage && toolCalls.length > usage.toolCallCount) {
     usage.toolCallCount = toolCalls.length
+  }
+
+  const subAgents: Record<string, SubAgentEntry> = {}
+  for (const tc of toolCalls) {
+    if (tc.is_subagent && tc.runId) {
+      subAgents[tc.runId] = {
+        tool_call_id: tc.runId,
+        name: tc.name,
+        sub_session_id: tc.sub_session_id || '',
+        query: typeof tc.args === 'object' ? (tc.args?.query || '') : '',
+        status: tc.status === 'running' ? 'running' : (tc.status === 'error' ? 'error' : 'done'),
+        tokenPreview: tc.result ? tc.result.slice(0, 150) : '',
+        toolCallCount: 0,
+        tokenCount: 0,
+        tokens: '',
+        innerToolCalls: [],
+        duration: tc.duration,
+      }
+    }
   }
 
   const httpTraces = normalizeHttpTraces(msg.http_traces || msg.httpTraces)
@@ -229,6 +262,7 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     content,
     timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now(),
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    subAgents: Object.keys(subAgents).length > 0 ? subAgents : undefined,
     usage,
     httpTraces,
     httpTracesCount,
@@ -399,11 +433,8 @@ export const useChatStore = defineStore('chat', () => {
         }
         if (!last.toolCalls) last.toolCalls = []
 
-        const existingRunning = last.toolCalls.find(
-          t => t.name === msg.name && t.status === 'running',
-        )
-        if (existingRunning) {
-          existingRunning.startTime = Date.now()
+        const existingByRunId = last.toolCalls.find(t => t.runId === msg.run_id)
+        if (existingByRunId) {
           return
         }
 
@@ -462,9 +493,9 @@ export const useChatStore = defineStore('chat', () => {
         innerToolCalls: [],
       }
       if (!last.subAgents) {
-        last.subAgents = new Map()
+        last.subAgents = {}
       }
-      last.subAgents.set(toolCallId, entry)
+      last.subAgents[toolCallId] = entry
 
       const tc = last.toolCalls?.find(t => t.runId === toolCallId)
       if (tc) {
@@ -477,7 +508,7 @@ export const useChatStore = defineStore('chat', () => {
       const last = messages.value[messages.value.length - 1]
       if (!last?.subAgents) return
       const toolCallId = (msg as any).tool_call_id
-      const sa = last.subAgents.get(toolCallId)
+      const sa = last.subAgents[toolCallId]
       if (sa) {
         sa.tokens += msg.content || ''
         sa.tokenCount++
@@ -493,7 +524,7 @@ export const useChatStore = defineStore('chat', () => {
       const last = messages.value[messages.value.length - 1]
       if (!last?.subAgents) return
       const toolCallId = (msg as any).tool_call_id
-      const sa = last.subAgents.get(toolCallId)
+      const sa = last.subAgents[toolCallId]
       if (sa) {
         sa.innerToolCalls.push({
           name: msg.name || '',
@@ -508,7 +539,7 @@ export const useChatStore = defineStore('chat', () => {
       const last = messages.value[messages.value.length - 1]
       if (!last?.subAgents) return
       const toolCallId = (msg as any).tool_call_id
-      const sa = last.subAgents.get(toolCallId)
+      const sa = last.subAgents[toolCallId]
       if (sa) {
         const tc = [...sa.innerToolCalls].reverse().find(
           t => t.name === msg.name && t.status === 'running',
@@ -524,16 +555,17 @@ export const useChatStore = defineStore('chat', () => {
       const last = messages.value[messages.value.length - 1]
       if (!last) return
       const toolCallId = (msg as any).tool_call_id
-      const sa = last.subAgents?.get(toolCallId)
+      const sa = last.subAgents?.[toolCallId]
       if (sa) {
-        sa.status = 'done'
+        sa.status = (msg as any).status === 'error' ? 'error' : 'done'
         sa.tokenPreview = (msg as any).result_preview || ''
+        if ((msg as any).duration) sa.duration = (msg as any).duration
       }
       const tc = last.toolCalls?.find(t => t.runId === toolCallId)
       if (tc) {
-        tc.status = 'done'
+        tc.status = (msg as any).status === 'error' ? 'error' : 'done'
         tc.result = (msg as any).result_preview
-        tc.duration = tc.startTime ? Date.now() - tc.startTime : undefined
+        tc.duration = tc.startTime ? Date.now() - tc.startTime : (msg as any).duration
         tc.resultLength = ((msg as any).result_preview || '').length
       }
     })
