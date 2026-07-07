@@ -7,6 +7,7 @@
     :close-on-press-escape="false"
     :show-close="false"
     append-to-body
+    align-center
   >
     <!-- ask_user 模式 -->
     <template v-if="isAskUser">
