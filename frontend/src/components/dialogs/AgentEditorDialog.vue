@@ -4,6 +4,7 @@
     :title="isEdit ? '编辑 Agent' : '新建 Agent'"
     width="600px"
     :close-on-click-modal="false"
+    append-to-body
   >
     <el-alert v-if="isCodeAgent" type="warning" :closable="false" style="margin-bottom: 12px">
       此智能体由代码注册（CompiledGraph），工具、MCP、Skills、提示词和模型由代码中的 graph 决定。此处仅展示说明，不能修改框架级配置。

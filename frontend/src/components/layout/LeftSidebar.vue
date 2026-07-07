@@ -97,7 +97,7 @@
     </div>
   </aside>
 
-  <el-dialog v-model="deleteDialogVisible" title="删除会话" width="400px" :close-on-click-modal="false">
+  <el-dialog v-model="deleteDialogVisible" title="删除会话" width="400px" :close-on-click-modal="false" append-to-body>
     <p>确认删除该会话吗？</p>
     <template #footer>
       <el-button @click="deleteDialogVisible = false">取消</el-button>
@@ -105,7 +105,7 @@
     </template>
   </el-dialog>
 
-  <el-dialog v-model="renameDialogVisible" title="重命名会话" width="400px" :close-on-click-modal="false" @opened="onRenameDialogOpened">
+  <el-dialog v-model="renameDialogVisible" title="重命名会话" width="400px" :close-on-click-modal="false" append-to-body @opened="onRenameDialogOpened">
     <el-input ref="renameInputRef" v-model="renameValue" placeholder="输入新的会话标题" @keyup.enter="confirmRename" />
     <template #footer>
       <el-button @click="renameDialogVisible = false">取消</el-button>

@@ -43,7 +43,7 @@
     </el-card>
 
     <!-- Create user dialog -->
-    <el-dialog v-model="createVisible" title="创建用户" width="420px" :close-on-click-modal="false">
+    <el-dialog v-model="createVisible" title="创建用户" width="420px" :close-on-click-modal="false" append-to-body>
       <el-form @submit.prevent="handleCreate">
         <el-form-item label="用户名">
           <el-input v-model="newUsername" placeholder="输入用户名" autocomplete="off" />
@@ -57,7 +57,7 @@
     </el-dialog>
 
     <!-- Generated password dialog -->
-    <el-dialog v-model="passwordVisible" title="生成的密码" width="420px" :close-on-click-modal="false">
+    <el-dialog v-model="passwordVisible" title="生成的密码" width="420px" :close-on-click-modal="false" append-to-body>
       <p class="password-hint">请妥善保存以下密码，关闭后将无法再次查看：</p>
       <el-input :model-value="generatedPassword" readonly>
         <template #append>
@@ -75,6 +75,7 @@
       :title="`Agent 授权 — ${selectedUser?.username || ''}`"
       width="480px"
       :close-on-click-modal="false"
+      append-to-body
     >
       <el-checkbox-group v-model="selectedAgentIds" class="agent-checkboxes">
         <el-checkbox v-for="agent in agents" :key="agent.id" :value="agent.id" :label="agent.id">
