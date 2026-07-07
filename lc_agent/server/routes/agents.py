@@ -33,6 +33,7 @@ class AgentCreateRequest(BaseModel):
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
     llm_params: dict | None = None
+    subagent_ids: list[str] | None = None
 
 
 class AgentUpdateRequest(BaseModel):
@@ -43,6 +44,7 @@ class AgentUpdateRequest(BaseModel):
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
     llm_params: dict | None = None
+    subagent_ids: list[str] | None = None
 
 
 def _preset_to_dict(p: AgentPreset) -> dict:
@@ -57,6 +59,7 @@ def _preset_to_dict(p: AgentPreset) -> dict:
             "allowed_skills": [],
             "source": "code",
             "default_enabled": False,
+            "subagent_ids": p.subagent_ids,
         }
     return {
         "id": p.id,
@@ -69,6 +72,7 @@ def _preset_to_dict(p: AgentPreset) -> dict:
         "llm_params": p.llm_params,
         "source": p.source,
         "default_enabled": p.default_enabled,
+        "subagent_ids": p.subagent_ids,
     }
 
 
@@ -101,6 +105,7 @@ async def list_agents(
             "llm_params": row.llm_params,
             "source": "user",
             "default_enabled": True,
+            "subagent_ids": row.subagent_ids,
         })
 
     if user.role != "admin":
@@ -129,6 +134,7 @@ async def create_agent(
         allowed_mcp_servers=body.allowed_mcp_servers,
         allowed_skills=body.allowed_skills,
         llm_params=body.llm_params,
+        subagent_ids=body.subagent_ids,
     )
     db.add(preset_db)
     await db.commit()
@@ -143,6 +149,7 @@ async def create_agent(
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,
         llm_params=preset_db.llm_params,
+        subagent_ids=preset_db.subagent_ids,
     )
     engine._presets[preset.id] = preset
 
@@ -150,6 +157,49 @@ async def create_agent(
         **preset.model_dump(),
         "source": "user",
     }
+
+
+@router.get("/agents/available-subagents")
+async def list_available_subagents(
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Return all presets that can be used as sub-agents.
+
+    Excludes __chat__ builtin. Includes code agents and web presets.
+    """
+    result = []
+
+    for p in engine._custom_presets.values():
+        result.append({
+            "id": p.id,
+            "name": p.name,
+            "source": "code",
+            "description": p.system_prompt[:100] if p.system_prompt else "",
+        })
+
+    for bp in engine.get_builtin_presets():
+        if bp.id == "__chat__":
+            continue
+        result.append({
+            "id": bp.id,
+            "name": bp.name,
+            "source": "builtin",
+            "description": bp.system_prompt[:100] if bp.system_prompt else "",
+        })
+
+    stmt = select(AgentPresetDB)
+    rows = await db.execute(stmt)
+    for row in rows.scalars().all():
+        result.append({
+            "id": row.id,
+            "name": row.name,
+            "source": "user",
+            "description": row.system_prompt[:100] if row.system_prompt else "",
+        })
+
+    return result
 
 
 @router.put("/agents/{agent_id}")
@@ -193,6 +243,7 @@ async def update_agent(
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,
         llm_params=preset_db.llm_params,
+        subagent_ids=preset_db.subagent_ids,
     )
     engine._presets[preset.id] = preset
     engine.invalidate_agent_cache(agent_id)
