@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncIterator
+from typing import Annotated, Any, AsyncIterator
 
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
@@ -13,6 +13,13 @@ from lc_agent.core.models import AgentPreset, ModelInfo
 from lc_agent.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+try:
+    from langchain_core.tools import InjectedToolCallId
+    _HAS_INJECTED_TOOL_CALL_ID = True
+except ImportError:
+    InjectedToolCallId = None  # type: ignore[assignment,misc]
+    _HAS_INJECTED_TOOL_CALL_ID = False
 
 
 class AgentEngine:
@@ -131,16 +138,10 @@ class AgentEngine:
         Returns None if the sub-agent cannot be found or if circular dependency.
         Propagates RunnableConfig so nested events appear in the parent stream.
         """
-        from typing import Annotated
-
         from langchain_core.tools import tool as lc_tool
         from langchain_core.runnables import RunnableConfig
 
-        try:
-            from langchain_core.tools import InjectedToolCallId
-            has_injected = True
-        except ImportError:
-            has_injected = False
+        has_injected = _HAS_INJECTED_TOOL_CALL_ID
 
         if subagent_id in building_set:
             logger.warning("Subagent circular reference detected: %s — skipping", subagent_id)
