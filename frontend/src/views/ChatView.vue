@@ -165,6 +165,7 @@
       @decide="handleInterruptDecide"
       @resume="handleInterruptResume"
       @allow-permanently="handleAllowPermanently"
+      @stop="handleStop"
     />
 
     <CodeBlockModal
