@@ -10,6 +10,8 @@
     </el-alert>
 
     <el-form v-if="!isCodeAgent" :model="form" label-width="100px" label-position="top">
+      <el-tabs>
+        <el-tab-pane label="基本设置" name="basic">
       <el-form-item label="名称" required>
         <el-input v-model="form.name" :disabled="isCodeAgent" placeholder="例如：Code Assistant" />
       </el-form-item>
@@ -161,6 +163,47 @@
           </div>
         </div>
       </el-form-item>
+        </el-tab-pane>
+
+        <el-tab-pane label="子Agent" name="subagents">
+          <div class="subagent-picker">
+            <p class="picker-hint" style="font-size:12px; color: var(--el-text-color-secondary); margin-bottom: 12px;">
+              选择其他 Agent 作为该 Agent 的专业子 Agent（被调用时作为工具执行）
+            </p>
+            <el-checkbox-group v-model="form.subagent_ids" class="subagent-list">
+              <div
+                v-for="sa in availableSubagents"
+                :key="sa.id"
+                class="subagent-item"
+                style="display: flex; flex-direction: column; margin-bottom: 8px;"
+              >
+                <el-checkbox :value="sa.id">
+                  <span class="sa-item-name" style="font-weight: 600;">{{ sa.name }}</span>
+                  <el-tag
+                    size="small"
+                    :type="sa.source === 'code' ? 'info' : sa.source === 'builtin' ? 'warning' : 'primary'"
+                    style="margin-left: 6px;"
+                  >
+                    {{ sa.source }}
+                  </el-tag>
+                </el-checkbox>
+                <span
+                  v-if="sa.description"
+                  class="sa-item-desc"
+                  style="font-size: 11px; color: var(--el-text-color-secondary); margin-left: 22px; margin-top: 2px;"
+                >
+                  {{ sa.description }}
+                </span>
+              </div>
+            </el-checkbox-group>
+            <el-empty
+              v-if="availableSubagents.length === 0"
+              description="暂无可用的子 Agent"
+              :image-size="60"
+            />
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-form>
 
     <div v-else class="code-agent-readonly">
@@ -196,6 +239,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { fetchAvailableSubagents } from '@/api/http'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore, type AgentPreset } from '@/stores/agents'
 
@@ -215,6 +259,7 @@ const mcpMode = ref<'all' | 'none' | 'custom'>('all')
 const selectedMcpServers = ref<string[]>([])
 const skillsMode = ref<'all' | 'none' | 'custom'>('all')
 const selectedSkills = ref<string[]>([])
+const availableSubagents = ref<Array<{ id: string; name: string; source: string; description: string }>>([])
 
 const isCodeAgent = ref(false)
 
@@ -223,9 +268,13 @@ const form = ref({
   system_prompt: '',
   default_model: '',
   llm_params: null as Record<string, any> | null,
+  subagent_ids: [] as string[],
 })
 
-function open(agent?: AgentPreset) {
+async function open(agent?: AgentPreset) {
+  const all = await fetchAvailableSubagents()
+  availableSubagents.value = all.filter(sa => sa.id !== (agent?.id ?? ''))
+
   if (agent) {
     isEdit.value = true
     editingId.value = agent.id
@@ -235,6 +284,7 @@ function open(agent?: AgentPreset) {
     form.value.system_prompt = agent.system_prompt
     form.value.default_model = agent.default_model
     form.value.llm_params = agent.llm_params ?? null
+    form.value.subagent_ids = agent.subagent_ids ? [...agent.subagent_ids] : []
 
     if (agent.allowed_tool_groups === null) {
       toolGroupMode.value = 'all'
@@ -273,7 +323,7 @@ function open(agent?: AgentPreset) {
     editingId.value = ''
     editingSource.value = 'user'
     isCodeAgent.value = false
-    form.value = { name: '', system_prompt: '', default_model: toolsStore.currentModel, llm_params: null }
+    form.value = { name: '', system_prompt: '', default_model: toolsStore.currentModel, llm_params: null, subagent_ids: [] }
     toolGroupMode.value = 'all'
     selectedGroups.value = []
     mcpMode.value = 'all'
@@ -310,6 +360,7 @@ async function handleSave() {
       allowed_mcp_servers,
       allowed_skills,
       llm_params: form.value.llm_params || null,
+      subagent_ids: form.value.subagent_ids.length > 0 ? form.value.subagent_ids : null,
     }
 
     if (isEdit.value) {

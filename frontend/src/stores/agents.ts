@@ -11,6 +11,7 @@ export interface AgentPreset {
   allowed_mcp_servers: string[] | null
   allowed_skills: string[] | null
   llm_params: Record<string, any> | null
+  subagent_ids: string[] | null
   source: 'builtin' | 'code' | 'user'
   default_enabled: boolean
 }
