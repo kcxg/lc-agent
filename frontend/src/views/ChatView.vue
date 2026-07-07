@@ -126,8 +126,8 @@
                     :tool-call="item.toolCalls[seg.toolIndex!]"
                   />
                   <SubAgentCard
-                    v-else-if="item.toolCalls[seg.toolIndex!]?.is_subagent && getSubAgentEntry(item, seg.toolIndex!)"
-                    :entry="getSubAgentEntry(item, seg.toolIndex!)!"
+                    v-else-if="item.toolCalls[seg.toolIndex!]?.is_subagent"
+                    :entry="getSubAgentEntry(item, seg.toolIndex!) || makeFallbackSubAgentEntry(item, seg.toolIndex!)"
                     @enter="handleEnterSubAgent"
                   />
                   <ToolCallCard
@@ -381,6 +381,23 @@ function getSubAgentEntry(item: ChatBubbleItem, toolIndex: number): SubAgentEntr
   const tc = item.toolCalls?.[toolIndex]
   if (!msg?.subAgents || !tc?.runId) return undefined
   return msg.subAgents[tc.runId]
+}
+
+function makeFallbackSubAgentEntry(item: ChatBubbleItem, toolIndex: number): SubAgentEntry {
+  const tc = item.toolCalls?.[toolIndex]
+  return {
+    tool_call_id: tc?.runId || '',
+    name: tc?.name || '子Agent',
+    sub_session_id: tc?.sub_session_id || '',
+    query: '',
+    status: (tc?.status === 'done' ? 'done' : tc?.status === 'error' ? 'error' : 'running') as 'running' | 'done' | 'error',
+    tokenPreview: tc?.result || '',
+    toolCallCount: 0,
+    tokenCount: 0,
+    tokens: '',
+    innerToolCalls: [],
+    duration: tc?.duration,
+  }
 }
 
 function handleEnterSubAgent(subSessionId: string, name: string) {

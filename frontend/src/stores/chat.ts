@@ -502,6 +502,8 @@ export const useChatStore = defineStore('chat', () => {
         tc.is_subagent = true
         tc.sub_session_id = subSessionId
       }
+      // Force Vue to detect the subAgents addition so SubAgentCard renders immediately
+      messages.value = [...messages.value]
     })
 
     client.on('subagent_token', (msg: SseMessage) => {

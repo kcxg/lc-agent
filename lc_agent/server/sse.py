@@ -307,6 +307,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                         event, content_parts, tool_calls, in_thinking,
                         subagent_tool_names=subagent_tool_names,
                         thread_id=thread_id,
+                        subagent_display_map=subagent_display_map,
                     )
 
                     for evt_type, evt_data in stream_utils.convert_stream_event(
@@ -565,6 +566,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                         event, content_parts, tool_calls, in_thinking,
                         subagent_tool_names=subagent_tool_names,
                         thread_id=thread_id,
+                        subagent_display_map=subagent_display_map,
                     )
 
                     for evt_type, evt_data in stream_utils.convert_stream_event(

@@ -141,8 +141,10 @@ class AgentEngine:
         """
         ascii_only = preset_name.encode("ascii", "ignore").decode()
         sanitized = re.sub(r"[^\w\-]", "_", ascii_only)
-        sanitized = re.sub(r"_+", "_", sanitized).strip("_-")[:40]
-        base = sanitized if sanitized else preset_id[:8]
+        sanitized = re.sub(r"_+", "_", sanitized).strip("_-")[:28]
+        # Always append short preset_id suffix to guarantee uniqueness across presets
+        short_id = preset_id.replace("-", "")[:8]
+        base = f"{sanitized}_{short_id}" if sanitized else short_id
         return f"subagent_{base}"
 
     def _make_subagent_tool(
