@@ -10,6 +10,9 @@ from langchain.agents.middleware.summarization import SummarizationMiddleware
 from lc_agent.core.http_trace import get_http_trace_collector
 from lc_agent.core.http_trace_httpx import TracingAsyncClient
 from lc_agent.core.models import AgentPreset, ModelInfo
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool as lc_tool
+
 from lc_agent.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -138,9 +141,6 @@ class AgentEngine:
         Returns None if the sub-agent cannot be found or if circular dependency.
         Propagates RunnableConfig so nested events appear in the parent stream.
         """
-        from langchain_core.tools import tool as lc_tool
-        from langchain_core.runnables import RunnableConfig
-
         has_injected = _HAS_INJECTED_TOOL_CALL_ID
 
         if subagent_id in building_set:
