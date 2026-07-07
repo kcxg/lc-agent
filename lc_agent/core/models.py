@@ -38,3 +38,5 @@ class AgentPreset(BaseModel):
 
     source: str = "user"
     default_enabled: bool = True
+
+    subagent_ids: list[str] | None = None
