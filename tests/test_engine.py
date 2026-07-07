@@ -152,7 +152,7 @@ class TestAgentEngine:
         engine = AgentEngine(config)
         built: list[tuple[str, str | None]] = []
 
-        def fake_build_agent(preset, cache_key=None, llm_params=None):
+        def fake_build_agent(preset, cache_key=None, llm_params=None, **_kwargs):
             built.append((preset.default_model, cache_key))
             agent = object()
             engine._agents[cache_key or preset.id] = agent

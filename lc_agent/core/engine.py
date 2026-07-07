@@ -131,8 +131,16 @@ class AgentEngine:
         Returns None if the sub-agent cannot be found or if circular dependency.
         Propagates RunnableConfig so nested events appear in the parent stream.
         """
+        from typing import Annotated
+
         from langchain_core.tools import tool as lc_tool
         from langchain_core.runnables import RunnableConfig
+
+        try:
+            from langchain_core.tools import InjectedToolCallId
+            has_injected = True
+        except ImportError:
+            has_injected = False
 
         if subagent_id in building_set:
             logger.warning("Subagent circular reference detected: %s — skipping", subagent_id)
@@ -145,7 +153,7 @@ class AgentEngine:
         subagent_preset = self._resolve_preset(subagent_id)
 
         try:
-            sub_agent = self._get_or_build_agent(subagent_id)
+            sub_agent = self._get_or_build_agent(subagent_id, _depth=depth)
         except Exception as exc:
             logger.warning("Could not build subagent %s: %s — skipping", subagent_id, exc)
             return None
@@ -153,34 +161,66 @@ class AgentEngine:
         agent_name = subagent_id
         agent_desc = f"{subagent_preset.name}: {subagent_preset.system_prompt[:200]}"
 
-        @lc_tool(agent_name, description=agent_desc)
-        async def _call_subagent(query: str, config: RunnableConfig) -> str:
-            """Invoke a specialist sub-agent. Pass the full task as query."""
-            import uuid
+        if has_injected:
+            @lc_tool(agent_name, description=agent_desc)
+            async def _call_subagent(
+                query: str,
+                tool_call_id: Annotated[str, InjectedToolCallId],
+                config: RunnableConfig,
+            ) -> str:
+                """Invoke a specialist sub-agent. Pass the full task as query."""
+                tc_id = tool_call_id
+                parent_tid = (config or {}).get("configurable", {}).get("thread_id") or ""
+                sub_thread_id = f"{parent_tid}/sa/{tc_id}"
 
-            tc_id = (config or {}).get("configurable", {}).get("tool_call_id") or uuid.uuid4().hex
-            parent_tid = (config or {}).get("configurable", {}).get("thread_id") or ""
-            sub_thread_id = f"{parent_tid}/sa/{tc_id}"
+                sub_config = {
+                    **(config or {}),
+                    "configurable": {
+                        **((config or {}).get("configurable") or {}),
+                        "thread_id": sub_thread_id,
+                        "sub_session_id": sub_thread_id,
+                    },
+                }
 
-            sub_config = {
-                **(config or {}),
-                "configurable": {
-                    **((config or {}).get("configurable") or {}),
-                    "thread_id": sub_thread_id,
-                    "sub_session_id": sub_thread_id,
-                },
-            }
+                try:
+                    result = await sub_agent.ainvoke(
+                        {"messages": [{"role": "user", "content": query}]},
+                        config=sub_config,
+                    )
+                    msgs = result.get("messages", [])
+                    return msgs[-1].content if msgs else ""
+                except Exception as exc:
+                    logger.exception("Subagent %s failed: %s", subagent_id, exc)
+                    return f"[Sub-agent error: {exc}]"
+        else:
+            @lc_tool(agent_name, description=agent_desc)
+            async def _call_subagent(query: str, config: RunnableConfig) -> str:
+                """Invoke a specialist sub-agent. Pass the full task as query."""
+                import uuid
 
-            try:
-                result = await sub_agent.ainvoke(
-                    {"messages": [{"role": "user", "content": query}]},
-                    config=sub_config,
-                )
-                msgs = result.get("messages", [])
-                return msgs[-1].content if msgs else ""
-            except Exception as exc:
-                logger.exception("Subagent %s failed: %s", subagent_id, exc)
-                return f"[Sub-agent error: {exc}]"
+                tc_id = (config or {}).get("configurable", {}).get("tool_call_id") or uuid.uuid4().hex
+                parent_tid = (config or {}).get("configurable", {}).get("thread_id") or ""
+                sub_thread_id = f"{parent_tid}/sa/{tc_id}"
+
+                sub_config = {
+                    **(config or {}),
+                    "configurable": {
+                        **((config or {}).get("configurable") or {}),
+                        "thread_id": sub_thread_id,
+                        "sub_session_id": sub_thread_id,
+                    },
+                }
+
+                try:
+                    result = await sub_agent.ainvoke(
+                        {"messages": [{"role": "user", "content": query}]},
+                        config=sub_config,
+                    )
+                    msgs = result.get("messages", [])
+                    return msgs[-1].content if msgs else ""
+                except Exception as exc:
+                    logger.exception("Subagent %s failed: %s", subagent_id, exc)
+                    return f"[Sub-agent error: {exc}]"
 
         return _call_subagent
 
@@ -190,6 +230,7 @@ class AgentEngine:
         cache_key: str | None = None,
         llm_params: dict | None = None,
         building_set: frozenset[str] | None = None,
+        _depth: int = 0,
     ):
         """Build a LangGraph ReAct agent from preset."""
         if preset is None:
@@ -247,11 +288,10 @@ class AgentEngine:
         subagent_tool_names: set[str] = set()
         if getattr(preset, "subagent_ids", None):
             max_depth = self.config.get("agent", {}).get("max_subagent_depth", 2)
-            current_depth = getattr(preset, "_current_depth", 0)
-            if current_depth < max_depth:
+            if _depth < max_depth:
                 new_building = (building_set or frozenset()) | {preset.id}
                 for sid in preset.subagent_ids:
-                    sa_tool = self._make_subagent_tool(sid, current_depth + 1, new_building)
+                    sa_tool = self._make_subagent_tool(sid, _depth + 1, new_building)
                     if sa_tool is not None:
                         tools.append(sa_tool)
                         subagent_tool_names.add(sid)
@@ -415,11 +455,19 @@ class AgentEngine:
             return self._presets[preset_id]
         return self.get_default_preset()
 
-    def _get_agent_cache_key(self, preset_id: str, model_id: str = "", llm_params: dict | None = None) -> str:
+    def _get_agent_cache_key(
+        self,
+        preset_id: str,
+        model_id: str = "",
+        llm_params: dict | None = None,
+        _depth: int = 0,
+    ) -> str:
         key = f"{preset_id}::model::{model_id}" if model_id else preset_id
         if llm_params:
             import json
             key = f"{key}::llm::{json.dumps(llm_params, sort_keys=True)}"
+        if _depth:
+            key = f"{key}::depth::{_depth}"
         return key
 
     def get_subagent_tool_names(
@@ -427,12 +475,14 @@ class AgentEngine:
         preset_id: str,
         model_id: str = "",
         llm_params: dict | None = None,
+        _depth: int = 0,
     ) -> set[str]:
         """Return the set of tool names that are sub-agents for the given preset."""
         cache_key = self._get_agent_cache_key(
             preset_id,
             model_id if self._find_model(model_id) else "",
             llm_params=llm_params,
+            _depth=_depth,
         )
         return self._agent_subagent_tools.get(cache_key, set())
 
@@ -466,6 +516,7 @@ class AgentEngine:
         preset_id: str,
         model_id: str = "",
         llm_params: dict | None = None,
+        _depth: int = 0,
     ):
         """Get cached agent or build a new one. Rebuilds preset agents if MCP state changed."""
         preset = self._resolve_preset(preset_id)
@@ -481,12 +532,13 @@ class AgentEngine:
             preset_id,
             model_id if preset.default_model == model_id else "",
             llm_params=llm_params,
+            _depth=_depth,
         )
         mcp_gen = getattr(self, '_mcp_generation', 0)
         cached = self._agents.get(cache_key)
         cached_gen = self._agent_mcp_gen.get(cache_key, -1)
         if cached is None or cached_gen != mcp_gen:
-            agent = self.build_agent(preset, cache_key=cache_key, llm_params=llm_params)
+            agent = self.build_agent(preset, cache_key=cache_key, llm_params=llm_params, _depth=_depth)
             self._agent_mcp_gen[cache_key] = mcp_gen
             return agent
         return cached

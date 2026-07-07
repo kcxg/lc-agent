@@ -5,6 +5,7 @@ API design aligns with LangGraph /threads/{id}/runs/stream pattern.
 """
 
 import asyncio
+import logging
 import time
 import traceback
 from typing import Any
@@ -22,6 +23,8 @@ from lc_agent.core.http_trace import (
 from lc_agent.server import persistence, stream_utils
 
 router = APIRouter(prefix="/api/threads", tags=["chat-sse"])
+
+logger = logging.getLogger(__name__)
 
 _cancel_flags: dict[str, bool] = {}
 _run_locks: dict[str, asyncio.Lock] = {}
@@ -251,6 +254,11 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             tool_calls: list[dict[str, Any]] = []
             in_thinking = False
             last_event_time = time.time()
+            # Ensure the agent is built (and subagent tools are cached) before streaming
+            try:
+                engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
+            except Exception as _e:
+                logger.warning("Failed to pre-build agent for subagent tool name lookup: %s", _e)
             subagent_tool_names = engine.get_subagent_tool_names(
                 preset_id, model_id=model_id or "", llm_params=llm_params,
             )
@@ -489,6 +497,11 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
 
             existing_tool_calls, existing_trace_count = await persistence.load_resume_context(_db_url, thread_id)
             tool_calls: list[dict[str, Any]] = list(existing_tool_calls)
+            # Ensure the agent is built (and subagent tools are cached) before streaming
+            try:
+                engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
+            except Exception as _e:
+                logger.warning("Failed to pre-build agent for subagent tool name lookup: %s", _e)
             subagent_tool_names = engine.get_subagent_tool_names(
                 preset_id, model_id=model_id or "", llm_params=llm_params,
             )

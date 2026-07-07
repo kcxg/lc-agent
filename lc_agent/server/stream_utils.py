@@ -93,16 +93,22 @@ def convert_stream_event(
                 "args": tool_input,
             }))
         elif subagent_tool_names and tool_name in subagent_tool_names:
+            tool_input_dict = tool_input if isinstance(tool_input, dict) else {}
+            sa_tc_id = tool_input_dict.get("tool_call_id") or event.get("run_id", "")
+            display_args = (
+                {k: v for k, v in tool_input_dict.items() if k != "tool_call_id"}
+                if isinstance(tool_input, dict) else tool_input
+            )
             results.append(("tool_call", {
                 "name": tool_name,
-                "run_id": event.get("run_id", ""),
-                "args": tool_input,
+                "run_id": sa_tc_id,
+                "args": display_args,
                 "is_subagent": True,
             }))
             results.append(("subagent_start", {
                 "name": tool_name,
-                "tool_call_id": event.get("run_id", ""),
-                "query": tool_input.get("query", str(tool_input)) if isinstance(tool_input, dict) else str(tool_input),
+                "tool_call_id": sa_tc_id,
+                "query": tool_input_dict.get("query", str(tool_input)) if isinstance(tool_input, dict) else str(tool_input),
             }))
         else:
             results.append(("tool_call", {
@@ -125,9 +131,16 @@ def convert_stream_event(
                 "result": result_str,
             }))
         elif subagent_tool_names and tool_name in subagent_tool_names:
+            tool_input_end = event.get("data", {}).get("input", {})
+            sa_tc_id_end = (
+                tool_input_end.get("tool_call_id")
+                if isinstance(tool_input_end, dict) else None
+            ) or event.get("run_id", "")
+            status = "error" if result_str.startswith("[Sub-agent error:") else "done"
             results.append(("subagent_done", {
-                "tool_call_id": event.get("run_id", ""),
+                "tool_call_id": sa_tc_id_end,
                 "result_preview": result_str[:150],
+                "status": status,
             }))
         else:
             results.append(("tool_result", {
@@ -181,7 +194,28 @@ def accumulate_display_state(
 
     elif kind == "on_tool_start":
         tool_name = event.get("name", "")
-        if not is_in_subagent and tool_name not in (subagent_tool_names or set()):
+        if not is_in_subagent and subagent_tool_names and tool_name in subagent_tool_names:
+            if in_thinking:
+                content_parts.append("<!--THINK_END-->")
+                in_thinking = False
+            tool_input = event.get("data", {}).get("input", {})
+            tool_input_dict = tool_input if isinstance(tool_input, dict) else {}
+            sa_tc_id = tool_input_dict.get("tool_call_id") or event.get("run_id", "")
+            display_args = (
+                {k: v for k, v in tool_input_dict.items() if k != "tool_call_id"}
+                if isinstance(tool_input, dict) else tool_input
+            )
+            tool_idx = len(tool_calls)
+            tool_calls.append({
+                "name": tool_name,
+                "runId": sa_tc_id,
+                "args": display_args,
+                "status": "running",
+                "is_subagent": True,
+                "startTime": int(time.time() * 1000),
+            })
+            content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
+        elif not is_in_subagent and tool_name not in (subagent_tool_names or set()):
             if in_thinking:
                 content_parts.append("<!--THINK_END-->")
                 in_thinking = False
@@ -201,7 +235,26 @@ def accumulate_display_state(
 
     elif kind == "on_tool_end":
         tool_name = event.get("name", "")
-        if not is_in_subagent and tool_name not in (subagent_tool_names or set()):
+        if not is_in_subagent and subagent_tool_names and tool_name in subagent_tool_names:
+            raw_output = event.get("data", {}).get("output", "")
+            if hasattr(raw_output, "content"):
+                result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
+            else:
+                result_str = str(raw_output)
+            tool_input_end = event.get("data", {}).get("input", {})
+            sa_tc_id = (
+                tool_input_end.get("tool_call_id")
+                if isinstance(tool_input_end, dict) else None
+            ) or event.get("run_id", "")
+            for tc in tool_calls:
+                if tc.get("runId") == sa_tc_id and tc.get("is_subagent"):
+                    start_time = tc.get("startTime")
+                    tc["status"] = "error" if result_str.startswith("[Sub-agent error:") else "done"
+                    tc["result"] = result_str[:100]
+                    tc["duration"] = int(time.time() * 1000) - start_time if start_time else None
+                    tc["resultLength"] = len(result_str)
+                    break
+        elif not is_in_subagent and tool_name not in (subagent_tool_names or set()):
             raw_output = event.get("data", {}).get("output", "")
             if hasattr(raw_output, "content"):
                 result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
