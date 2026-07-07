@@ -94,6 +94,9 @@ const visible = computed({
   set: () => {},
 })
 
+// 标记弹窗因用户操作（approve/reject/resume）而关闭，避免 @close 误触发 stop
+const closingByAction = ref(false)
+
 const freeInput = ref('')
 const selectedOption = ref<string | null>(null)
 const selectedOptions = ref<string[]>([])
@@ -168,6 +171,7 @@ function selectOption(label: string) {
 }
 
 function submitAskUser() {
+  closingByAction.value = true
   const parts: string[] = []
   if (askPayload.value?.allow_multiple && selectedOptions.value.length > 0) {
     parts.push(selectedOptions.value.join(', '))
@@ -183,6 +187,7 @@ function submitAskUser() {
 }
 
 function allowPermanently() {
+  closingByAction.value = true
   const toolName = firstToolName.value
   if (toolName) {
     emit('allow-permanently', toolName)
@@ -190,14 +195,20 @@ function allowPermanently() {
 }
 
 function approve() {
+  closingByAction.value = true
   emit('decide', { type: 'approve' })
 }
 
 function handleClose() {
+  if (closingByAction.value) {
+    closingByAction.value = false
+    return
+  }
   emit('stop')
 }
 
 function reject() {
+  closingByAction.value = true
   emit('decide', { type: 'reject', message: '用户拒绝了此操作' })
 }
 </script>
