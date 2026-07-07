@@ -251,6 +251,10 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             tool_calls: list[dict[str, Any]] = []
             in_thinking = False
             last_event_time = time.time()
+            subagent_tool_names = engine.get_subagent_tool_names(
+                preset_id, model_id=model_id or "", llm_params=llm_params,
+            )
+            _sa_writers: dict[str, dict] = {}
 
             if is_first:
                 preliminary_title = content[:30].strip()
@@ -292,11 +296,76 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
                     in_thinking = stream_utils.accumulate_display_state(
                         event, content_parts, tool_calls, in_thinking,
+                        subagent_tool_names=subagent_tool_names,
                     )
 
-                    for evt_type, evt_data in stream_utils.convert_stream_event(event):
+                    for evt_type, evt_data in stream_utils.convert_stream_event(
+                        event, subagent_tool_names=subagent_tool_names,
+                    ):
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()
+
+                        if evt_type == "subagent_start":
+                            sa_tid = evt_data["tool_call_id"]
+                            sa_query = evt_data.get("query", "")
+                            sa_name = evt_data.get("name", "sub-agent")
+                            parent_tid = thread_id
+                            sub_sid = f"{parent_tid}/sa/{sa_tid}"
+                            _sa_writers[sa_tid] = {
+                                "content_parts": [],
+                                "tool_calls": [],
+                                "query": sa_query,
+                                "sub_session_id": sub_sid,
+                            }
+                            asyncio.create_task(persistence.create_subsession(
+                                _db_url, sub_sid, parent_tid, sa_tid,
+                                agent_id=sa_name,
+                                title=f"{sa_name}: {sa_query[:30]}",
+                                user_id=user.id if user else "",
+                            ))
+                            asyncio.create_task(persistence.save_subsession_delegation_message(
+                                _db_url, sub_sid, sa_query,
+                            ))
+                            for tc in tool_calls:
+                                if tc.get("runId") == sa_tid or tc.get("run_id") == sa_tid:
+                                    tc["is_subagent"] = True
+                                    tc["sub_session_id"] = sub_sid
+                                    break
+
+                        elif evt_type == "subagent_token":
+                            sa_tid = evt_data["tool_call_id"]
+                            if sa_tid in _sa_writers:
+                                _sa_writers[sa_tid]["content_parts"].append(evt_data["content"])
+
+                        elif evt_type == "subagent_tool_call":
+                            sa_tid = evt_data["tool_call_id"]
+                            if sa_tid in _sa_writers:
+                                _sa_writers[sa_tid]["tool_calls"].append({
+                                    "name": evt_data["name"],
+                                    "args": evt_data.get("args"),
+                                    "status": "running",
+                                })
+
+                        elif evt_type == "subagent_tool_result":
+                            sa_tid = evt_data["tool_call_id"]
+                            if sa_tid in _sa_writers:
+                                name = evt_data["name"]
+                                for tc in _sa_writers[sa_tid]["tool_calls"]:
+                                    if tc["name"] == name and tc.get("status") == "running":
+                                        tc["result"] = evt_data.get("result")
+                                        tc["status"] = "done"
+                                        break
+
+                        elif evt_type == "subagent_done":
+                            sa_tid = evt_data["tool_call_id"]
+                            if sa_tid in _sa_writers:
+                                writer = _sa_writers.pop(sa_tid)
+                                sa_content = "".join(writer["content_parts"])
+                                sub_sid = writer["sub_session_id"]
+                                asyncio.create_task(persistence.finalize_subsession_message(
+                                    _db_url, sub_sid, sa_content,
+                                    tool_calls=writer["tool_calls"] or None,
+                                ))
 
                     prev_len = len(usage_rounds)
                     stream_utils.accumulate_usage(event, usage_rounds)
@@ -420,6 +489,9 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
 
             existing_tool_calls, existing_trace_count = await persistence.load_resume_context(_db_url, thread_id)
             tool_calls: list[dict[str, Any]] = list(existing_tool_calls)
+            subagent_tool_names = engine.get_subagent_tool_names(
+                preset_id, model_id=model_id or "", llm_params=llm_params,
+            )
             from langgraph.types import Command
 
             agent = engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
@@ -465,9 +537,12 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
 
                     in_thinking = stream_utils.accumulate_display_state(
                         event, content_parts, tool_calls, in_thinking,
+                        subagent_tool_names=subagent_tool_names,
                     )
 
-                    for evt_type, evt_data in stream_utils.convert_stream_event(event):
+                    for evt_type, evt_data in stream_utils.convert_stream_event(
+                        event, subagent_tool_names=subagent_tool_names,
+                    ):
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()
 
