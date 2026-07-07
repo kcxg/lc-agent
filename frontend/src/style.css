@@ -30,6 +30,17 @@ a {
   text-decoration: none;
 }
 
+/* 强制 el-dialog / el-message-box 水平居中 */
+.el-dialog {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.el-message-box {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
 /* 统一聚焦态 */
 :focus-visible {
   outline: 2px solid var(--el-color-primary);
