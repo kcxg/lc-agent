@@ -1,5 +1,28 @@
 <template>
   <div class="chat-view">
+    <div
+      v-if="sessionsStore.sessionNavStack.length > 0"
+      class="subagent-breadcrumb"
+    >
+      <button class="breadcrumb-back" @click="sessionsStore.popSubSession()">
+        ← 返回
+      </button>
+      <span
+        class="breadcrumb-home"
+        @click="sessionsStore.popToRoot()"
+      >
+        主对话
+      </span>
+      <template
+        v-for="(nav, i) in sessionsStore.sessionNavStack"
+        :key="i"
+      >
+        <span class="breadcrumb-sep"> / </span>
+        <span class="breadcrumb-item" :class="{ 'breadcrumb-active': i === sessionsStore.sessionNavStack.length - 1 }">
+          {{ nav.label }}
+        </span>
+      </template>
+    </div>
     <div ref="messagesContainerRef" class="messages-container">
       <Welcome
         v-if="messages.length === 0 && !isLoading"
@@ -193,6 +216,7 @@ import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
 import { Cpu, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
+import { useSessionsStore } from '@/stores/sessions'
 import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
@@ -253,6 +277,7 @@ type LoadOlderBubbleItem = BubbleListItemProps & {
 type ChatBubbleItem = MessageBubbleItem | LoadOlderBubbleItem
 
 const chatStore = useChatStore()
+const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()
 const toolsStore = useToolsStore()
 const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder } = storeToRefs(chatStore)
@@ -341,7 +366,7 @@ function getSubAgentEntry(item: ChatBubbleItem, toolIndex: number): SubAgentEntr
 }
 
 function handleEnterSubAgent(subSessionId: string, name: string) {
-  console.log('enter', subSessionId, name)
+  sessionsStore.pushSubSession(subSessionId, name)
 }
 
 function getAssistantLabel(): string {
@@ -553,6 +578,20 @@ watch(errorMessage, (newError) => {
   }
 })
 
+watch(
+  () => sessionsStore.sessionNavStack.length,
+  async (newLen, oldLen) => {
+    if (newLen === 0 && oldLen === 0) return
+    const newId = sessionsStore.effectiveThreadId
+    if (!newId) return
+    if (chatStore.threadId === newId && chatStore.isConnected) return
+    chatStore.clearMessages()
+    chatStore.disconnect()
+    await chatStore.loadMessages(newId)
+    await chatStore.connect(newId)
+  },
+)
+
 watch(() => messages.value[messages.value.length - 1]?.id, () => {
   scrollMessagesToBottom()
 }, { flush: 'post' })
@@ -696,6 +735,47 @@ onBeforeUnmount(() => {
   overflow: hidden;
   height: 100%;
   min-height: 0;
+}
+
+.subagent-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: var(--el-color-primary-light-9);
+  border-bottom: 1px solid var(--el-color-primary-light-7);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.breadcrumb-back {
+  padding: 3px 9px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 6px;
+  background: white;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.breadcrumb-back:hover {
+  background: var(--el-color-primary-light-9);
+}
+.breadcrumb-home {
+  color: var(--el-color-primary);
+  cursor: pointer;
+}
+.breadcrumb-home:hover {
+  text-decoration: underline;
+}
+.breadcrumb-sep {
+  color: var(--el-text-color-disabled);
+}
+.breadcrumb-item {
+  color: var(--el-text-color-secondary);
+}
+.breadcrumb-active {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  cursor: default;
 }
 
 .messages-container {
