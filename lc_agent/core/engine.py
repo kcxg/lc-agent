@@ -24,6 +24,7 @@ class AgentEngine:
         self._checkpointer = checkpointer
         self._store = store
         self._agents: dict[str, Any] = {}
+        self._agent_subagent_tools: dict[str, set[str]] = {}
         self._current_preset: AgentPreset | None = None
         self._models: list[ModelInfo] = self._parse_models(config)
         self._presets: dict[str, AgentPreset] = {}
@@ -111,11 +112,84 @@ class AgentEngine:
         """Return the default agent (Chat - safest)."""
         return self.get_builtin_presets()[0]
 
+    def _preset_exists(self, preset_id: str) -> bool:
+        """Return True if preset_id refers to a known preset."""
+        return (
+            preset_id in self.BUILTIN_IDS
+            or preset_id in self._custom_presets
+            or preset_id in self._presets
+        )
+
+    def _make_subagent_tool(
+        self,
+        subagent_id: str,
+        depth: int,
+        building_set: frozenset[str],
+    ):
+        """Wrap a sub-agent preset as an async langchain tool.
+
+        Returns None if the sub-agent cannot be found or if circular dependency.
+        Propagates RunnableConfig so nested events appear in the parent stream.
+        """
+        from langchain_core.tools import tool as lc_tool
+        from langchain_core.runnables import RunnableConfig
+
+        if subagent_id in building_set:
+            logger.warning("Subagent circular reference detected: %s — skipping", subagent_id)
+            return None
+
+        if not self._preset_exists(subagent_id):
+            logger.warning("Subagent preset not found: %s — skipping", subagent_id)
+            return None
+
+        subagent_preset = self._resolve_preset(subagent_id)
+
+        try:
+            sub_agent = self._get_or_build_agent(subagent_id)
+        except Exception as exc:
+            logger.warning("Could not build subagent %s: %s — skipping", subagent_id, exc)
+            return None
+
+        agent_name = subagent_id
+        agent_desc = f"{subagent_preset.name}: {subagent_preset.system_prompt[:200]}"
+
+        @lc_tool(agent_name, description=agent_desc)
+        async def _call_subagent(query: str, config: RunnableConfig) -> str:
+            """Invoke a specialist sub-agent. Pass the full task as query."""
+            import uuid
+
+            tc_id = (config or {}).get("configurable", {}).get("tool_call_id") or uuid.uuid4().hex
+            parent_tid = (config or {}).get("configurable", {}).get("thread_id") or ""
+            sub_thread_id = f"{parent_tid}/sa/{tc_id}"
+
+            sub_config = {
+                **(config or {}),
+                "configurable": {
+                    **((config or {}).get("configurable") or {}),
+                    "thread_id": sub_thread_id,
+                    "sub_session_id": sub_thread_id,
+                },
+            }
+
+            try:
+                result = await sub_agent.ainvoke(
+                    {"messages": [{"role": "user", "content": query}]},
+                    config=sub_config,
+                )
+                msgs = result.get("messages", [])
+                return msgs[-1].content if msgs else ""
+            except Exception as exc:
+                logger.exception("Subagent %s failed: %s", subagent_id, exc)
+                return f"[Sub-agent error: {exc}]"
+
+        return _call_subagent
+
     def build_agent(
         self,
         preset: AgentPreset | None = None,
         cache_key: str | None = None,
         llm_params: dict | None = None,
+        building_set: frozenset[str] | None = None,
     ):
         """Build a LangGraph ReAct agent from preset."""
         if preset is None:
@@ -170,6 +244,18 @@ class AgentEngine:
             kwargs["store"] = self._store
             kwargs["context_schema"] = AgentRuntimeContext
 
+        subagent_tool_names: set[str] = set()
+        if getattr(preset, "subagent_ids", None):
+            max_depth = self.config.get("agent", {}).get("max_subagent_depth", 2)
+            current_depth = getattr(preset, "_current_depth", 0)
+            if current_depth < max_depth:
+                new_building = (building_set or frozenset()) | {preset.id}
+                for sid in preset.subagent_ids:
+                    sa_tool = self._make_subagent_tool(sid, current_depth + 1, new_building)
+                    if sa_tool is not None:
+                        tools.append(sa_tool)
+                        subagent_tool_names.add(sid)
+
         model_info = self._find_model(preset.default_model)
         effective_params = {**(preset.llm_params or {}), **(llm_params or {})}
         llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
@@ -200,7 +286,9 @@ class AgentEngine:
             **kwargs,
         )
 
-        self._agents[cache_key or preset.id] = agent
+        resolved_cache_key = cache_key or preset.id
+        self._agents[resolved_cache_key] = agent
+        self._agent_subagent_tools[resolved_cache_key] = subagent_tool_names
         return agent
 
     def _build_tracing_async_client(self, model_info: ModelInfo | None, model_id: str):
@@ -334,6 +422,20 @@ class AgentEngine:
             key = f"{key}::llm::{json.dumps(llm_params, sort_keys=True)}"
         return key
 
+    def get_subagent_tool_names(
+        self,
+        preset_id: str,
+        model_id: str = "",
+        llm_params: dict | None = None,
+    ) -> set[str]:
+        """Return the set of tool names that are sub-agents for the given preset."""
+        cache_key = self._get_agent_cache_key(
+            preset_id,
+            model_id if self._find_model(model_id) else "",
+            llm_params=llm_params,
+        )
+        return self._agent_subagent_tools.get(cache_key, set())
+
     def invalidate_agent_cache(self, preset_id: str, keep_exact: bool = False) -> None:
         """Remove cached agents for a preset, including model/llm_params override variants."""
         prefix = f"{preset_id}::"
@@ -345,11 +447,13 @@ class AgentEngine:
         for key in keys:
             self._agents.pop(key, None)
             self._agent_mcp_gen.pop(key, None)
+            self._agent_subagent_tools.pop(key, None)
 
     def invalidate_all_agents(self) -> None:
         """Remove all cached agents, forcing rebuild on next use."""
         self._agents.clear()
         self._agent_mcp_gen.clear()
+        self._agent_subagent_tools.clear()
 
     def _resolve_preset_for_model(self, preset_id: str, model_id: str = "") -> AgentPreset:
         preset = self._resolve_preset(preset_id)
