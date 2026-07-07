@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated, Any, AsyncIterator
 
 from langchain.agents.middleware import TodoListMiddleware
@@ -34,7 +35,8 @@ class AgentEngine:
         self._checkpointer = checkpointer
         self._store = store
         self._agents: dict[str, Any] = {}
-        self._agent_subagent_tools: dict[str, set[str]] = {}
+        # Maps agent cache_key → {tool_name: display_name} for sub-agent tools
+        self._agent_subagent_tools: dict[str, dict[str, str]] = {}
         self._current_preset: AgentPreset | None = None
         self._models: list[ModelInfo] = self._parse_models(config)
         self._presets: dict[str, AgentPreset] = {}
@@ -130,6 +132,19 @@ class AgentEngine:
             or preset_id in self._presets
         )
 
+    @staticmethod
+    def _sanitize_subagent_tool_name(preset_name: str, preset_id: str) -> str:
+        """Build a valid LLM function name from a preset name.
+
+        Keeps only ASCII alphanumeric, underscore, hyphen (valid for OpenAI).
+        Falls back to first 8 chars of preset_id if nothing remains.
+        """
+        ascii_only = preset_name.encode("ascii", "ignore").decode()
+        sanitized = re.sub(r"[^\w\-]", "_", ascii_only)
+        sanitized = re.sub(r"_+", "_", sanitized).strip("_-")[:40]
+        base = sanitized if sanitized else preset_id[:8]
+        return f"subagent_{base}"
+
     def _make_subagent_tool(
         self,
         subagent_id: str,
@@ -159,7 +174,7 @@ class AgentEngine:
             logger.warning("Could not build subagent %s: %s — skipping", subagent_id, exc)
             return None
 
-        agent_name = subagent_id
+        agent_name = self._sanitize_subagent_tool_name(subagent_preset.name, subagent_id)
         agent_desc = f"{subagent_preset.name}: {subagent_preset.system_prompt[:200]}"
 
         if has_injected:
@@ -286,7 +301,8 @@ class AgentEngine:
             kwargs["store"] = self._store
             kwargs["context_schema"] = AgentRuntimeContext
 
-        subagent_tool_names: set[str] = set()
+        # Maps tool_name → display_name for sub-agent detection and display
+        subagent_tool_map: dict[str, str] = {}
         if getattr(preset, "subagent_ids", None):
             max_depth = self.config.get("agent", {}).get("max_subagent_depth", 2)
             if _depth < max_depth:
@@ -294,8 +310,9 @@ class AgentEngine:
                 for sid in preset.subagent_ids:
                     sa_tool = self._make_subagent_tool(sid, _depth + 1, new_building)
                     if sa_tool is not None:
+                        sa_preset = self._resolve_preset(sid)
                         tools.append(sa_tool)
-                        subagent_tool_names.add(sid)
+                        subagent_tool_map[sa_tool.name] = sa_preset.name if sa_preset else sa_tool.name
 
         model_info = self._find_model(preset.default_model)
         effective_params = {**(preset.llm_params or {}), **(llm_params or {})}
@@ -329,7 +346,7 @@ class AgentEngine:
 
         resolved_cache_key = cache_key or preset.id
         self._agents[resolved_cache_key] = agent
-        self._agent_subagent_tools[resolved_cache_key] = subagent_tool_names
+        self._agent_subagent_tools[resolved_cache_key] = subagent_tool_map
         return agent
 
     def _build_tracing_async_client(self, model_info: ModelInfo | None, model_id: str):
@@ -478,14 +495,24 @@ class AgentEngine:
         llm_params: dict | None = None,
         _depth: int = 0,
     ) -> set[str]:
-        """Return the set of tool names that are sub-agents for the given preset."""
+        """Return the set of tool names (not IDs) that are sub-agents for the given preset."""
+        return set(self.get_subagent_display_name_map(preset_id, model_id=model_id, llm_params=llm_params, _depth=_depth).keys())
+
+    def get_subagent_display_name_map(
+        self,
+        preset_id: str,
+        model_id: str = "",
+        llm_params: dict | None = None,
+        _depth: int = 0,
+    ) -> dict[str, str]:
+        """Return {tool_name: display_name} for sub-agents of the given preset."""
         cache_key = self._get_agent_cache_key(
             preset_id,
             model_id if self._find_model(model_id) else "",
             llm_params=llm_params,
             _depth=_depth,
         )
-        return self._agent_subagent_tools.get(cache_key, set())
+        return self._agent_subagent_tools.get(cache_key, {})
 
     def invalidate_agent_cache(self, preset_id: str, keep_exact: bool = False) -> None:
         """Remove cached agents for a preset, including model/llm_params override variants."""

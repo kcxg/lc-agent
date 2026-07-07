@@ -259,9 +259,10 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
             except Exception as _e:
                 logger.warning("Failed to pre-build agent for subagent tool name lookup: %s", _e)
-            subagent_tool_names = engine.get_subagent_tool_names(
+            subagent_display_map = engine.get_subagent_display_name_map(
                 preset_id, model_id=model_id or "", llm_params=llm_params,
             )
+            subagent_tool_names = set(subagent_display_map.keys())
             _sa_writers: dict[str, dict] = {}
 
             if is_first:
@@ -305,11 +306,22 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                     in_thinking = stream_utils.accumulate_display_state(
                         event, content_parts, tool_calls, in_thinking,
                         subagent_tool_names=subagent_tool_names,
+                        thread_id=thread_id,
                     )
 
                     for evt_type, evt_data in stream_utils.convert_stream_event(
                         event, subagent_tool_names=subagent_tool_names,
                     ):
+                        # Enrich subagent_start with display name and sub_session_id before yielding
+                        if evt_type == "subagent_start":
+                            tool_name = evt_data.get("name", "")
+                            display_name = subagent_display_map.get(tool_name) or tool_name
+                            sa_tid_pre = evt_data["tool_call_id"]
+                            evt_data = {
+                                **evt_data,
+                                "name": display_name,
+                                "sub_session_id": f"{thread_id}/sa/{sa_tid_pre}",
+                            }
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()
 
@@ -502,9 +514,10 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
             except Exception as _e:
                 logger.warning("Failed to pre-build agent for subagent tool name lookup: %s", _e)
-            subagent_tool_names = engine.get_subagent_tool_names(
+            subagent_display_map = engine.get_subagent_display_name_map(
                 preset_id, model_id=model_id or "", llm_params=llm_params,
             )
+            subagent_tool_names = set(subagent_display_map.keys())
             from langgraph.types import Command
 
             agent = engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
@@ -551,11 +564,21 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                     in_thinking = stream_utils.accumulate_display_state(
                         event, content_parts, tool_calls, in_thinking,
                         subagent_tool_names=subagent_tool_names,
+                        thread_id=thread_id,
                     )
 
                     for evt_type, evt_data in stream_utils.convert_stream_event(
                         event, subagent_tool_names=subagent_tool_names,
                     ):
+                        if evt_type == "subagent_start":
+                            tool_name = evt_data.get("name", "")
+                            display_name = subagent_display_map.get(tool_name) or tool_name
+                            sa_tid_pre = evt_data["tool_call_id"]
+                            evt_data = {
+                                **evt_data,
+                                "name": display_name,
+                                "sub_session_id": f"{thread_id}/sa/{sa_tid_pre}",
+                            }
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()
 

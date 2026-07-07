@@ -157,6 +157,7 @@ def accumulate_display_state(
     tool_calls: list[dict[str, Any]],
     in_thinking: bool,
     subagent_tool_names: set[str] | None = None,
+    thread_id: str | None = None,
 ) -> bool:
     """Mirror the client display markers so history can replay the same layout.
 
@@ -205,6 +206,7 @@ def accumulate_display_state(
                 {k: v for k, v in tool_input_dict.items() if k != "tool_call_id"}
                 if isinstance(tool_input, dict) else tool_input
             )
+            sub_session_id = f"{thread_id}/sa/{sa_tc_id}" if thread_id else ""
             tool_idx = len(tool_calls)
             tool_calls.append({
                 "name": tool_name,
@@ -212,6 +214,7 @@ def accumulate_display_state(
                 "args": display_args,
                 "status": "running",
                 "is_subagent": True,
+                "sub_session_id": sub_session_id,
                 "startTime": int(time.time() * 1000),
             })
             content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
