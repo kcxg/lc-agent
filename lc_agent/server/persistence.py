@@ -236,3 +236,63 @@ async def append_to_last_assistant_message(
             await session.close()
     except Exception as e:
         print(f"[persistence] Failed to update last assistant message for {thread_id}: {e}")
+
+
+async def create_subsession(
+    db_url: str,
+    sub_session_id: str,
+    parent_session_id: str,
+    tool_call_id: str,
+    agent_id: str,
+    title: str,
+    user_id: str = "",
+) -> None:
+    """Create a sub-session record linked to its parent session."""
+    try:
+        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.models import SessionMeta
+
+        session = get_async_session(db_url)
+        try:
+            new_session = SessionMeta(
+                id=sub_session_id,
+                title=title,
+                agent_id=agent_id,
+                model="",
+                user_id=user_id,
+                message_count=0,
+                parent_session_id=parent_session_id,
+                tool_call_id=tool_call_id,
+            )
+            session.add(new_session)
+            await session.commit()
+        finally:
+            await session.close()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+
+
+async def save_subsession_delegation_message(
+    db_url: str,
+    sub_session_id: str,
+    query: str,
+) -> None:
+    """Insert the synthetic delegation message as the first message in a sub-session."""
+    await save_ui_message(db_url, sub_session_id, "system", f"委托任务: {query}")
+
+
+async def finalize_subsession_message(
+    db_url: str,
+    sub_session_id: str,
+    content: str,
+    tool_calls: list[dict] | None = None,
+    usage: dict | None = None,
+) -> None:
+    """Save the sub-agent's assistant message and increment message count."""
+    await save_ui_message(
+        db_url, sub_session_id, "assistant", content,
+        tool_calls=tool_calls,
+        usage=usage,
+    )
+    await increment_session_message_count(db_url, sub_session_id)
