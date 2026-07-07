@@ -215,6 +215,7 @@ class LcAgentApp:
                     allowed_mcp_servers=row.allowed_mcp_servers,
                     allowed_skills=row.allowed_skills,
                     llm_params=row.llm_params,
+                    subagent_ids=row.subagent_ids,
                 )
                 self.engine._presets[preset.id] = preset
             loaded = len(self.engine._presets)
