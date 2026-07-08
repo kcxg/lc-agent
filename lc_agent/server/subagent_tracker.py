@@ -1,0 +1,248 @@
+"""Sub-agent stream run tracking for SSE events."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from lc_agent.core.http_trace import pop_subagent_traces
+from lc_agent.server import persistence
+
+
+@dataclass
+class _SubAgentRun:
+    tool_call_id: str
+    sub_session_id: str
+    name: str
+    query: str
+    tokens: list[str] = field(default_factory=list)
+    thinking: list[str] = field(default_factory=list)
+    content_parts: list[str] = field(default_factory=list)
+    inner_tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    start_time: float = field(default_factory=time.time)
+    status: str = "running"
+    in_thinking: bool = False
+    http_traces: list[dict[str, Any]] | None = None
+
+
+class SubAgentRunTracker:
+    def __init__(
+        self,
+        *,
+        db_url: str,
+        parent_thread_id: str,
+        user_id: str,
+        subagent_display_map: dict[str, str],
+        tool_calls: list[dict[str, Any]],
+        existing_subsession_ids: set[str] | None = None,
+    ) -> None:
+        self.db_url = db_url
+        self.parent_thread_id = parent_thread_id
+        self.user_id = user_id
+        self.subagent_display_map = subagent_display_map
+        self.tool_calls = tool_calls
+        self.existing_subsession_ids = existing_subsession_ids or set()
+        self._runs: dict[str, _SubAgentRun] = {}
+        self._tasks: list[asyncio.Task[Any]] = []
+        self._run_persistence_tasks: dict[str, asyncio.Task[Any]] = {}
+
+    def handle_event(self, event_type: str, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        if event_type == "tool_call" and payload.get("is_subagent"):
+            return event_type, self._enrich_subagent_tool_call(payload)
+        if event_type == "subagent_start":
+            return event_type, self._handle_start(payload)
+        if event_type == "subagent_token":
+            self._handle_token(payload)
+            return event_type, payload
+        if event_type == "subagent_thinking":
+            self._handle_thinking(payload)
+            return event_type, payload
+        if event_type == "subagent_tool_call":
+            self._handle_tool_call(payload)
+            return event_type, payload
+        if event_type == "subagent_tool_result":
+            self._handle_tool_result(payload)
+            return event_type, payload
+        if event_type == "subagent_done":
+            return event_type, self._handle_done(payload)
+        return event_type, payload
+
+    def finalize_open_runs(self, status: str = "error") -> list[tuple[str, dict[str, Any]]]:
+        terminal_events: list[tuple[str, dict[str, Any]]] = []
+        for tool_call_id in list(self._runs.keys()):
+            terminal_events.append((
+                "subagent_done",
+                self._handle_done({"tool_call_id": tool_call_id, "status": status}),
+            ))
+        return terminal_events
+
+    async def drain(self) -> None:
+        while self._tasks:
+            tasks = self._tasks
+            self._tasks = []
+            await asyncio.gather(*tasks)
+
+    def _enqueue_persistence(self, tool_call_id: str, operation_factory: Callable[[], Awaitable[Any]]) -> None:
+        previous_task = self._run_persistence_tasks.get(tool_call_id)
+
+        async def run_ordered() -> None:
+            if previous_task is not None:
+                await previous_task
+            try:
+                await operation_factory()
+            finally:
+                if self._run_persistence_tasks.get(tool_call_id) is current_task:
+                    self._run_persistence_tasks.pop(tool_call_id, None)
+
+        current_task = asyncio.create_task(run_ordered())
+        self._run_persistence_tasks[tool_call_id] = current_task
+        self._tasks.append(current_task)
+
+    def _handle_start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        tool_call_id = payload["tool_call_id"]
+        raw_name = payload.get("name", "sub-agent")
+        display_name = self.subagent_display_map.get(raw_name, raw_name)
+        query = payload.get("query", "")
+        sub_session_id = f"{self.parent_thread_id}--sa--{tool_call_id}"
+        run = _SubAgentRun(
+            tool_call_id=tool_call_id,
+            sub_session_id=sub_session_id,
+            name=display_name,
+            query=query,
+        )
+        self._runs[tool_call_id] = run
+        existed = sub_session_id in self.existing_subsession_ids
+        self._mark_parent_tool_call(tool_call_id, display_name, sub_session_id)
+        if not existed:
+            self._enqueue_persistence(
+                tool_call_id,
+                lambda: persistence.create_subsession(
+                    self.db_url,
+                    sub_session_id,
+                    self.parent_thread_id,
+                    tool_call_id,
+                    display_name,
+                    f"{display_name}: {query}",
+                    self.user_id,
+                ),
+            )
+            self._enqueue_persistence(
+                tool_call_id,
+                lambda: persistence.save_subsession_delegation_message(
+                    self.db_url,
+                    sub_session_id,
+                    query,
+                ),
+            )
+        return {**payload, "name": display_name, "sub_session_id": sub_session_id}
+
+    def _handle_token(self, payload: dict[str, Any]) -> None:
+        run = self._runs.get(payload.get("tool_call_id"))
+        if run is not None:
+            content = payload.get("content", "")
+            if run.in_thinking:
+                run.content_parts.append("<!--THINK_END-->")
+                run.in_thinking = False
+            run.tokens.append(content)
+            run.content_parts.append(content)
+
+    def _handle_thinking(self, payload: dict[str, Any]) -> None:
+        run = self._runs.get(payload.get("tool_call_id"))
+        if run is not None:
+            content = payload.get("content", "")
+            if not run.in_thinking:
+                run.content_parts.append("<!--THINK_START-->")
+                run.in_thinking = True
+            run.thinking.append(content)
+            run.content_parts.append(content)
+
+    def _handle_tool_call(self, payload: dict[str, Any]) -> None:
+        run = self._runs.get(payload.get("tool_call_id"))
+        if run is None:
+            return
+        tool_index = len(run.inner_tool_calls)
+        run.inner_tool_calls.append({
+            "name": payload.get("name", ""),
+            "args": payload.get("args", {}),
+            "status": "running",
+            "startTime": int(time.time() * 1000),
+        })
+        if run.in_thinking:
+            run.content_parts.append("<!--THINK_END-->")
+            run.in_thinking = False
+        run.content_parts.append(f"\n<!--TOOL:{tool_index}-->\n")
+
+    def _handle_tool_result(self, payload: dict[str, Any]) -> None:
+        run = self._runs.get(payload.get("tool_call_id"))
+        if run is None:
+            return
+        tool_name = payload.get("name", "")
+        for tool_call in reversed(run.inner_tool_calls):
+            if tool_call.get("name") == tool_name and tool_call.get("status") == "running":
+                result = payload.get("result", "")
+                start_time = tool_call.get("startTime")
+                tool_call["status"] = "done"
+                tool_call["result"] = result
+                tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
+                tool_call["resultLength"] = len(result)
+                return
+
+    def _handle_done(self, payload: dict[str, Any]) -> dict[str, Any]:
+        tool_call_id = payload["tool_call_id"]
+        run = self._runs.pop(tool_call_id, None)
+        if run is None:
+            return payload
+        run.status = payload.get("status", "done")
+        content = self._build_content(run)
+        traces = pop_subagent_traces(run.sub_session_id) or None
+        run.http_traces = traces
+        self._enqueue_persistence(
+            tool_call_id,
+            lambda: persistence.finalize_subsession_message(
+                self.db_url,
+                run.sub_session_id,
+                content,
+                tool_calls=run.inner_tool_calls or None,
+                http_traces=traces,
+            ),
+        )
+        result_preview = content or payload.get("result_preview", "")
+        done_payload = {
+            **payload,
+            "result_preview": result_preview[:150],
+            "status": run.status,
+            "duration": int((time.time() - run.start_time) * 1000),
+            "tool_count": len(run.inner_tool_calls),
+            "token_count": len(run.tokens),
+        }
+        if traces:
+            done_payload["http_traces"] = traces
+        return done_payload
+
+    def _mark_parent_tool_call(self, tool_call_id: str, display_name: str, sub_session_id: str) -> None:
+        for tool_call in self.tool_calls:
+            if tool_call.get("runId") == tool_call_id or tool_call.get("run_id") == tool_call_id:
+                tool_call["is_subagent"] = True
+                tool_call["sub_session_id"] = sub_session_id
+                tool_call["name"] = display_name
+                return
+
+    def _enrich_subagent_tool_call(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw_name = payload.get("name", "sub-agent")
+        display_name = self.subagent_display_map.get(raw_name, raw_name)
+        tool_call_id = payload.get("run_id") or payload.get("runId") or payload.get("tool_call_id")
+        if not tool_call_id:
+            return {**payload, "name": display_name}
+        sub_session_id = f"{self.parent_thread_id}--sa--{tool_call_id}"
+        self._mark_parent_tool_call(tool_call_id, display_name, sub_session_id)
+        return {**payload, "name": display_name, "sub_session_id": sub_session_id}
+
+    @staticmethod
+    def _build_content(run: _SubAgentRun) -> str:
+        parts = list(run.content_parts)
+        if run.in_thinking:
+            parts.append("<!--THINK_END-->")
+        return "".join(parts)

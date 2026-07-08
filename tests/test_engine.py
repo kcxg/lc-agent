@@ -55,6 +55,29 @@ class TestAgentEngine:
         engine = AgentEngine(sample_config)
         assert engine.config == sample_config
 
+    def test_build_agent_configures_todo_middleware_final_answer_guard(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine
+
+        captured = {}
+        engine = AgentEngine(sample_config)
+
+        monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id, llm_params=None: object())
+        monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+
+        def fake_create_agent(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr("langchain.agents.create_agent", fake_create_agent)
+
+        engine.build_agent()
+
+        todo_middleware = captured["middleware"][0]
+        assert "After you start writing the substantive final answer" in todo_middleware.system_prompt
+        assert "do not call `write_todos` again" in todo_middleware.system_prompt
+        assert "Do not create todo items whose only purpose" in todo_middleware.tool_description
+        assert "If the only remaining todo is about producing the final answer" in todo_middleware.tool_description
+
     def test_build_agent_passes_memory_store_and_context_schema(self, sample_config, monkeypatch):
         from lc_agent.core.engine import AgentEngine
         from lc_agent.core.memory import AgentRuntimeContext

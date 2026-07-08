@@ -20,6 +20,7 @@ from lc_agent.mcp.manager import McpManager
 from lc_agent.server.app import create_app, mount_static_files
 from lc_agent.server import sse as sse_module
 from lc_agent.skills.filtered_loader import FilteredSkillLoader
+from lc_agent.utils.loggers import app_logger, mcp_logger
 
 
 def _resolve_sqlite_url(url: str, root: Path) -> str:
@@ -117,8 +118,8 @@ class LcAgentApp:
                 saver = AsyncSqliteSaver(conn)
                 await saver.setup()
                 self.engine._checkpointer = saver
-            except Exception as e:
-                print(f"[Warning] Checkpoint saver setup failed, using None: {e}")
+            except Exception:
+                app_logger.exception("Checkpoint saver setup failed, using None")
 
             memory_config = self.config.get("memory")
             if memory_config is None:
@@ -141,9 +142,9 @@ class LcAgentApp:
                     await self.mcp_manager.connect_all()
                     connected = [s for s in self.mcp_manager.servers if s.status == "connected"]
                     if connected:
-                        print(f"[MCP] Connected: {[s.name for s in connected]}")
-                except Exception as e:
-                    print(f"[MCP] Background connection error: {e}")
+                        mcp_logger.info("Connected MCP servers: %s", [s.name for s in connected])
+                except Exception:
+                    mcp_logger.exception("Background MCP connection error")
 
             asyncio.create_task(_connect_mcp_background())
             yield
@@ -158,7 +159,7 @@ class LcAgentApp:
         auth_config = self.config.get("auth", {})
         secret = auth_config.get("secret", "")
         if not secret:
-            print("[Auth] WARNING: auth.secret not configured, authentication DISABLED")
+            app_logger.warning("auth.secret not configured, authentication disabled")
             return
         if len(secret) < 16:
             raise ValueError("Auth secret must be at least 16 characters")
@@ -188,9 +189,9 @@ class LcAgentApp:
                 )
 
                 await db.commit()
-                print(f"[Auth] Created initial admin: admin / {password}")
+                app_logger.warning("Created initial admin user with default password; change it immediately")
             else:
-                print(f"[Auth] Admin user exists: {admin.username}")
+                app_logger.info("Admin user exists: %s", admin.username)
         finally:
             await db.close()
 
@@ -220,9 +221,9 @@ class LcAgentApp:
                 self.engine._presets[preset.id] = preset
             loaded = len(self.engine._presets)
             if loaded:
-                print(f"[Agents] Loaded {loaded} user presets from database")
+                app_logger.info("Loaded %s user presets from database", loaded)
         except Exception as e:
-            print(f"[Warning] Failed to load presets from DB: {e}")
+            app_logger.exception("Failed to load presets from DB")
         finally:
             await session.close()
 
@@ -258,9 +259,9 @@ class LcAgentApp:
         """Start the server (blocking)."""
         from lc_agent import __version__
 
-        print(f"\n  lc_agent v{__version__}")
-        print(f"  Web UI: http://{self.host}:{self.port}")
-        print(f"  API Docs: http://{self.host}:{self.port}/api/docs\n")
+        app_logger.info("lc_agent v%s", __version__)
+        app_logger.info("Web UI: http://%s:%s", self.host, self.port)
+        app_logger.info("API Docs: http://%s:%s/api/docs", self.host, self.port)
         uvicorn.run(self.fastapi_app, host=self.host, port=self.port)
 
 

@@ -503,7 +503,22 @@ function makeFallbackSubAgentEntry(item: ChatBubbleItem, toolIndex: number): Sub
   }
 }
 
+function getLiveToolCallIdFromSubSession(subSessionId: string): string | null {
+  const parts = subSessionId.split('--sa--')
+  if (parts.length < 2) return null
+  return parts.slice(1).join('--sa--')
+}
+
+function hasLiveSubAgentEntry(toolCallId: string): boolean {
+  return messages.value.some(msg => Boolean(msg.subAgents?.[toolCallId]))
+}
+
 function handleEnterSubAgent(subSessionId: string, name: string) {
+  if (chatStore.isStreaming) {
+    if (subLiveToolCallId.value !== null) return
+    const toolCallId = getLiveToolCallIdFromSubSession(subSessionId)
+    if (toolCallId && !hasLiveSubAgentEntry(toolCallId)) return
+  }
   sessionsStore.pushSubSession(subSessionId, name)
 }
 
@@ -735,13 +750,12 @@ watch(
 
     if (newLen > 0) {
       if (chatStore.isStreaming) {
-        // Live mode: stay connected to main SSE, render from SubAgentEntry in store.
-        // Extract tool_call_id from the sub_session_id (format: parentId--sa--toolCallId)
-        const parts = newId.split('--sa--')
-        if (parts.length >= 2) {
-          subLiveToolCallId.value = parts.slice(1).join('--sa--')
+        const toolCallId = getLiveToolCallIdFromSubSession(newId)
+        if (toolCallId && hasLiveSubAgentEntry(toolCallId)) {
+          subLiveToolCallId.value = toolCallId
+          return
         }
-        // Do NOT disconnect or load messages — main session continues streaming
+        sessionsStore.popSubSession()
         return
       }
       // Historical mode: load sub-session from DB

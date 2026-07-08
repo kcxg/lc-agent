@@ -7,6 +7,7 @@ from typing import Annotated, Any, AsyncIterator
 
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
+from langchain.agents.middleware.todo import WRITE_TODOS_SYSTEM_PROMPT, WRITE_TODOS_TOOL_DESCRIPTION
 
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
@@ -23,6 +24,40 @@ from langchain_core.tools import tool as lc_tool
 from lc_agent.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+TODO_FINAL_ANSWER_GUARD = """## Final Answer Guard for `write_todos`
+
+- Do not create todo items whose only purpose is to write, organize, summarize, or deliver the final answer.
+- Before writing the substantive final answer to the user, make your last necessary `write_todos` call.
+- After you start writing the substantive final answer, do not call `write_todos` again in the same turn.
+- If the only remaining todo is about producing the final answer, do not call `write_todos` just to mark it complete. Deliver the final answer directly.
+"""
+
+TODO_SYSTEM_PROMPT = f"{WRITE_TODOS_SYSTEM_PROMPT}\n\n{TODO_FINAL_ANSWER_GUARD}"
+TODO_TOOL_DESCRIPTION = f"{WRITE_TODOS_TOOL_DESCRIPTION}\n\n{TODO_FINAL_ANSWER_GUARD}"
+
+
+def _extract_subagent_result(messages: list[Any], limit: int = 2) -> str:
+    texts: list[str] = []
+    for msg in reversed(messages):
+        if getattr(msg, "type", None) != "ai":
+            continue
+        content = getattr(msg, "content", "")
+        if isinstance(content, str):
+            text = content.strip()
+        elif isinstance(content, list):
+            text = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            ).strip()
+        else:
+            text = str(content).strip()
+        if text:
+            texts.append(text)
+        if len(texts) >= limit:
+            break
+    # Subagents may emit the substantive answer, then update write_todos and emit a short closing message.
+    return "\n\n".join(reversed(texts))
 
 try:
     from langchain_core.tools import InjectedToolCallId
@@ -223,7 +258,7 @@ class AgentEngine:
                         config=sub_config,
                     )
                     msgs = result.get("messages", [])
-                    return msgs[-1].content if msgs else ""
+                    return _extract_subagent_result(msgs)
                 except Exception as exc:
                     logger.exception("Subagent %s failed: %s", subagent_id, exc)
                     return f"[Sub-agent error: {exc}]"
@@ -264,7 +299,7 @@ class AgentEngine:
                         config=sub_config,
                     )
                     msgs = result.get("messages", [])
-                    return msgs[-1].content if msgs else ""
+                    return _extract_subagent_result(msgs)
                 except Exception as exc:
                     logger.exception("Subagent %s failed: %s", subagent_id, exc)
                     return f"[Sub-agent error: {exc}]"
@@ -354,7 +389,10 @@ class AgentEngine:
 
         from langchain.agents import create_agent
 
-        middleware = [TodoListMiddleware()]
+        middleware = [TodoListMiddleware(
+            system_prompt=TODO_SYSTEM_PROMPT,
+            tool_description=TODO_TOOL_DESCRIPTION,
+        )]
         middleware.extend(self._build_summarization_middleware(preset))
 
         # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously

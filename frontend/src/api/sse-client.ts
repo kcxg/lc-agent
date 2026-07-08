@@ -12,6 +12,14 @@ export interface SseMessage {
   result?: string
   message?: string
   run_id?: string
+  tool_call_id?: string
+  sub_session_id?: string
+  query?: string
+  status?: 'running' | 'done' | 'error' | string
+  result_preview?: string
+  duration?: number
+  tool_count?: number
+  token_count?: number
   args?: Record<string, any>
   action_requests?: any[]
   review_configs?: any[]
@@ -25,6 +33,7 @@ export interface SseMessage {
   usage?: any[]
   http_traces?: any[]
   is_resume?: boolean
+  is_subagent?: boolean
   // error fields
   error_code?: string
   detail?: string

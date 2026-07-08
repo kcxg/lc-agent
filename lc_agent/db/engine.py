@@ -5,6 +5,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
+from lc_agent.utils.loggers import db_logger
+
 _engine = None
 _async_session_factory = None
 
@@ -65,9 +67,9 @@ def _add_missing_columns(connection):
                 ddl = f"ALTER TABLE {table.name} ADD COLUMN {col.name} {col_type}{nullable}{default}"
                 try:
                     connection.execute(text(ddl))
-                    print(f"[DB] Added missing column: {table.name}.{col.name} ({col_type})")
-                except Exception as e:
-                    print(f"[DB] Failed to add column {table.name}.{col.name}: {e}")
+                    db_logger.info("Added missing column: %s.%s (%s)", table.name, col.name, col_type)
+                except Exception:
+                    db_logger.exception("Failed to add column %s.%s", table.name, col.name)
 
 
 async def init_db(url: str = "sqlite+aiosqlite:///./lc_agent_data.db"):
@@ -100,7 +102,7 @@ async def init_db(url: str = "sqlite+aiosqlite:///./lc_agent_data.db"):
                 await conn.run_sync(_add_missing_columns)
             return
     except Exception as e:
-        print(f"[DB] Alembic migration failed, falling back to create_all: {e}")
+        db_logger.exception("Alembic migration failed, falling back to create_all")
 
     engine = get_async_engine(url)
     async with engine.begin() as conn:

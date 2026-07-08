@@ -6,6 +6,7 @@ from lc_agent.db.models_auth import User
 from lc_agent.db.repository import ChatUiMessageRepository, SessionRepository
 from lc_agent.server.auth_middleware import get_current_user
 from lc_agent.server.dependencies import get_db_session
+from lc_agent.utils.loggers import server_logger
 
 router = APIRouter(tags=["sessions"])
 
@@ -216,7 +217,7 @@ async def get_session_messages(
         paginated = result[checkpoint_offset:checkpoint_offset + limit]
         return {"total": len(result), "offset": checkpoint_offset, "limit": limit, "messages": paginated}
     except Exception as e:
-        print(f"[Sessions] Failed to load messages for {session_id}: {e}")
+        server_logger.exception("Failed to load messages for session %s", session_id)
         return {"total": 0, "offset": effective_offset, "limit": limit, "messages": []}
 
 

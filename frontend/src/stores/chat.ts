@@ -315,6 +315,192 @@ function mergeFinalUsageRounds(targetRounds: LlmRoundUsage[], rawRounds: any[]) 
   })
 }
 
+export interface SubAgentReducerResult {
+  changed: boolean
+  shouldRefresh: boolean
+}
+
+const SUBAGENT_UNCHANGED: SubAgentReducerResult = { changed: false, shouldRefresh: false }
+
+type SubAgentReducer = (
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+  parentThreadId?: string | null,
+) => SubAgentReducerResult
+
+function getSubAgentToolCallId(msg: SseMessage): string {
+  return msg.tool_call_id || msg.run_id || ''
+}
+
+function findSubAgentMessage(messages: ChatMessage[], toolCallId: string): ChatMessage | undefined {
+  if (!toolCallId) return undefined
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.role !== 'assistant') continue
+    if (message.subAgents?.[toolCallId]) return message
+    if (message.toolCalls?.some(t => t.runId === toolCallId)) return message
+  }
+  return undefined
+}
+
+export function applySubAgentEventToMessages(
+  messages: ChatMessage[],
+  msg: SseMessage,
+  reducer: SubAgentReducer,
+  parentThreadId?: string | null,
+): SubAgentReducerResult {
+  const toolCallId = getSubAgentToolCallId(msg)
+  const message = findSubAgentMessage(messages, toolCallId)
+  return reducer(message, msg, parentThreadId)
+}
+
+export function applySubAgentStart(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+  parentThreadId?: string | null,
+): SubAgentReducerResult {
+  if (!message || message.role !== 'assistant') return SUBAGENT_UNCHANGED
+
+  const toolCallId = msg.tool_call_id || msg.run_id || ''
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const subSessionId = msg.sub_session_id
+    || (parentThreadId ? `${parentThreadId}--sa--${toolCallId}` : '')
+
+  const entry: SubAgentEntry = {
+    tool_call_id: toolCallId,
+    name: msg.name || '',
+    sub_session_id: subSessionId,
+    query: msg.query || '',
+    status: 'running',
+    tokenPreview: '',
+    toolCallCount: 0,
+    tokenCount: 0,
+    tokens: '',
+    thinking: '',
+    thinkCount: 0,
+    innerToolCalls: [],
+  }
+  if (!message.subAgents) {
+    message.subAgents = {}
+  }
+  message.subAgents[toolCallId] = entry
+
+  const tc = message.toolCalls?.find(t => t.runId === toolCallId)
+  if (tc) {
+    tc.is_subagent = true
+    tc.sub_session_id = subSessionId
+  }
+  return { changed: true, shouldRefresh: true }
+}
+
+export function applySubAgentToken(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message?.subAgents) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents[toolCallId]
+  if (!sa) return SUBAGENT_UNCHANGED
+
+  const newCount = sa.tokenCount + 1
+  message.subAgents[toolCallId] = { ...sa, tokens: sa.tokens + (msg.content || ''), tokenCount: newCount }
+  return { changed: true, shouldRefresh: newCount % 3 === 0 }
+}
+
+export function applySubAgentThinking(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message?.subAgents) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents[toolCallId]
+  if (!sa) return SUBAGENT_UNCHANGED
+
+  const newThinkCount = sa.thinkCount + 1
+  message.subAgents[toolCallId] = {
+    ...sa,
+    thinking: sa.thinking + (msg.content || ''),
+    thinkCount: newThinkCount,
+  }
+  return { changed: true, shouldRefresh: newThinkCount % 5 === 0 }
+}
+
+export function applySubAgentToolCall(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message?.subAgents) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents[toolCallId]
+  if (!sa) return SUBAGENT_UNCHANGED
+
+  message.subAgents[toolCallId] = {
+    ...sa,
+    innerToolCalls: [...sa.innerToolCalls, {
+      name: msg.name || '',
+      status: 'running',
+      args: msg.args,
+    }],
+    toolCallCount: sa.toolCallCount + 1,
+  }
+  return { changed: true, shouldRefresh: true }
+}
+
+export function applySubAgentToolResult(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message?.subAgents) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents[toolCallId]
+  if (!sa) return SUBAGENT_UNCHANGED
+
+  const updatedCalls = [...sa.innerToolCalls]
+  const idx = [...updatedCalls].reverse().findIndex(
+    t => t.name === msg.name && t.status === 'running',
+  )
+  if (idx === -1) return SUBAGENT_UNCHANGED
+
+  const realIdx = updatedCalls.length - 1 - idx
+  updatedCalls[realIdx] = { ...updatedCalls[realIdx], result: msg.result, status: 'done' }
+  message.subAgents[toolCallId] = { ...sa, innerToolCalls: updatedCalls }
+  return { changed: true, shouldRefresh: true }
+}
+
+export function applySubAgentDone(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents?.[toolCallId]
+  const rawHttpTraces = msg.http_traces
+  const saHttpTraces = rawHttpTraces?.length ? normalizeHttpTraces(rawHttpTraces) : undefined
+  if (sa) {
+    message.subAgents![toolCallId] = {
+      ...sa,
+      status: msg.status === 'error' ? 'error' : 'done',
+      tokens: sa.tokens,
+      tokenPreview: sa.tokens || msg.result_preview || '',
+      duration: msg.duration ?? sa.duration,
+      httpTraces: saHttpTraces,
+    }
+  }
+  const tc = message.toolCalls?.find(t => t.runId === toolCallId)
+  if (tc) {
+    tc.status = msg.status === 'error' ? 'error' : 'done'
+    tc.result = sa?.tokens || msg.result_preview || ''
+    tc.duration = tc.startTime ? Date.now() - tc.startTime : msg.duration
+    tc.resultLength = (tc.result || '').length
+  }
+  return { changed: !!sa || !!tc, shouldRefresh: true }
+}
+
 export interface TodoItem {
   content: string
   status: 'pending' | 'in_progress' | 'completed'
@@ -450,8 +636,8 @@ export const useChatStore = defineStore('chat', () => {
           args: msg.args,
           status: 'running',
           startTime: Date.now(),
-          is_subagent: (msg as any).is_subagent,
-          sub_session_id: (msg as any).sub_session_id,
+          is_subagent: msg.is_subagent,
+          sub_session_id: msg.sub_session_id,
         }
         last.toolCalls.push(tc)
         last.content += `\n<!--TOOL:${tcIdx}-->\n`
@@ -478,146 +664,45 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     client.on('subagent_start', (msg: SseMessage) => {
-      const last = messages.value[messages.value.length - 1]
-      if (!last || last.role !== 'assistant') return
-
-      const toolCallId = (msg as any).tool_call_id || msg.run_id || ''
-      const subSessionId = (msg as any).sub_session_id
-        || (threadId.value ? `${threadId.value}--sa--${toolCallId}` : '')
-
-      const entry: SubAgentEntry = {
-        tool_call_id: toolCallId,
-        name: msg.name || '',
-        sub_session_id: subSessionId,
-        query: (msg as any).query || '',
-        status: 'running',
-        tokenPreview: '',
-        toolCallCount: 0,
-        tokenCount: 0,
-        tokens: '',
-        thinking: '',
-        thinkCount: 0,
-        innerToolCalls: [],
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentStart, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
       }
-      if (!last.subAgents) {
-        last.subAgents = {}
-      }
-      last.subAgents[toolCallId] = entry
-
-      const tc = last.toolCalls?.find(t => t.runId === toolCallId)
-      if (tc) {
-        tc.is_subagent = true
-        tc.sub_session_id = subSessionId
-      }
-      // Force Vue to detect the subAgents addition so SubAgentCard renders immediately
-      messages.value = [...messages.value]
     })
 
     client.on('subagent_token', (msg: SseMessage) => {
-      const last = messages.value[messages.value.length - 1]
-      if (!last?.subAgents) return
-      const toolCallId = (msg as any).tool_call_id
-      const sa = last.subAgents[toolCallId]
-      if (sa) {
-        const newCount = sa.tokenCount + 1
-        // Replace object reference so Vue detects prop change in SubAgentCard
-        last.subAgents[toolCallId] = { ...sa, tokens: sa.tokens + (msg.content || ''), tokenCount: newCount }
-        // Throttled re-render: every 3 tokens to balance freshness vs. performance
-        if (newCount % 3 === 0) {
-          messages.value = [...messages.value]
-        }
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentToken, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
       }
     })
 
     client.on('subagent_thinking', (msg: SseMessage) => {
-      const last = messages.value[messages.value.length - 1]
-      if (!last?.subAgents) return
-      const toolCallId = (msg as any).tool_call_id
-      const sa = last.subAgents[toolCallId]
-      if (sa) {
-        const newThinkCount = sa.thinkCount + 1
-        // Replace object reference so Vue prop change is detected
-        last.subAgents[toolCallId] = {
-          ...sa,
-          thinking: sa.thinking + (msg.content || ''),
-          thinkCount: newThinkCount,
-        }
-        // Throttle: trigger re-render every 5 thinking chunks
-        if (newThinkCount % 5 === 0) {
-          messages.value = [...messages.value]
-        }
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentThinking, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
       }
     })
 
     client.on('subagent_tool_call', (msg: SseMessage) => {
-      const last = messages.value[messages.value.length - 1]
-      if (!last?.subAgents) return
-      const toolCallId = (msg as any).tool_call_id
-      const sa = last.subAgents[toolCallId]
-      if (sa) {
-        // Replace the entire entry object so Vue detects the prop change in SubAgentCard
-        last.subAgents[toolCallId] = {
-          ...sa,
-          innerToolCalls: [...sa.innerToolCalls, {
-            name: msg.name || '',
-            status: 'running',
-            args: msg.args,
-          }],
-          toolCallCount: sa.toolCallCount + 1,
-        }
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentToolCall, threadId.value)
+      if (result.shouldRefresh) {
         messages.value = [...messages.value]
       }
     })
 
     client.on('subagent_tool_result', (msg: SseMessage) => {
-      const last = messages.value[messages.value.length - 1]
-      if (!last?.subAgents) return
-      const toolCallId = (msg as any).tool_call_id
-      const sa = last.subAgents[toolCallId]
-      if (sa) {
-        // Find the latest running tool call with this name and mark it done
-        const updatedCalls = [...sa.innerToolCalls]
-        const idx = [...updatedCalls].reverse().findIndex(
-          t => t.name === msg.name && t.status === 'running',
-        )
-        if (idx !== -1) {
-          const realIdx = updatedCalls.length - 1 - idx
-          updatedCalls[realIdx] = { ...updatedCalls[realIdx], result: msg.result, status: 'done' }
-          // Replace the entire entry object so Vue detects the change
-          last.subAgents[toolCallId] = { ...sa, innerToolCalls: updatedCalls }
-          messages.value = [...messages.value]
-        }
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentToolResult, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
       }
     })
 
     client.on('subagent_done', (msg: SseMessage) => {
-      const last = messages.value[messages.value.length - 1]
-      if (!last) return
-      const toolCallId = (msg as any).tool_call_id
-      const sa = last.subAgents?.[toolCallId]
-      const rawHttpTraces = (msg as any).http_traces
-      const saHttpTraces = rawHttpTraces?.length ? normalizeHttpTraces(rawHttpTraces) : undefined
-      if (sa) {
-        // Replace entry object so Vue re-renders SubAgentCard with final state.
-        // Fall back to accumulated tokens if backend result_preview is empty.
-        last.subAgents![toolCallId] = {
-          ...sa,
-          status: (msg as any).status === 'error' ? 'error' : 'done',
-          // Keep full accumulated tokens so done-state renders complete answer
-          tokens: sa.tokens,
-          tokenPreview: sa.tokens || (msg as any).result_preview || '',
-          duration: (msg as any).duration ?? sa.duration,
-          httpTraces: saHttpTraces,
-        }
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentDone, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
       }
-      const tc = last.toolCalls?.find(t => t.runId === toolCallId)
-      if (tc) {
-        tc.status = (msg as any).status === 'error' ? 'error' : 'done'
-        tc.result = sa?.tokens || (msg as any).result_preview || ''
-        tc.duration = tc.startTime ? Date.now() - tc.startTime : (msg as any).duration
-        tc.resultLength = (tc.result || '').length
-      }
-      messages.value = [...messages.value]
     })
 
     client.on('interrupt', (msg: SseMessage) => {
