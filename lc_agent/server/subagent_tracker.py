@@ -103,8 +103,12 @@ class SubAgentRunTracker:
 
     def _handle_start(self, payload: dict[str, Any]) -> dict[str, Any]:
         tool_call_id = payload["tool_call_id"]
-        raw_name = payload.get("name", "sub-agent")
-        display_name = self.subagent_display_map.get(raw_name, raw_name)
+        subagent_type = payload.get("subagent_type")
+        raw_name = payload.get("name") or subagent_type or "sub-agent"
+        if subagent_type:
+            display_name = self.subagent_display_map.get(subagent_type, raw_name)
+        else:
+            display_name = self.subagent_display_map.get(raw_name, raw_name)
         query = payload.get("query", "")
         sub_session_id = f"{self.parent_thread_id}--sa--{tool_call_id}"
         run = _SubAgentRun(
@@ -183,8 +187,9 @@ class SubAgentRunTracker:
         for tool_call in reversed(run.inner_tool_calls):
             if tool_call.get("name") == tool_name and tool_call.get("status") == "running":
                 result = payload.get("result", "")
+                status = payload.get("status") or ("error" if payload.get("is_error") else "done")
                 start_time = tool_call.get("startTime")
-                tool_call["status"] = "done"
+                tool_call["status"] = status
                 tool_call["result"] = result
                 tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
                 tool_call["resultLength"] = len(result)

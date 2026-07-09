@@ -41,6 +41,49 @@ expectIncludes('chat.ts', chatStore, 'changed: boolean')
 expectIncludes('chat.ts', chatStore, 'shouldRefresh: boolean')
 expectIncludes('chat.ts', chatStore, 'const SUBAGENT_UNCHANGED: SubAgentReducerResult = { changed: false, shouldRefresh: false }')
 
+const sseClient = read('src/api/sse-client.ts')
+const subAgentCard = read('src/components/chat/SubAgentCard.vue')
+const requiredSnippets = [
+  'subagent_start',
+  'is_subagent',
+  'sub_session_id',
+  'tool_call_id',
+]
+
+for (const snippet of requiredSnippets) {
+  expectIncludes('chat.ts', chatStore, snippet)
+}
+
+for (const snippet of ['subagent_type', 'query', 'description']) {
+  expectIncludes('sse-client.ts', sseClient, snippet)
+}
+
+const taskModeSubagentStart = {
+  type: 'subagent_start',
+  name: 'funboost教程查询智能体',
+  subagent_type: 'funboost教程查询智能体',
+  tool_call_id: 'task123',
+  query: '查询定时任务',
+}
+
+expectIncludes('chat.ts', chatStore, 'name: msg.name || msg.subagent_type ||')
+expectIncludes('chat.ts', chatStore, 'query: msg.query || msg.description ||')
+expectMatches(
+  'SubAgentCard.vue',
+  subAgentCard,
+  /\{\{\s*entry\.name\s*\}\}/,
+  '必须使用 subagent_start 提供的 display name 渲染标题',
+)
+expectNotMatches(
+  'SubAgentCard.vue',
+  subAgentCard,
+  /toolCall\.name|args\?\.name|args\?\.subagent_type/,
+  '不得从原始 task tool call 或 args 派生子 Agent 标题',
+)
+if (taskModeSubagentStart.name !== 'funboost教程查询智能体' || taskModeSubagentStart.tool_call_id !== 'task123') {
+  failures.push('task-mode subagent_start fixture 无效')
+}
+
 for (const [eventName, reducerName] of reducers) {
   expectIncludes('chat.ts', chatStore, `export function ${reducerName}(`)
   expectIncludes('chat.ts', chatStore, `client.on('${eventName}', (msg: SseMessage) => {`)
@@ -54,7 +97,9 @@ for (const [eventName, reducerName] of reducers) {
 }
 
 expectIncludes('chat.ts', chatStore, 'export function applySubAgentEventToMessages(')
-expectIncludes('chat.ts', chatStore, 'findSubAgentMessage(messages, toolCallId)')
+expectIncludes('chat.ts', chatStore, 'findSubAgentMessage(messages, toolCallId, msg.type === \'subagent_start\')')
+expectIncludes('chat.ts', chatStore, 'let lastAssistant: ChatMessage | undefined')
+expectIncludes('chat.ts', chatStore, 'if (allowLastAssistantFallback && message.role === \'assistant\' && !lastAssistant)')
 expectNotMatches(
   'chat.ts',
   chatStore,
@@ -65,13 +110,24 @@ expectNotMatches(
 expectIncludes('chat.ts', chatStore, 'const toolCallId = msg.tool_call_id || msg.run_id || \'\'')
 expectIncludes('chat.ts', chatStore, 'const subSessionId = msg.sub_session_id')
 expectIncludes('chat.ts', chatStore, '|| (parentThreadId ? `${parentThreadId}--sa--${toolCallId}` : \'\')')
+expectIncludes('chat.ts', chatStore, 'const existing = message.subAgents?.[toolCallId]')
+expectIncludes('chat.ts', chatStore, 'tokenPreview: existing?.tokenPreview || \'\'')
+expectIncludes('chat.ts', chatStore, 'innerToolCalls: existing?.innerToolCalls || []')
+expectIncludes('chat.ts', chatStore, 'httpTraces: existing?.httpTraces')
 expectIncludes('chat.ts', chatStore, 'tc.is_subagent = true')
+expectIncludes('chat.ts', chatStore, 'message.toolCalls = message.toolCalls || []')
+expectIncludes('chat.ts', chatStore, 'message.toolCalls.push(tc)')
+expectIncludes('chat.ts', chatStore, "status: 'running'")
 expectIncludes('chat.ts', chatStore, 'tc.sub_session_id = subSessionId')
 expectIncludes('chat.ts', chatStore, 'return { changed: true, shouldRefresh: newCount % 3 === 0 }')
 expectIncludes('chat.ts', chatStore, 'return { changed: true, shouldRefresh: newThinkCount % 5 === 0 }')
 expectIncludes('chat.ts', chatStore, 'innerToolCalls: [...sa.innerToolCalls, {')
 expectIncludes('chat.ts', chatStore, 'const idx = [...updatedCalls].reverse().findIndex(')
-expectIncludes('chat.ts', chatStore, 'status: msg.status === \'error\' ? \'error\' : \'done\'')
+expectIncludes('chat.ts', chatStore, "const resultStatus = msg.status === 'error' || msg.is_error ? 'error' : 'done'")
+expectIncludes('chat.ts', chatStore, 'status: resultStatus')
+expectIncludes('chat.ts', chatStore, "status: 'running' | 'done' | 'error' | 'cancelled' | 'interrupted'")
+expectIncludes('chat.ts', chatStore, "status === 'cancelled' || status === 'interrupted'")
+expectIncludes('chat.ts', chatStore, 'normalizeSubAgentDoneStatus(msg.status)')
 expectIncludes('chat.ts', chatStore, 'const rawHttpTraces = msg.http_traces')
 expectIncludes('chat.ts', chatStore, 'httpTraces: saHttpTraces')
 expectIncludes('chat.ts', chatStore, 'tc.result = sa?.tokens || msg.result_preview || \'\'')

@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 import re
 from typing import Annotated, Any, AsyncIterator
 
+from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
 from langchain.agents.middleware.todo import WRITE_TODOS_SYSTEM_PROMPT, WRITE_TODOS_TOOL_DESCRIPTION
@@ -35,6 +37,19 @@ TODO_FINAL_ANSWER_GUARD = """## Final Answer Guard for `write_todos`
 
 TODO_SYSTEM_PROMPT = f"{WRITE_TODOS_SYSTEM_PROMPT}\n\n{TODO_FINAL_ANSWER_GUARD}"
 TODO_TOOL_DESCRIPTION = f"{WRITE_TODOS_TOOL_DESCRIPTION}\n\n{TODO_FINAL_ANSWER_GUARD}"
+
+
+@dataclass(frozen=True)
+class SubAgentDescriptor:
+    subagent_type: str
+    preset_id: str
+    display_name: str
+    description: str
+
+
+_GENERAL_PURPOSE_DESCRIPTION = (
+    "当你需要一个与当前智能体能力相近、但在隔离上下文中并行处理复杂任务的工作线程时调用它。"
+)
 
 
 def _extract_subagent_result(messages: list[Any], limit: int = 2) -> str:
@@ -76,8 +91,8 @@ class AgentEngine:
         self._checkpointer = checkpointer
         self._store = store
         self._agents: dict[str, Any] = {}
-        # Maps agent cache_key → {tool_name: display_name} for sub-agent tools
-        self._agent_subagent_tools: dict[str, dict[str, str]] = {}
+        self._agent_subagent_tools: dict[str, set[str]] = {}
+        self._agent_subagent_display_map: dict[str, dict[str, str]] = {}
         self._current_preset: AgentPreset | None = None
         self._models: list[ModelInfo] = self._parse_models(config)
         self._presets: dict[str, AgentPreset] = {}
@@ -173,141 +188,145 @@ class AgentEngine:
             or preset_id in self._presets
         )
 
-    @staticmethod
-    def _sanitize_subagent_tool_name(preset_name: str, preset_id: str) -> str:
-        """Build a valid LLM function name from a preset name.
-
-        Keeps only ASCII alphanumeric, underscore, hyphen (valid for OpenAI).
-        Falls back to first 8 chars of preset_id if nothing remains.
-        """
-        ascii_only = preset_name.encode("ascii", "ignore").decode()
-        sanitized = re.sub(r"[^\w\-]", "_", ascii_only)
-        sanitized = re.sub(r"_+", "_", sanitized).strip("_-")[:28]
-        # Always append short preset_id suffix to guarantee uniqueness across presets
-        short_id = preset_id.replace("-", "")[:8]
-        base = f"{sanitized}_{short_id}" if sanitized else short_id
-        return f"subagent_{base}"
-
-    def _make_subagent_tool(
+    def _build_subagent_registry(
         self,
-        subagent_id: str,
+        preset: AgentPreset,
+        depth: int,
+        building_set: frozenset[str],
+    ) -> dict[str, SubAgentDescriptor]:
+        max_depth = self.config.get("agent", {}).get("max_subagent_depth", 2)
+        if depth >= max_depth:
+            return {}
+
+        registry: dict[str, SubAgentDescriptor] = {}
+        subagent_candidates: list[tuple[str, str]] = []
+        if getattr(preset, "subagents", None):
+            for subagent_link in preset.subagents:
+                subagent_candidates.append((
+                    subagent_link.agent_id,
+                    (subagent_link.delegation_description or "").strip(),
+                ))
+
+        for subagent_id, relationship_description in subagent_candidates:
+            if subagent_id in building_set:
+                logger.warning("Subagent circular reference detected: %s — skipping", subagent_id)
+                continue
+            if not self._preset_exists(subagent_id):
+                logger.warning("Subagent preset not found: %s — skipping", subagent_id)
+                continue
+            subagent_preset = self._resolve_preset(subagent_id)
+            display_name = subagent_preset.name
+            subagent_type = display_name
+            suffix = 1
+            while subagent_type in registry:
+                suffix += 1
+                subagent_type = f"{display_name}#{subagent_id.replace('-', '')[:8] or suffix}"
+            registry[subagent_type] = SubAgentDescriptor(
+                subagent_type=subagent_type,
+                preset_id=subagent_id,
+                display_name=display_name,
+                description=(
+                    relationship_description
+                    or (getattr(subagent_preset, "default_delegation_description", "") or "").strip()
+                    or display_name
+                ),
+            )
+
+        if getattr(preset, "enable_general_purpose_subagent", False):
+            gp_id = f"__gp__:{preset.id}"
+            gp_preset = preset.model_copy(update={
+                "id": gp_id,
+                "subagents": None,
+                "enable_general_purpose_subagent": False,
+            })
+            self._presets[gp_id] = gp_preset
+            registry["通用助手"] = SubAgentDescriptor(
+                subagent_type="通用助手",
+                preset_id=gp_id,
+                display_name="通用助手",
+                description=_GENERAL_PURPOSE_DESCRIPTION,
+            )
+
+        return registry
+
+    def _make_task_tool(
+        self,
+        registry: dict[str, SubAgentDescriptor],
         depth: int,
         building_set: frozenset[str],
     ):
-        """Wrap a sub-agent preset as an async langchain tool.
+        async def _run_subagent(subagent_type: str, description: str, config: RunnableConfig, tool_call_id: str) -> str:
+            descriptor = registry.get(subagent_type)
+            if descriptor is None:
+                available = ", ".join(sorted(registry))
+                return f"[Sub-agent error: Unknown subagent_type '{subagent_type}'. Available: {available}]"
 
-        Returns None if the sub-agent cannot be found or if circular dependency.
-        Propagates RunnableConfig so nested events appear in the parent stream.
-        """
-        has_injected = _HAS_INJECTED_TOOL_CALL_ID
+            try:
+                sub_agent = self._get_or_build_agent(descriptor.preset_id, _depth=depth)
+            except Exception as exc:
+                logger.exception("Subagent %s failed to build: %s", descriptor.preset_id, exc)
+                return f"[Sub-agent error: {exc}]"
 
-        if subagent_id in building_set:
-            logger.warning("Subagent circular reference detected: %s — skipping", subagent_id)
-            return None
+            configurable = (config or {}).get("configurable", {})
+            parent_tid = configurable.get("thread_id") or ""
+            lg_ns = configurable.get("checkpoint_ns", "")
+            tc_id = next(
+                (seg.split(":", 1)[1] for seg in lg_ns.split("|") if seg.startswith("tools:")),
+                tool_call_id,
+            )
+            sub_thread_id = f"{parent_tid}--sa--{tc_id}"
+            sub_config = {
+                **(config or {}),
+                "configurable": {
+                    **((config or {}).get("configurable") or {}),
+                    "thread_id": sub_thread_id,
+                    "sub_session_id": sub_thread_id,
+                },
+            }
 
-        if not self._preset_exists(subagent_id):
-            logger.warning("Subagent preset not found: %s — skipping", subagent_id)
-            return None
+            _sa_collector = HttpTraceCollector(provider=None, model=None)
+            _trace_token = bind_http_trace_collector(_sa_collector)
+            try:
+                result = await sub_agent.ainvoke(
+                    {"messages": [{"role": "user", "content": description}]},
+                    config=sub_config,
+                )
+                msgs = result.get("messages", [])
+                return _extract_subagent_result(msgs)
+            except Exception as exc:
+                logger.exception("Subagent %s failed: %s", descriptor.preset_id, exc)
+                return f"[Sub-agent error: {exc}]"
+            finally:
+                reset_http_trace_collector(_trace_token)
+                register_subagent_collector(sub_thread_id, _sa_collector)
 
-        subagent_preset = self._resolve_preset(subagent_id)
+        description_lines = [
+            "Delegate a task to one configured sub-agent.",
+            "Available subagents:",
+            "subagent_type: delegation_description",
+        ]
+        for descriptor in registry.values():
+            description_lines.append(f"{descriptor.subagent_type}: {descriptor.description}")
+        task_description = "\n".join(description_lines)
 
-        try:
-            sub_agent = self._get_or_build_agent(subagent_id, _depth=depth)
-        except Exception as exc:
-            logger.warning("Could not build subagent %s: %s — skipping", subagent_id, exc)
-            return None
-
-        agent_name = self._sanitize_subagent_tool_name(subagent_preset.name, subagent_id)
-        agent_desc = f"{subagent_preset.name}: {subagent_preset.system_prompt[:200]}"
-
-        if has_injected:
-            @lc_tool(agent_name, description=agent_desc)
-            async def _call_subagent(
-                query: str,
+        if _HAS_INJECTED_TOOL_CALL_ID:
+            @lc_tool("task", description=task_description)
+            async def task(
+                subagent_type: str,
+                description: str,
                 tool_call_id: Annotated[str, InjectedToolCallId],
                 config: RunnableConfig,
             ) -> str:
-                """Invoke a specialist sub-agent. Pass the full task as query."""
-                configurable = (config or {}).get("configurable", {})
-                parent_tid = configurable.get("thread_id") or ""
-                # Prefer the LangGraph task UUID extracted from checkpoint_ns
-                # (matches the sa_tid produced by stream_utils.py → sse.py).
-                lg_ns = configurable.get("checkpoint_ns", "")
-                tc_id = next(
-                    (seg.split(":", 1)[1] for seg in lg_ns.split("|") if seg.startswith("tools:")),
-                    tool_call_id,  # fallback to InjectedToolCallId
-                )
-                sub_thread_id = f"{parent_tid}--sa--{tc_id}"
-
-                sub_config = {
-                    **(config or {}),
-                    "configurable": {
-                        **((config or {}).get("configurable") or {}),
-                        "thread_id": sub_thread_id,
-                        "sub_session_id": sub_thread_id,
-                    },
-                }
-
-                # Isolate sub-agent HTTP traces so they don't pollute the parent session.
-                # After ainvoke, register collector so SSE can retrieve traces for the sub-session.
-                _sa_collector = HttpTraceCollector(provider=None, model=None)
-                _trace_token = bind_http_trace_collector(_sa_collector)
-                try:
-                    result = await sub_agent.ainvoke(
-                        {"messages": [{"role": "user", "content": query}]},
-                        config=sub_config,
-                    )
-                    msgs = result.get("messages", [])
-                    return _extract_subagent_result(msgs)
-                except Exception as exc:
-                    logger.exception("Subagent %s failed: %s", subagent_id, exc)
-                    return f"[Sub-agent error: {exc}]"
-                finally:
-                    reset_http_trace_collector(_trace_token)
-                    register_subagent_collector(sub_thread_id, _sa_collector)
+                return await _run_subagent(subagent_type, description, config, tool_call_id)
         else:
-            @lc_tool(agent_name, description=agent_desc)
-            async def _call_subagent(query: str, config: RunnableConfig) -> str:
-                """Invoke a specialist sub-agent. Pass the full task as query."""
+            @lc_tool("task", description=task_description)
+            async def task(subagent_type: str, description: str, config: RunnableConfig) -> str:
                 import uuid
 
-                configurable = (config or {}).get("configurable", {})
-                parent_tid = configurable.get("thread_id") or ""
-                lg_ns = configurable.get("checkpoint_ns", "")
-                tc_id = next(
-                    (seg.split(":", 1)[1] for seg in lg_ns.split("|") if seg.startswith("tools:")),
-                    configurable.get("tool_call_id") or uuid.uuid4().hex,
-                )
-                sub_thread_id = f"{parent_tid}--sa--{tc_id}"
+                tool_call_id = ((config or {}).get("configurable") or {}).get("tool_call_id") or uuid.uuid4().hex
+                return await _run_subagent(subagent_type, description, config, tool_call_id)
 
-                sub_config = {
-                    **(config or {}),
-                    "configurable": {
-                        **((config or {}).get("configurable") or {}),
-                        "thread_id": sub_thread_id,
-                        "sub_session_id": sub_thread_id,
-                    },
-                }
-
-                # Isolate sub-agent HTTP traces so they don't pollute the parent session.
-                # After ainvoke, register collector so SSE can retrieve traces for the sub-session.
-                _sa_collector = HttpTraceCollector(provider=None, model=None)
-                _trace_token = bind_http_trace_collector(_sa_collector)
-                try:
-                    result = await sub_agent.ainvoke(
-                        {"messages": [{"role": "user", "content": query}]},
-                        config=sub_config,
-                    )
-                    msgs = result.get("messages", [])
-                    return _extract_subagent_result(msgs)
-                except Exception as exc:
-                    logger.exception("Subagent %s failed: %s", subagent_id, exc)
-                    return f"[Sub-agent error: {exc}]"
-                finally:
-                    reset_http_trace_collector(_trace_token)
-                    register_subagent_collector(sub_thread_id, _sa_collector)
-
-        return _call_subagent
+        return task
 
     def build_agent(
         self,
@@ -370,24 +389,21 @@ class AgentEngine:
             kwargs["store"] = self._store
             kwargs["context_schema"] = AgentRuntimeContext
 
-        # Maps tool_name → display_name for sub-agent detection and display
-        subagent_tool_map: dict[str, str] = {}
-        if getattr(preset, "subagent_ids", None):
-            max_depth = self.config.get("agent", {}).get("max_subagent_depth", 2)
-            if _depth < max_depth:
-                new_building = (building_set or frozenset()) | {preset.id}
-                for sid in preset.subagent_ids:
-                    sa_tool = self._make_subagent_tool(sid, _depth + 1, new_building)
-                    if sa_tool is not None:
-                        sa_preset = self._resolve_preset(sid)
-                        tools.append(sa_tool)
-                        subagent_tool_map[sa_tool.name] = sa_preset.name if sa_preset else sa_tool.name
+        new_building = (building_set or frozenset()) | {preset.id}
+        subagent_registry = self._build_subagent_registry(preset, depth=_depth, building_set=new_building)
+        subagent_tool_names: set[str] = set()
+        subagent_display_map: dict[str, str] = {}
+        if subagent_registry:
+            tools.append(self._make_task_tool(subagent_registry, _depth + 1, new_building))
+            subagent_tool_names = {"task"}
+            subagent_display_map = {
+                descriptor.subagent_type: descriptor.display_name
+                for descriptor in subagent_registry.values()
+            }
 
         model_info = self._find_model(preset.default_model)
         effective_params = {**(preset.llm_params or {}), **(llm_params or {})}
         llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
-
-        from langchain.agents import create_agent
 
         middleware = [TodoListMiddleware(
             system_prompt=TODO_SYSTEM_PROMPT,
@@ -419,7 +435,8 @@ class AgentEngine:
 
         resolved_cache_key = cache_key or preset.id
         self._agents[resolved_cache_key] = agent
-        self._agent_subagent_tools[resolved_cache_key] = subagent_tool_map
+        self._agent_subagent_tools[resolved_cache_key] = subagent_tool_names
+        self._agent_subagent_display_map[resolved_cache_key] = subagent_display_map
         return agent
 
     def _build_tracing_async_client(self, model_info: ModelInfo | None, model_id: str):
@@ -569,7 +586,13 @@ class AgentEngine:
         _depth: int = 0,
     ) -> set[str]:
         """Return the set of tool names (not IDs) that are sub-agents for the given preset."""
-        return set(self.get_subagent_display_name_map(preset_id, model_id=model_id, llm_params=llm_params, _depth=_depth).keys())
+        cache_key = self._get_agent_cache_key(
+            preset_id,
+            model_id if self._find_model(model_id) else "",
+            llm_params=llm_params,
+            _depth=_depth,
+        )
+        return self._agent_subagent_tools.get(cache_key, set())
 
     def get_subagent_display_name_map(
         self,
@@ -585,7 +608,7 @@ class AgentEngine:
             llm_params=llm_params,
             _depth=_depth,
         )
-        return self._agent_subagent_tools.get(cache_key, {})
+        return self._agent_subagent_display_map.get(cache_key, {})
 
     def invalidate_agent_cache(self, preset_id: str, keep_exact: bool = False) -> None:
         """Remove cached agents for a preset, including model/llm_params override variants."""
@@ -599,12 +622,14 @@ class AgentEngine:
             self._agents.pop(key, None)
             self._agent_mcp_gen.pop(key, None)
             self._agent_subagent_tools.pop(key, None)
+            self._agent_subagent_display_map.pop(key, None)
 
     def invalidate_all_agents(self) -> None:
         """Remove all cached agents, forcing rebuild on next use."""
         self._agents.clear()
         self._agent_mcp_gen.clear()
         self._agent_subagent_tools.clear()
+        self._agent_subagent_display_map.clear()
 
     def _resolve_preset_for_model(self, preset_id: str, model_id: str = "") -> AgentPreset:
         preset = self._resolve_preset(preset_id)

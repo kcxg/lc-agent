@@ -199,7 +199,7 @@ class LcAgentApp:
         """Load user-created presets from database on startup."""
         from lc_agent.db.engine import get_async_session
         from lc_agent.db.models import AgentPresetDB
-        from lc_agent.core.models import AgentPreset
+        from lc_agent.core.models import AgentPreset, SubAgentLink
         from sqlalchemy import select
 
         session = get_async_session(self._db_url)
@@ -216,7 +216,8 @@ class LcAgentApp:
                     allowed_mcp_servers=row.allowed_mcp_servers,
                     allowed_skills=row.allowed_skills,
                     llm_params=row.llm_params,
-                    subagent_ids=row.subagent_ids,
+                    subagents=[SubAgentLink.model_validate(item) for item in row.subagents] if row.subagents else None,
+                    enable_general_purpose_subagent=row.enable_general_purpose_subagent,
                 )
                 self.engine._presets[preset.id] = preset
             loaded = len(self.engine._presets)
@@ -227,13 +228,14 @@ class LcAgentApp:
         finally:
             await session.close()
 
-    def add_agent(self, name: str, graph, description: str = ""):
+    def add_agent(self, name: str, graph, description: str = "", delegation_description: str = ""):
         """Register a pre-built CompiledStateGraph as a named agent.
 
         Args:
             name: Unique agent identifier
             graph: A compiled LangGraph (must have ainvoke and astream_events)
             description: Human-readable description
+            delegation_description: Default delegation guidance for parent agents
         """
         if name in self.engine._agents:
             raise ValueError(f"Agent '{name}' already registered")
@@ -247,6 +249,7 @@ class LcAgentApp:
             name=name,
             system_prompt=description or f"Custom agent: {name}",
             default_model="custom",
+            default_delegation_description=delegation_description,
             allowed_tool_groups=[],
             allowed_mcp_servers=[],
             allowed_skills=[],
@@ -263,5 +266,3 @@ class LcAgentApp:
         app_logger.info("Web UI: http://%s:%s", self.host, self.port)
         app_logger.info("API Docs: http://%s:%s/api/docs", self.host, self.port)
         uvicorn.run(self.fastapi_app, host=self.host, port=self.port)
-
-

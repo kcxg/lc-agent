@@ -77,6 +77,7 @@ def test_subagent_start_emitted_for_subagent_tools_with_single_segment_namespace
                 "name": "research_expert",
                 "tool_call_id": "task123",
                 "query": "quantum",
+                "subagent_type": "research_expert",
             },
         ),
     ]
@@ -98,6 +99,36 @@ def test_subagent_done_instead_of_tool_result_with_single_segment_namespace():
                 "tool_call_id": "task123",
                 "result_preview": "research result",
                 "status": "done",
+                "is_error": False,
+            },
+        )
+    ]
+
+
+def test_task_mode_subagent_error_end_sets_explicit_error_flag():
+    event = {
+        "event": "on_tool_end",
+        "name": "task",
+        "run_id": "run123",
+        "metadata": {"langgraph_checkpoint_ns": "tools:task123"},
+        "data": {"output": "[Sub-agent error: boom]"},
+    }
+
+    results = convert_stream_event(
+        event,
+        subagent_tool_names={"task"},
+        subagent_display_map={"research_expert": "研究专家"},
+        active_subagent_tool_call_ids={"task123"},
+    )
+
+    assert results == [
+        (
+            "subagent_done",
+            {
+                "tool_call_id": "task123",
+                "result_preview": "[Sub-agent error: boom]",
+                "status": "error",
+                "is_error": True,
             },
         )
     ]
@@ -120,7 +151,38 @@ def test_subagent_internal_tool_call_and_result():
         ("subagent_tool_call", {"tool_call_id": "abc123", "name": "web_search", "args": {"q": "quantum"}})
     ]
     assert convert_stream_event(end_event, subagent_tool_names={"research_expert"}) == [
-        ("subagent_tool_result", {"tool_call_id": "abc123", "name": "web_search", "result": "found"})
+        (
+            "subagent_tool_result",
+            {
+                "tool_call_id": "abc123",
+                "name": "web_search",
+                "result": "found",
+                "status": "done",
+                "is_error": False,
+            },
+        )
+    ]
+
+
+def test_subagent_internal_tool_error_result_has_explicit_status():
+    event = {
+        "event": "on_tool_end",
+        "name": "web_search",
+        "metadata": {"langgraph_checkpoint_ns": "tools:abc123|tools:inner456"},
+        "data": {"output": "[Tool error: boom]"},
+    }
+
+    assert convert_stream_event(event, subagent_tool_names={"research_expert"}) == [
+        (
+            "subagent_tool_result",
+            {
+                "tool_call_id": "abc123",
+                "name": "web_search",
+                "result": "[Tool error: boom]",
+                "status": "error",
+                "is_error": True,
+            },
+        )
     ]
 
 
@@ -178,6 +240,7 @@ def test_subagent_tool_without_namespace_falls_back_to_run_id():
                 "name": "research_expert",
                 "tool_call_id": "run123",
                 "query": "quantum",
+                "subagent_type": "research_expert",
             },
         ),
     ]
@@ -188,6 +251,7 @@ def test_subagent_tool_without_namespace_falls_back_to_run_id():
                 "tool_call_id": "run123",
                 "result_preview": "research result",
                 "status": "done",
+                "is_error": False,
             },
         )
     ]

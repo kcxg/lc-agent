@@ -13,7 +13,7 @@ depends_on = None
 
 def upgrade() -> None:
     with op.batch_alter_table("agent_presets") as batch_op:
-        batch_op.add_column(sa.Column("subagent_ids", sa.JSON(), nullable=True))
+        batch_op.add_column(sa.Column("subagents", sa.JSON(), nullable=True))
 
     with op.batch_alter_table("sessions") as batch_op:
         batch_op.add_column(sa.Column("parent_session_id", sa.String(), nullable=True))

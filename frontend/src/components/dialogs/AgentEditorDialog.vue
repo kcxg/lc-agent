@@ -3,6 +3,7 @@
     v-model="visible"
     :title="isEdit ? '编辑 Agent' : '新建 Agent'"
     width="600px"
+    class="agent-editor-dialog"
     :close-on-click-modal="false"
   >
     <el-alert v-if="isCodeAgent" type="warning" :closable="false" style="margin-bottom: 12px">
@@ -167,17 +168,27 @@
 
         <el-tab-pane label="子Agent" name="subagents">
           <div class="subagent-picker">
+            <div class="general-purpose-subagent">
+              <el-checkbox v-model="form.enable_general_purpose_subagent">
+                <span style="font-weight: 600;">启用通用子 Agent</span>
+              </el-checkbox>
+              <p class="picker-hint" style="font-size:12px; color: var(--el-text-color-secondary); margin: 4px 0 12px 24px;">
+                让当前 Agent 可以把复杂任务委派给一个同能力的隔离 worker。该 worker 不会继续调用 task。
+              </p>
+            </div>
             <p class="picker-hint" style="font-size:12px; color: var(--el-text-color-secondary); margin-bottom: 12px;">
-              选择其他 Agent 作为该 Agent 的专业子 Agent（被调用时作为工具执行）
+              选择专业子 Agent，并为每个子 Agent 填写委派说明。
             </p>
-            <el-checkbox-group v-model="form.subagent_ids" class="subagent-list">
+            <div class="subagent-list">
               <div
                 v-for="sa in availableSubagents"
                 :key="sa.id"
                 class="subagent-item"
-                style="display: flex; flex-direction: column; margin-bottom: 8px;"
               >
-                <el-checkbox :value="sa.id">
+                <el-checkbox
+                  :model-value="isSubagentSelected(sa.id)"
+                  @update:model-value="toggleSubagent(sa.id, $event)"
+                >
                   <span class="sa-item-name" style="font-weight: 600;">{{ sa.name }}</span>
                   <el-tag
                     size="small"
@@ -190,8 +201,21 @@
                 <span v-if="sa.description" class="sa-item-desc">
                   {{ sa.description }}
                 </span>
+                <div v-if="isSubagentSelected(sa.id)" class="subagent-delegation-section">
+                  <p class="subagent-delegation-help">
+                    填写该子 Agent 适合处理什么任务，以便主 Agent 能在正确、合适的时机触发调用它，作用类似 Skill 的 description；不能为空。
+                  </p>
+                  <el-input
+                    :model-value="getSubagentDelegationDescription(sa.id)"
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 4 }"
+                    placeholder="例如：当对话涉及数据分析、报表生成时调用它"
+                    class="subagent-delegation-input"
+                    @update:model-value="setSubagentDelegationDescription(sa.id, $event)"
+                  />
+                </div>
               </div>
-            </el-checkbox-group>
+            </div>
             <el-empty
               v-if="availableSubagents.length === 0"
               description="暂无可用的子 Agent"
@@ -235,9 +259,10 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { fetchAvailableSubagents } from '@/api/http'
 import { useToolsStore } from '@/stores/tools'
-import { useAgentsStore, type AgentPreset } from '@/stores/agents'
+import { useAgentsStore, type AgentPreset, type AgentSubagentConfig } from '@/stores/agents'
 
 const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
 
@@ -265,7 +290,8 @@ const form = ref({
   system_prompt: '',
   default_model: '',
   llm_params: null as Record<string, any> | null,
-  subagent_ids: [] as string[],
+  subagents: [] as AgentSubagentConfig[],
+  enable_general_purpose_subagent: false,
 })
 
 async function open(agent?: AgentPreset) {
@@ -282,7 +308,8 @@ async function open(agent?: AgentPreset) {
     form.value.system_prompt = agent.system_prompt
     form.value.default_model = agent.default_model
     form.value.llm_params = agent.llm_params ?? null
-    form.value.subagent_ids = agent.subagent_ids ? [...agent.subagent_ids] : []
+    form.value.subagents = agent.subagents ? agent.subagents.map(item => ({ ...item })) : []
+    form.value.enable_general_purpose_subagent = agent.enable_general_purpose_subagent ?? false
 
     if (agent.allowed_tool_groups === null) {
       toolGroupMode.value = 'all'
@@ -321,7 +348,14 @@ async function open(agent?: AgentPreset) {
     editingId.value = ''
     editingSource.value = 'user'
     isCodeAgent.value = false
-    form.value = { name: '', system_prompt: '', default_model: toolsStore.currentModel, llm_params: null, subagent_ids: [] }
+    form.value = {
+      name: '',
+      system_prompt: '',
+      default_model: toolsStore.currentModel,
+      llm_params: null,
+      subagents: [],
+      enable_general_purpose_subagent: false,
+    }
     toolGroupMode.value = 'none'
     selectedGroups.value = []
     mcpMode.value = 'none'
@@ -350,6 +384,17 @@ async function handleSave() {
       skillsMode.value === 'none' ? [] :
       selectedSkills.value
 
+    if (form.value.subagents.some(item => !item.delegation_description.trim())) {
+      activeTab.value = 'subagents'
+      ElMessage.error('每个已选择的子 Agent 都必须填写非空的委派说明')
+      return
+    }
+
+    const normalizedSubagents = form.value.subagents.map(item => ({
+      agent_id: item.agent_id,
+      delegation_description: item.delegation_description.trim(),
+    }))
+
     const data = {
       name: form.value.name,
       system_prompt: form.value.system_prompt,
@@ -358,7 +403,8 @@ async function handleSave() {
       allowed_mcp_servers,
       allowed_skills,
       llm_params: form.value.llm_params || null,
-      subagent_ids: form.value.subagent_ids.length > 0 ? form.value.subagent_ids : null,
+      subagents: normalizedSubagents.length > 0 ? normalizedSubagents : null,
+      enable_general_purpose_subagent: form.value.enable_general_purpose_subagent,
     }
 
     if (isEdit.value) {
@@ -375,6 +421,30 @@ async function handleSave() {
 async function handleDelete() {
   await agentsStore.deleteAgent(editingId.value)
   visible.value = false
+}
+
+function isSubagentSelected(agentId: string) {
+  return form.value.subagents.some(item => item.agent_id === agentId)
+}
+
+function getSubagentDelegationDescription(agentId: string) {
+  return form.value.subagents.find(item => item.agent_id === agentId)?.delegation_description || ''
+}
+
+function toggleSubagent(agentId: string, checked: boolean | string | number) {
+  if (checked) {
+    if (!isSubagentSelected(agentId)) {
+      form.value.subagents.push({ agent_id: agentId, delegation_description: '' })
+    }
+    return
+  }
+  form.value.subagents = form.value.subagents.filter(item => item.agent_id !== agentId)
+}
+
+function setSubagentDelegationDescription(agentId: string, value: string | number) {
+  const item = form.value.subagents.find(entry => entry.agent_id === agentId)
+  if (!item) return
+  item.delegation_description = String(value)
 }
 
 function _ensureLlmParams() {
@@ -482,9 +552,9 @@ defineExpose({ open })
 }
 
 .subagent-list {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   width: 100%;
 }
 
@@ -492,6 +562,10 @@ defineExpose({ open })
   display: flex;
   flex-direction: column;
   width: 100%;
+  padding: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-extra-light);
 }
 
 .subagent-item :deep(.el-checkbox) {
@@ -512,6 +586,27 @@ defineExpose({ open })
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+.subagent-delegation-section {
+  margin-top: 8px;
+  margin-left: 22px;
+  padding-right: 10px;
+}
+
+.subagent-delegation-help {
+  margin-top: 0;
+  margin-left: 0;
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+
+.subagent-delegation-input {
+  margin-top: 0;
+  margin-left: 0;
+}
+
 .code-agent-readonly {
   padding: 12px;
   border: 1px solid var(--el-border-color-lighter);
@@ -541,6 +636,34 @@ defineExpose({ open })
   color: var(--el-text-color-primary);
   font-size: 13px;
   text-align: right;
+}
+
+:deep(.agent-editor-dialog) {
+  max-width: min(600px, calc(100vw - 24px));
+}
+
+@media (max-width: 768px) {
+  .subagent-item {
+    padding: 10px 8px;
+  }
+
+  .sa-item-desc {
+    margin-left: 0;
+  }
+
+  .subagent-delegation-section {
+    margin-left: 0;
+    padding-right: 0;
+  }
+
+  .subagent-delegation-help {
+    margin-left: 0;
+  }
+
+  .subagent-delegation-input {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 
 </style>

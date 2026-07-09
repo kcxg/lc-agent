@@ -3,6 +3,7 @@
     v-model="visible"
     :title="dialogTitle"
     width="500px"
+    class="interrupt-dialog"
     :close-on-click-modal="false"
     :close-on-press-escape="false"
     :show-close="false"
@@ -242,6 +243,12 @@ function reject() {
 
 .free-input {
   margin-top: 8px;
+  width: 100%;
+}
+
+.free-input :deep(.el-input__wrapper),
+.free-input :deep(.el-textarea__inner) {
+  box-sizing: border-box;
 }
 
 .tool-display-name {
@@ -280,5 +287,47 @@ function reject() {
 
 .expand-btn {
   margin-top: 4px;
+}
+
+.dialog-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+:deep(.interrupt-dialog) {
+  max-width: min(500px, calc(100vw - 24px));
+}
+
+@media (max-width: 768px) {
+  .ask-question {
+    font-size: 14px;
+  }
+
+  .action-item {
+    padding: 10px;
+  }
+
+  .action-args {
+    font-size: 11px;
+    max-height: 40vh;
+  }
+
+  .dialog-footer-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .dialog-footer-actions .el-button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .option-btn {
+    width: 100%;
+    margin-left: 0;
+  }
 }
 </style>

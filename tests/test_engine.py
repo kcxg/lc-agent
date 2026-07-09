@@ -1,7 +1,7 @@
 # tests/test_engine.py
 import pytest
 
-from lc_agent.core.models import AgentPreset, ModelInfo
+from lc_agent.core.models import AgentPreset, ModelInfo, SubAgentLink
 
 
 class TestAgentPreset:
@@ -36,6 +36,27 @@ class TestAgentPreset:
         )
         assert preset.allowed_tool_groups == ["math", "text"]
 
+    def test_accepts_subagent_links(self):
+        preset = AgentPreset(
+            id="p1",
+            name="主智能体",
+            system_prompt="x",
+            default_model="m1",
+            subagents=[
+                SubAgentLink(
+                    agent_id="child-1",
+                    delegation_description="当你需要查询 funboost 知识时调用它",
+                )
+            ],
+        )
+        assert preset.subagents is not None
+        assert preset.subagents[0].agent_id == "child-1"
+        assert preset.subagents[0].delegation_description == "当你需要查询 funboost 知识时调用它"
+
+    def test_subagents_defaults_to_none(self):
+        preset = AgentPreset(id="p1", name="n", system_prompt="x", default_model="m1")
+        assert preset.subagents is None
+
 
 class TestModelInfo:
     def test_creates_model_info(self):
@@ -68,7 +89,7 @@ class TestAgentEngine:
             captured.update(kwargs)
             return object()
 
-        monkeypatch.setattr("langchain.agents.create_agent", fake_create_agent)
+        monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
 
         engine.build_agent()
 
@@ -93,7 +114,7 @@ class TestAgentEngine:
             captured.update(kwargs)
             return FakeAgent()
 
-        monkeypatch.setattr("langchain.agents.create_agent", fake_create_agent)
+        monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
 
         engine.build_agent(cache_key="memory-test")
 
@@ -125,7 +146,7 @@ class TestAgentEngine:
             captured.update(kwargs)
             return object()
 
-        monkeypatch.setattr("langchain.agents.create_agent", fake_create_agent)
+        monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
 
         engine.build_agent()
 

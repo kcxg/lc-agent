@@ -33,6 +33,48 @@ def test_tracker_enriches_subagent_tool_call_event():
 
 
 @pytest.mark.asyncio
+async def test_tracker_start_uses_task_payload_display_name(monkeypatch):
+    from lc_agent.server import subagent_tracker
+    from lc_agent.server.subagent_tracker import SubAgentRunTracker
+
+    async def fake_noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(subagent_tracker.persistence, "create_subsession", fake_noop)
+    monkeypatch.setattr(subagent_tracker.persistence, "save_subsession_delegation_message", fake_noop)
+
+    tool_calls = [{"name": "funboost教程查询智能体", "runId": "task123", "status": "running"}]
+    tracker = SubAgentRunTracker(
+        db_url="db",
+        parent_thread_id="parent1",
+        user_id="",
+        subagent_display_map={"funboost": "funboost教程查询智能体"},
+        tool_calls=tool_calls,
+    )
+
+    event_type, payload = tracker.handle_event(
+        "subagent_start",
+        {
+            "name": "funboost教程查询智能体",
+            "subagent_type": "funboost",
+            "tool_call_id": "task123",
+            "query": "查询定时任务",
+        },
+    )
+
+    assert event_type == "subagent_start"
+    assert payload["name"] == "funboost教程查询智能体"
+    assert payload["tool_call_id"] == "task123"
+    assert payload["query"] == "查询定时任务"
+    assert payload["sub_session_id"] == "parent1--sa--task123"
+    assert tool_calls[0]["name"] == "funboost教程查询智能体"
+    assert tool_calls[0]["sub_session_id"] == "parent1--sa--task123"
+    assert tool_calls[0]["is_subagent"] is True
+
+    await tracker.drain()
+
+
+@pytest.mark.asyncio
 async def test_tracker_creates_subsession_when_parent_tool_call_is_only_enriched(monkeypatch):
     from lc_agent.server import subagent_tracker
     from lc_agent.server.subagent_tracker import SubAgentRunTracker
@@ -423,6 +465,9 @@ async def test_send_stream_routes_subagent_events_through_tracker(monkeypatch):
         async def aget_state(self, config):
             return SimpleNamespace(tasks=[])
 
+        def get_subagent_tool_names(self, *args, **kwargs):
+            return {"task"}
+
         def get_subagent_display_name_map(self, *args, **kwargs):
             return {"research_expert": "研究专家"}
 
@@ -435,14 +480,14 @@ async def test_send_stream_routes_subagent_events_through_tracker(monkeypatch):
         async def chat_stream(self, *args, **kwargs):
             yield {
                 "event": "on_tool_start",
-                "name": "research_expert",
+                "name": "task",
                 "run_id": "run123",
                 "metadata": {"langgraph_checkpoint_ns": "tools:task123"},
-                "data": {"input": {"query": "quantum"}},
+                "data": {"input": {"subagent_type": "research_expert", "description": "quantum"}},
             }
             yield {
                 "event": "on_tool_end",
-                "name": "research_expert",
+                "name": "task",
                 "run_id": "run123",
                 "metadata": {"langgraph_checkpoint_ns": "tools:task123"},
                 "data": {"output": "research result"},
@@ -514,14 +559,14 @@ async def test_resume_stream_routes_subagent_events_through_tracker(monkeypatch)
         async def astream_events(self, *args, **kwargs):
             yield {
                 "event": "on_tool_start",
-                "name": "research_expert",
+                "name": "task",
                 "run_id": "run123",
                 "metadata": {"langgraph_checkpoint_ns": "tools:task123"},
-                "data": {"input": {"query": "quantum"}},
+                "data": {"input": {"subagent_type": "research_expert", "description": "quantum"}},
             }
             yield {
                 "event": "on_tool_end",
-                "name": "research_expert",
+                "name": "task",
                 "run_id": "run123",
                 "metadata": {"langgraph_checkpoint_ns": "tools:task123"},
                 "data": {"output": "research result"},
@@ -536,8 +581,11 @@ async def test_resume_stream_routes_subagent_events_through_tracker(monkeypatch)
         def _get_or_build_agent(self, *args, **kwargs):
             return FakeAgent()
 
+        def get_subagent_tool_names(self, *args, **kwargs):
+            return {"task"}
+
         def get_subagent_display_name_map(self, *args, **kwargs):
-            return {"research_expert": "????"}
+            return {"research_expert": "研究专家"}
 
         def _find_model(self, model_id):
             return None
@@ -589,3 +637,97 @@ async def test_resume_stream_routes_subagent_events_through_tracker(monkeypatch)
     assert "tracked" in "".join(body_chunks)
     assert appended_messages
     assert "<!--HTTP:2-->" in appended_messages[0][0][2]
+
+
+@pytest.mark.asyncio
+async def test_resume_stream_marks_stale_running_subagent_tool_calls_interrupted(monkeypatch):
+    from types import SimpleNamespace
+
+    from lc_agent.server import persistence, sse
+
+    class FakeTracker:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def handle_event(self, event_type, payload):
+            return event_type, payload
+
+        def finalize_open_runs(self, status="error"):
+            return []
+
+        async def drain(self):
+            return None
+
+    class FakeAgent:
+        async def astream_events(self, *args, **kwargs):
+            if False:
+                yield None
+            return
+
+        async def aget_state(self, config):
+            return SimpleNamespace(tasks=[])
+
+    class FakeEngine:
+        recursion_limit = 25
+
+        def _get_or_build_agent(self, *args, **kwargs):
+            return FakeAgent()
+
+        def get_subagent_tool_names(self, *args, **kwargs):
+            return {"task"}
+
+        def get_subagent_display_name_map(self, *args, **kwargs):
+            return {"research_expert": "研究专家"}
+
+        def _find_model(self, model_id):
+            return None
+
+        def _should_use_memory_context(self, preset_id):
+            return False
+
+    async def fake_load_resume_context(*args, **kwargs):
+        return ([{
+            "name": "研究专家",
+            "runId": "task123",
+            "status": "running",
+            "is_subagent": True,
+            "sub_session_id": "thread1--sa--task123",
+        }], 0)
+
+    appended_messages = []
+
+    async def fake_append_to_last_assistant_message(*args, **kwargs):
+        appended_messages.append((args, kwargs))
+
+    monkeypatch.setattr(sse, "_engine", FakeEngine())
+    monkeypatch.setattr(sse, "SubAgentRunTracker", FakeTracker)
+    monkeypatch.setattr(persistence, "load_resume_context", fake_load_resume_context)
+    monkeypatch.setattr(persistence, "append_to_last_assistant_message", fake_append_to_last_assistant_message)
+
+    class FakeTraceCollector:
+        def __init__(self, *args, **kwargs):
+            self.kwargs = kwargs
+
+        def snapshot(self):
+            return []
+
+    monkeypatch.setattr(sse, "HttpTraceCollector", FakeTraceCollector)
+    monkeypatch.setattr(sse, "bind_http_trace_collector", lambda collector: "token")
+    monkeypatch.setattr(sse, "reset_http_trace_collector", lambda token: None)
+
+    async def fake_disconnected():
+        return False
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(auth_service=None)),
+        is_disconnected=fake_disconnected,
+    )
+    req = sse.RunStreamRequest(command={"resume": {"decisions": []}}, preset_id="__power__", model="")
+
+    response = await sse._resume_stream("thread1", req, request)
+    async for _chunk in response.body_iterator:
+        pass
+
+    assert appended_messages
+    tool_calls = appended_messages[0][1]["all_tool_calls"]
+    assert tool_calls[0]["status"] == "interrupted"

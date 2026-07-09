@@ -490,8 +490,16 @@ function makeFallbackSubAgentEntry(item: ChatBubbleItem, toolIndex: number): Sub
     tool_call_id: tc?.runId || '',
     name: tc?.name || '子Agent',
     sub_session_id: tc?.sub_session_id || '',
-    query: '',
-    status: (tc?.status === 'done' ? 'done' : tc?.status === 'error' ? 'error' : 'running') as 'running' | 'done' | 'error',
+    query: typeof tc?.args === 'object' ? String((tc.args as Record<string, unknown>)?.query || (tc.args as Record<string, unknown>)?.description || '') : '',
+    status: (tc?.status === 'done'
+      ? 'done'
+      : tc?.status === 'error'
+        ? 'error'
+        : tc?.status === 'cancelled'
+          ? 'cancelled'
+          : tc?.status === 'interrupted'
+            ? 'interrupted'
+            : 'running') as 'running' | 'done' | 'error' | 'cancelled' | 'interrupted',
     tokenPreview: tc?.result || '',
     toolCallCount: 0,
     tokenCount: 0,

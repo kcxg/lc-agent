@@ -2,6 +2,11 @@
 from pydantic import BaseModel
 
 
+class SubAgentLink(BaseModel):
+    agent_id: str
+    delegation_description: str
+
+
 class ModelInfo(BaseModel):
     """LLM model metadata."""
 
@@ -29,6 +34,7 @@ class AgentPreset(BaseModel):
     name: str
     system_prompt: str
     default_model: str
+    default_delegation_description: str = ""
 
     allowed_tool_groups: list[str] | None = None
     allowed_mcp_servers: list[str] | None = None
@@ -39,4 +45,5 @@ class AgentPreset(BaseModel):
     source: str = "user"
     default_enabled: bool = True
 
-    subagent_ids: list[str] | None = None
+    subagents: list[SubAgentLink] | None = None
+    enable_general_purpose_subagent: bool = False

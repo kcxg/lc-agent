@@ -8,8 +8,10 @@
         <div class="sa-submeta">
           <span v-if="entry.status === 'running'" class="sa-running-dot"></span>
           <span v-if="entry.status === 'running'">执行中</span>
-          <span v-if="entry.status === 'done'">完成 ✓</span>
-          <span v-if="entry.status === 'error'">失败</span>
+          <span v-else-if="entry.status === 'done'">完成 ✓</span>
+          <span v-else-if="entry.status === 'error'">失败</span>
+          <span v-else-if="entry.status === 'cancelled'">已取消</span>
+          <span v-else-if="entry.status === 'interrupted'">已中断</span>
           <template v-if="entry.toolCallCount > 0">
             · 🔧 {{ entry.toolCallCount }}次
           </template>
@@ -33,6 +35,10 @@
 
     <!-- Body: always 200px scrollable window -->
     <div ref="bodyRef" class="sa-body">
+      <div v-if="entry.query?.trim()" class="sa-query-block">
+        <div class="sa-query-header">对子 Agent 的提问</div>
+        <div class="sa-query-text">{{ entry.query }}</div>
+      </div>
       <!-- Thinking block (only while running) -->
       <div v-if="entry.status === 'running' && entry.thinking?.trim()" class="sa-thinking-block">
         <div class="sa-thinking-header">
@@ -90,11 +96,17 @@ defineEmits<{
 
 const bodyRef = ref<HTMLElement | null>(null)
 
-const statusClass = computed(() => ({
-  'sa-running': props.entry.status === 'running',
-  'sa-done': props.entry.status === 'done',
-  'sa-error': props.entry.status === 'error',
-}))
+const statusClass = computed(() => {
+  const status = props.entry.status
+
+  return {
+    'sa-running': status === 'running',
+    'sa-done': status === 'done',
+    'sa-error': status === 'error',
+    'sa-cancelled': status === 'cancelled',
+    'sa-interrupted': status === 'interrupted',
+  }
+})
 
 /** Text shown in done state: prefer full in-memory tokens, fallback to DB tokenPreview */
 const bodyText = computed(() => props.entry.tokens || props.entry.tokenPreview || '')
@@ -184,6 +196,30 @@ watch(() => props.entry.status, (newStatus) => {
   overflow-y: auto;
   scroll-behavior: smooth;
   box-sizing: border-box;
+}
+
+/* Query block */
+.sa-query-block {
+  margin-bottom: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+}
+
+.sa-query-header {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+}
+
+.sa-query-text {
+  padding: 0 8px 8px;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 /* Thinking block */

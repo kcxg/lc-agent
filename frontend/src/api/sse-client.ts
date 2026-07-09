@@ -9,6 +9,8 @@ export interface SseMessage {
   thread_id?: string
   title?: string
   name?: string
+  subagent_type?: string
+  description?: string
   result?: string
   message?: string
   run_id?: string
@@ -34,6 +36,7 @@ export interface SseMessage {
   http_traces?: any[]
   is_resume?: boolean
   is_subagent?: boolean
+  is_error?: boolean
   // error fields
   error_code?: string
   detail?: string
