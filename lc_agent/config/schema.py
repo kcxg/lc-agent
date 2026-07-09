@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModelConfig(BaseModel):
@@ -42,6 +44,13 @@ class McpServerConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     url: str = ""
     enabled: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_http_type_from_url(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("url") and not data.get("type"):
+            return {**data, "type": "http"}
+        return data
 
 
 class AuthConfig(BaseModel):

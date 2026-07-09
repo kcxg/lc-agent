@@ -18,6 +18,7 @@
     "test:sidebar": "node scripts/check-sidebar-agent-cards.mjs",
     "test:session-pinning": "node scripts/check-session-pinning-contract.mjs",
     "test:session-route": "node scripts/check-session-route-restore-contract.mjs",
+    "test:new-chat-right-panel": "node scripts/check-new-chat-right-panel-contract.mjs",
     "test:restart-bfzs": "node scripts/check-restart-bfzs-contract.mjs",
     "test:favicon": "node scripts/check-favicon-contract.mjs",
     "test:responsive": "node scripts/check-responsive-layout.mjs",

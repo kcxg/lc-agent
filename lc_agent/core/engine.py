@@ -1,4 +1,4 @@
-# lc_agent/core/engine.py
+﻿# lc_agent/core/engine.py
 from __future__ import annotations
 
 import logging
@@ -10,6 +10,13 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
 from langchain.agents.middleware.todo import WRITE_TODOS_SYSTEM_PROMPT, WRITE_TODOS_TOOL_DESCRIPTION
+try:
+    from langchain.agents.middleware.types import AgentMiddleware as _AgentMiddlewareBase
+    from langchain_core.messages import SystemMessage as _SystemMessage
+    _HAS_MIDDLEWARE_BASE = True
+except ImportError:
+    _AgentMiddlewareBase = object  # type: ignore[misc,assignment]
+    _HAS_MIDDLEWARE_BASE = False
 
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
@@ -37,6 +44,46 @@ TODO_FINAL_ANSWER_GUARD = """## Final Answer Guard for `write_todos`
 
 TODO_SYSTEM_PROMPT = f"{WRITE_TODOS_SYSTEM_PROMPT}\n\n{TODO_FINAL_ANSWER_GUARD}"
 TODO_TOOL_DESCRIPTION = f"{WRITE_TODOS_TOOL_DESCRIPTION}\n\n{TODO_FINAL_ANSWER_GUARD}"
+
+_LOAD_SKILL_DESCRIPTION = (
+    "Retrieve the full step-by-step instructions for a skill. "
+    "This MUST be called before executing any task that matches a skill — "
+    "the brief description in the system prompt is only a trigger hint, "
+    "not the actual procedure. "
+    "Returns the skill's markdown body, available resources, and scripts. "
+    "Skill names are listed in the system prompt under '## Available Skills'."
+)
+
+
+class _SystemBlockMiddleware(_AgentMiddlewareBase):  # type: ignore[misc]
+    """Injects a text block as a separate system message content block."""
+
+    def __init__(self, text: str, middleware_name: str) -> None:
+        super().__init__()
+        self._text = text
+        self._middleware_name = middleware_name
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return self._middleware_name
+
+    def _patched_system(self, existing: Any) -> Any:
+        block_text = f"\n\n{self._text}"
+        if existing is not None:
+            new_content = [*existing.content_blocks, {"type": "text", "text": block_text}]
+        else:
+            new_content = [{"type": "text", "text": block_text}]
+        return _SystemMessage(content=new_content)  # type: ignore[call-arg]
+
+    def wrap_model_call(self, request: Any, handler: Any) -> Any:
+        return handler(request.override(system_message=self._patched_system(request.system_message)))
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        return await handler(request.override(system_message=self._patched_system(request.system_message)))
+
+
+# Keep old name as alias for backwards compatibility
+_SkillsPromptMiddleware = _SystemBlockMiddleware
 
 
 @dataclass(frozen=True)
@@ -302,11 +349,25 @@ class AgentEngine:
 
         description_lines = [
             "Delegate a task to one configured sub-agent.",
+            "",
+            "Use the exact `subagent_type` value from the list below.",
+            "Do not rename it, paraphrase it, translate it, or invent a new value.",
+            "",
             "Available subagents:",
-            "subagent_type: delegation_description",
+            "",
         ]
         for descriptor in registry.values():
-            description_lines.append(f"{descriptor.subagent_type}: {descriptor.description}")
+            description_lines.extend([
+                "====================",
+                "",
+                f"subagent_type: {descriptor.subagent_type}",
+                "",
+                "delegation_description:",
+                descriptor.description,
+                "",
+            ])
+        if description_lines and description_lines[-1] == "":
+            description_lines.pop()
         task_description = "\n".join(description_lines)
 
         if _HAS_INJECTED_TOOL_CALL_ID:
@@ -344,30 +405,55 @@ class AgentEngine:
         system_prompt = preset.system_prompt
         tools = self.tool_registry.get_filtered_tools(preset.allowed_tool_groups)
 
+        _memory_middleware: _SystemBlockMiddleware | None = None
+        _skills_middleware: _SystemBlockMiddleware | None = None
         if hasattr(self, '_skills_toolkit') and self._skills_toolkit:
             allowed = preset.allowed_skills
             if allowed is None or allowed:
-                skill_tools = [
-                    t for t in self._skills_toolkit.get_tools()
-                    if t.name != "list_skills"
-                ]
+                skill_tools = []
+                for _t in self._skills_toolkit.get_tools():
+                    if _t.name == "list_skills":
+                        continue
+                    if _t.name == "load_skill":
+                        try:
+                            _t = _t.model_copy(update={"description": _LOAD_SKILL_DESCRIPTION})
+                        except Exception:
+                            pass
+                    skill_tools.append(_t)
                 tools = tools + skill_tools
                 loader = self._skills_toolkit._resolved_loader
                 if loader:
                     all_skills = loader.list_skills()
                     if allowed is not None:
                         all_skills = [s for s in all_skills if s.name in allowed]
-                    if all_skills:
-                        lines = ["# Available Skills", ""]
-                        for s in all_skills:
-                            lines.append(f"- **{s.name}**: {s.description}")
-                        lines.append("")
-                        lines.append(
-                            "Use `load_skill` to get full instructions for a skill, "
-                            "`read_skill_resource` to read its resources, "
-                            "and `run_skill_script` to execute its scripts."
-                        )
-                        system_prompt = f"{system_prompt}\n\n" + "\n".join(lines)
+                    if all_skills and _HAS_MIDDLEWARE_BASE:
+                        import json as _json
+                        skill_entries = [
+                            {
+                                "skill_name": s.name,
+                                "description": s.description.splitlines()[0],
+                            }
+                            for s in all_skills
+                        ]
+                        lines = [
+                            "## Available Skills",
+                            "",
+                            "The descriptions below are **triggers** — they tell you WHEN a skill applies.",
+                            "The actual step-by-step instructions, required tools, and constraints are INSIDE the skill.",
+                            "",
+                            "**MANDATORY RULE**: When the user's request matches a skill's description,",
+                            "you MUST call `load_skill(skill_name=\"<skill_name>\")` FIRST to retrieve",
+                            "the full instructions, then follow them exactly.",
+                            "Do NOT skip this step and proceed with your default approach.",
+                            "",
+                            "```json",
+                            _json.dumps(skill_entries, ensure_ascii=False, indent=2),
+                            "```",
+                            "",
+                            "After loading a skill, you may also call `read_skill_resource` to fetch",
+                            "its reference files or `run_skill_script` to execute its scripts.",
+                        ]
+                        _skills_middleware = _SystemBlockMiddleware("\n".join(lines), "SkillsPromptMiddleware")
 
         if hasattr(self, '_mcp_manager') and self._mcp_manager:
             mcp_tools = self._mcp_manager.get_filtered_langchain_tools(preset.allowed_mcp_servers)
@@ -385,7 +471,10 @@ class AgentEngine:
             )
 
             tools = tools + build_memory_tools()
-            system_prompt = f"{system_prompt}\n\n{MEMORY_SYSTEM_PROMPT}"
+            if _HAS_MIDDLEWARE_BASE:
+                _memory_middleware = _SystemBlockMiddleware(MEMORY_SYSTEM_PROMPT, "MemoryPromptMiddleware")
+            else:
+                system_prompt = f"{system_prompt}\n\n{MEMORY_SYSTEM_PROMPT}"
             kwargs["store"] = self._store
             kwargs["context_schema"] = AgentRuntimeContext
 
@@ -405,10 +494,15 @@ class AgentEngine:
         effective_params = {**(preset.llm_params or {}), **(llm_params or {})}
         llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
 
-        middleware = [TodoListMiddleware(
+        middleware = []
+        if _memory_middleware is not None:
+            middleware.append(_memory_middleware)
+        if _skills_middleware is not None:
+            middleware.append(_skills_middleware)
+        middleware.append(TodoListMiddleware(
             system_prompt=TODO_SYSTEM_PROMPT,
             tool_description=TODO_TOOL_DESCRIPTION,
-        )]
+        ))
         middleware.extend(self._build_summarization_middleware(preset))
 
         # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously

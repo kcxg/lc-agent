@@ -126,10 +126,14 @@ def test_build_agent_injects_single_task_tool_and_records_display_map(monkeypatc
     assert [tool.name for tool in task_tools] == ["task"]
     assert all(not tool.name.startswith("subagent_") for tool in captured["tools"])
     assert task_tools[0].description == (
-        "Delegate a task to one configured sub-agent.\n"
-        "Available subagents:\n"
-        "subagent_type: delegation_description\n"
-        "研究专家: 当你需要深入研究时调用它"
+        "Delegate a task to one configured sub-agent.\n\n"
+        "Use the exact `subagent_type` value from the list below.\n"
+        "Do not rename it, paraphrase it, translate it, or invent a new value.\n\n"
+        "Available subagents:\n\n"
+        "====================\n\n"
+        "subagent_type: 研究专家\n\n"
+        "delegation_description:\n"
+        "当你需要深入研究时调用它"
     )
     assert engine.get_subagent_tool_names("parent-agent") == {"task"}
     assert engine.get_subagent_display_name_map("parent-agent") == {"研究专家": "研究专家"}

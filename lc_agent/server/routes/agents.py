@@ -345,9 +345,10 @@ def activate_agent(
             "reason": "code agent is controlled by its registered graph",
         }
     manager = getattr(request.app.state, "mcp_manager", None)
+    loader = getattr(request.app.state, "filtered_loader", None)
     registry = ToolRegistry()
 
-    if preset.allowed_tool_groups == [] and preset.allowed_mcp_servers == []:
+    if preset.allowed_tool_groups == [] and preset.allowed_mcp_servers == [] and preset.allowed_skills == []:
         return {"agent_id": agent_id, "action": "none", "reason": "preset blocks all"}
 
     target_enabled = preset.default_enabled
@@ -375,7 +376,23 @@ def activate_agent(
             registry._disabled_groups.add(group)
             changed_groups.append(group)
 
-    if changed_mcp or changed_groups:
+    changed_skills = []
+    if loader:
+        all_skill_names = {skill.name for skill in loader.list_all_skills()}
+        if preset.allowed_skills is None:
+            target_skill_names = sorted(all_skill_names)
+        else:
+            target_skill_names = [name for name in preset.allowed_skills if name in all_skill_names]
+        for skill_name in target_skill_names:
+            is_disabled = skill_name in loader.disabled_skills
+            if target_enabled and is_disabled:
+                loader.disabled_skills.discard(skill_name)
+                changed_skills.append(skill_name)
+            elif not target_enabled and not is_disabled:
+                loader.disabled_skills.add(skill_name)
+                changed_skills.append(skill_name)
+
+    if changed_mcp or changed_groups or changed_skills:
         engine._mcp_generation += 1
 
     return {
@@ -383,4 +400,5 @@ def activate_agent(
         "default_enabled": target_enabled,
         "changed_mcp": changed_mcp,
         "changed_groups": changed_groups,
+        "changed_skills": changed_skills,
     }

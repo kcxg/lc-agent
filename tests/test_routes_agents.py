@@ -190,6 +190,78 @@ def test_preset_to_dict_normalizes_code_agent_capabilities():
     assert data["default_enabled"] is False
 
 
+def test_activate_agent_restores_skills_to_default_enabled_state():
+    from types import SimpleNamespace
+    from lc_agent.core.engine import AgentEngine
+    from lc_agent.core.models import AgentPreset
+    from lc_agent.server.routes.agents import activate_agent
+
+    class FakeLoader:
+        def __init__(self):
+            self.disabled_skills = {"web-search"}
+
+        def list_all_skills(self):
+            return [SimpleNamespace(name="web-search"), SimpleNamespace(name="pdf")]
+
+    engine = AgentEngine({"agent": {"default_model": "model-a"}})
+    engine._presets["power"] = AgentPreset(
+        id="power",
+        name="power",
+        system_prompt="Power agent",
+        default_model="model-a",
+        source="user",
+        allowed_tool_groups=None,
+        allowed_mcp_servers=None,
+        allowed_skills=None,
+        default_enabled=True,
+    )
+    engine._mcp_generation = 3
+    loader = FakeLoader()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(mcp_manager=None, filtered_loader=loader)))
+
+    result = activate_agent("power", request, engine, admin=SimpleNamespace(role="admin"))
+
+    assert loader.disabled_skills == set()
+    assert result["changed_skills"] == ["web-search"]
+    assert engine._mcp_generation == 4
+
+
+def test_activate_agent_disables_allowed_skills_when_default_disabled():
+    from types import SimpleNamespace
+    from lc_agent.core.engine import AgentEngine
+    from lc_agent.core.models import AgentPreset
+    from lc_agent.server.routes.agents import activate_agent
+
+    class FakeLoader:
+        def __init__(self):
+            self.disabled_skills = set()
+
+        def list_all_skills(self):
+            return [SimpleNamespace(name="web-search"), SimpleNamespace(name="pdf")]
+
+    engine = AgentEngine({"agent": {"default_model": "model-a"}})
+    engine._presets["empty"] = AgentPreset(
+        id="empty",
+        name="empty",
+        system_prompt="Empty agent",
+        default_model="model-a",
+        source="user",
+        allowed_tool_groups=None,
+        allowed_mcp_servers=None,
+        allowed_skills=["web-search"],
+        default_enabled=False,
+    )
+    engine._mcp_generation = 3
+    loader = FakeLoader()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(mcp_manager=None, filtered_loader=loader)))
+
+    result = activate_agent("empty", request, engine, admin=SimpleNamespace(role="admin"))
+
+    assert loader.disabled_skills == {"web-search"}
+    assert result["changed_skills"] == ["web-search"]
+    assert engine._mcp_generation == 4
+
+
 def test_activate_code_agent_is_noop():
     from types import SimpleNamespace
     from lc_agent.core.engine import AgentEngine

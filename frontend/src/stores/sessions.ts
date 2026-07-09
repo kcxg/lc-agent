@@ -63,6 +63,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       s => s.agent_id === agentId && s.message_count === 0 && localSessionIds.value.has(s.id)
     )
     if (existing) {
+      existing.model = model || existing.model
       currentSessionId.value = existing.id
       return existing
     }

@@ -137,6 +137,10 @@ class TestAppConfig:
         )
         assert config.agent["default_model"] == "m1"
 
+    def test_mcp_server_url_defaults_to_http(self):
+        config = AppConfig(mcp_servers={"remote": {"url": "http://localhost:3000/mcp"}})
+        assert config.mcp_servers["remote"].type == "http"
+
     def test_rejects_missing_agent_section(self):
         with pytest.raises(ValidationError):
             AppConfig(agent="not a dict")

@@ -133,6 +133,12 @@ function getSessionModelForAgent(agentId: string): string {
   return agent?.default_model || toolsStore.currentModel || ''
 }
 
+function getCurrentRightPanelModelForAgent(agentId: string): string {
+  const agent = agentsStore.agents.find(a => a.id === agentId)
+  if (agent?.source === 'code') return ''
+  return toolsStore.currentModel || agent?.default_model || ''
+}
+
 function applySessionModel(model: string) {
   if (model) {
     toolsStore.setModel(model)
@@ -192,7 +198,7 @@ async function restoreSession(sessionId: string) {
 }
 
 async function handleNewChat() {
-  const sessionModel = getSessionModelForAgent(agentsStore.currentAgentId)
+  const sessionModel = getCurrentRightPanelModelForAgent(agentsStore.currentAgentId)
   const session = sessionsStore.createLocalSession(agentsStore.currentAgentId, sessionModel)
   const sameRouteSession = route.params.sessionId === session.id
   chatStore.clearMessages()

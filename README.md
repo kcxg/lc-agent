@@ -221,6 +221,10 @@ npm run build
 如果你是基于这个框架做业务项目，建议直接参考：
 - [lc-agent-bfzs](https://github.com/ydf0509/lc-agent-bfzs)
 
+## 快问快答 
+### 1 lc-agent 是否有rag知识库功能
+答：lc-agent 不内置自带知识库，nbrag也是本人开发，将nbrag mcp配置到mcpservers里面即可，这样更解耦，因为这种知识库是agentic serach的，并且能接入到任何agent中，例如 openclaw claudecode codex trae cursor workbuddy qoder 中等等。
+
 ## License
 
 MIT
