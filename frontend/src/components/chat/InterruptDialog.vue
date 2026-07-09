@@ -5,8 +5,7 @@
     width="500px"
     :close-on-click-modal="false"
     :close-on-press-escape="false"
-    :show-close="true"
-    @close="handleClose"
+    :show-close="false"
     append-to-body
     align-center
   >
@@ -60,7 +59,6 @@
         </el-button>
       </template>
       <template v-else>
-        <el-button type="danger" @click="handleClose">停止生成</el-button>
         <el-button @click="reject">拒绝</el-button>
         <el-button type="success" @click="allowPermanently" :disabled="!firstToolName">永久允许此工具</el-button>
         <el-button type="primary" @click="approve">批准执行</el-button>
@@ -86,7 +84,6 @@ const emit = defineEmits<{
   decide: [decision: { type: string; message?: string }]
   resume: [value: any]
   'allow-permanently': [toolName: string]
-  stop: []
 }>()
 
 const visible = computed({
@@ -191,10 +188,6 @@ function allowPermanently() {
 
 function approve() {
   emit('decide', { type: 'approve' })
-}
-
-function handleClose() {
-  emit('stop')
 }
 
 function reject() {
