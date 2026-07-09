@@ -19,7 +19,7 @@
       <el-tag v-if="allowlist.length === 0" type="info">（空 — 所有工具需要审批）</el-tag>
     </div>
 
-    <el-dialog v-model="dialogVisible" title="工具权限白名单详情" width="600px" append-to-body>
+    <el-dialog v-model="dialogVisible" title="工具权限白名单详情" width="600px">
       <el-input
         v-model="searchQuery"
         placeholder="搜索已添加的工具..."

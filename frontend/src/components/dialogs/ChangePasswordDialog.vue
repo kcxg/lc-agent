@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="visible" title="修改密码" width="420px" :close-on-click-modal="false" append-to-body @closed="resetForm">
+  <el-dialog v-model="visible" title="修改密码" width="420px" :close-on-click-modal="false" @closed="resetForm">
     <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
       <el-form-item label="旧密码" prop="oldPassword">
         <el-input v-model="form.oldPassword" type="password" show-password autocomplete="current-password" />
