@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, shallowReactive } from 'vue'
 import { ChatSseClient, type SseMessage } from '@/api/sse-client'
 import { useSessionsStore } from '@/stores/sessions'
 import { api } from '@/api/http'
@@ -540,7 +540,10 @@ export interface TodoItem {
 
 export const useChatStore = defineStore('chat', () => {
   // --- Session Registry ---
-  const activeSessions = new Map<string, SessionState>()
+  // shallowReactive() makes Map.get/set/delete/has reactive (so sidebar streaming
+  // indicators update automatically) without deep-unwrapping the Ref fields
+  // inside SessionState.
+  const activeSessions = shallowReactive(new Map<string, SessionState>())
   const activeSessionId = ref<string | null>(null)
   const sessionOffsets = new Map<string, number>()
 
@@ -876,8 +879,6 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  let _switchTarget: string | null = null
-
   /**
    * Switch the active session. If the departing session is streaming, it stays
    * in the registry and continues in the background. If it is idle, it is
@@ -886,8 +887,6 @@ export const useChatStore = defineStore('chat', () => {
    */
   async function switchToSession(sessionId: string): Promise<void> {
     if (activeSessionId.value === sessionId) return
-
-    _switchTarget = sessionId
 
     // Departing session
     const oldId = activeSessionId.value
@@ -909,10 +908,12 @@ export const useChatStore = defineStore('chat', () => {
     activeSessions.set(sessionId, state)
     await _loadMessagesIntoState(sessionId, state)
 
-    // Stale switch: another switchToSession was called while we were awaiting
-    if (_switchTarget !== sessionId) {
-      activeSessions.delete(sessionId)
-      sessionOffsets.delete(sessionId)
+    // Stale switch guard: verify this is still the current state object for
+    // this session. Catches the A→B→A rapid-switch case where a second
+    // switchToSession(A) created a new state and replaced ours in the map.
+    // Only return — do NOT delete from the map (that would evict the
+    // replacement state that is still loading).
+    if (activeSessions.get(sessionId) !== state) {
       return
     }
 
