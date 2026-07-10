@@ -176,16 +176,7 @@ async function restoreSession(sessionId: string) {
     } else if (session.model) {
       toolsStore.setModel(session.model)
     }
-    chatStore.clearMessages()
-    // If a stream is in progress, abandon (let server finish & save to DB)
-    // instead of aborting — the user will see the complete response on return.
-    if (chatStore.isStreaming) {
-      chatStore.abandonStream()
-    } else {
-      chatStore.disconnect()
-    }
-    await chatStore.loadMessages(sessionId)
-    await chatStore.connect(sessionId)
+    await chatStore.switchToSession(sessionId)
     return
   }
 
@@ -198,8 +189,7 @@ async function restoreSession(sessionId: string) {
       await agentsStore.selectAgent(agentQuery)
     }
     applySessionModel(sessionModel)
-    chatStore.clearMessages()
-    chatStore.disconnect()
+    await chatStore.switchToSession(sessionId)
   }
 }
 
@@ -207,8 +197,7 @@ async function handleNewChat() {
   const sessionModel = getCurrentRightPanelModelForAgent(agentsStore.currentAgentId)
   const session = sessionsStore.createLocalSession(agentsStore.currentAgentId, sessionModel)
   const sameRouteSession = route.params.sessionId === session.id
-  chatStore.clearMessages()
-  chatStore.disconnect()
+  await chatStore.switchToSession(session.id)
   await router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: agentsStore.currentAgentId } })
   if (sameRouteSession) {
     await restoreSession(session.id)
@@ -239,10 +228,7 @@ async function handleSwitchSession(sessionId: string) {
   } else if (session?.model) {
     toolsStore.setModel(session.model)
   }
-  chatStore.clearMessages()
-  chatStore.disconnect()
-  await chatStore.loadMessages(sessionId)
-  await chatStore.connect(sessionId)
+  await chatStore.switchToSession(sessionId)
   if (session?.agent_id && session.agent_id !== agentsStore.currentAgentId) {
     await agentsStore.selectAgent(session.agent_id)
   }
@@ -255,8 +241,7 @@ async function handleAgentChange(agentId: string) {
   const sessionModel = getSessionModelForAgent(agentId)
   applySessionModel(sessionModel)
   const session = sessionsStore.createLocalSession(agentId, sessionModel)
-  chatStore.clearMessages()
-  chatStore.disconnect()
+  await chatStore.switchToSession(session.id)
   await router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: agentId } })
   closeMobileDrawers()
 }

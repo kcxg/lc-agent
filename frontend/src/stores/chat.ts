@@ -1044,9 +1044,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function loadMessages(sessionId: string): Promise<void> {
-    const state = activeSessions.get(sessionId)
-    if (state) {
-      await _loadMessagesIntoState(sessionId, state)
+    // If the target session is in the registry, load into its own state.
+    // Otherwise fall back to the currently active session — this supports
+    // temporary display of sub-session messages without a full session switch.
+    const targetState = activeSessions.get(sessionId) ?? _active()
+    if (targetState) {
+      await _loadMessagesIntoState(sessionId, targetState)
     }
   }
 
