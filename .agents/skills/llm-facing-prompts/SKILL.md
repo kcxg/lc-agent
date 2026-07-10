@@ -8,6 +8,8 @@ description: >-
 
 # lc-agent 面向 LLM 的提示文本规范
 
+**lc-agent的系统提示词，工具描述，工具入参描述，针对的都是llm，不是人类。**
+
 ## 工具 description、函数入参的 Annotated 描述、系统提示词，均禁止出现框架内部实现词汇
 
 因为：LLM 根本不知道用户在使用 lc-agent，更不知道框架细节。LLM 只有 messages 数组和 function schema（含工具描述和参数描述）。这三类文本全部面向 LLM，各自有明确目的：
