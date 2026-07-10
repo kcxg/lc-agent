@@ -44,7 +44,7 @@ async def test_list_agents_returns_default(app_and_headers):
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) >= 1
-        assert any(a["id"] == "__chat__" for a in data)
+        assert any(a["id"] == "chat" for a in data)
 
 
 @pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def test_create_agent(app_and_headers):
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         payload = {
-            "name": "Code Assistant",
+            "name": "code-assistant",
             "system_prompt": "You are a coding expert.",
             "default_model": "gpt-4",
             "allowed_tool_groups": ["filesystem"],
@@ -61,7 +61,7 @@ async def test_create_agent(app_and_headers):
         resp = await client.post("/api/agents", json=payload, headers=headers)
         assert resp.status_code == 201
         data = resp.json()
-        assert data["name"] == "Code Assistant"
+        assert data["name"] == "code-assistant"
         assert "id" in data
         assert data["id"] != "__default__"
 
@@ -72,19 +72,19 @@ async def test_update_agent(app_and_headers):
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post("/api/agents", json={
-            "name": "Test Agent",
+            "name": "test-agent",
             "system_prompt": "Original",
             "default_model": "gpt-4",
         }, headers=headers)
         agent_id = create_resp.json()["id"]
 
         update_resp = await client.put(f"/api/agents/{agent_id}", json={
-            "name": "Updated Agent",
+            "name": "updated-agent",
             "system_prompt": "Updated prompt",
             "default_model": "gpt-4",
         }, headers=headers)
         assert update_resp.status_code == 200
-        assert update_resp.json()["name"] == "Updated Agent"
+        assert update_resp.json()["name"] == "updated-agent"
         assert update_resp.json()["system_prompt"] == "Updated prompt"
 
 
@@ -94,7 +94,7 @@ async def test_update_agent_invalidates_model_variant_cache(app_and_headers):
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post("/api/agents", json={
-            "name": "Cache Agent",
+            "name": "cache-agent",
             "system_prompt": "Old prompt",
             "default_model": "gpt-4",
         }, headers=headers)
@@ -142,7 +142,7 @@ async def test_delete_agent(app_and_headers):
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post("/api/agents", json={
-            "name": "Temp Agent",
+            "name": "temp-agent",
             "system_prompt": "Temp",
             "default_model": "gpt-4",
         }, headers=headers)
@@ -160,7 +160,7 @@ async def test_cannot_delete_default(app_and_headers):
     app, headers = app_and_headers
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.delete("/api/agents/__chat__", headers=headers)
+        resp = await client.delete("/api/agents/chat", headers=headers)
         assert resp.status_code == 400
 
 
@@ -240,9 +240,9 @@ def test_activate_agent_disables_allowed_skills_when_default_disabled():
             return [SimpleNamespace(name="web-search"), SimpleNamespace(name="pdf")]
 
     engine = AgentEngine({"agent": {"default_model": "model-a"}})
-    engine._presets["empty"] = AgentPreset(
-        id="empty",
-        name="empty",
+    engine._presets["skill-tester"] = AgentPreset(
+        id="skill-tester",
+        name="skill-tester",
         system_prompt="Empty agent",
         default_model="model-a",
         source="user",
@@ -255,7 +255,7 @@ def test_activate_agent_disables_allowed_skills_when_default_disabled():
     loader = FakeLoader()
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(mcp_manager=None, filtered_loader=loader)))
 
-    result = activate_agent("empty", request, engine, admin=SimpleNamespace(role="admin"))
+    result = activate_agent("skill-tester", request, engine, admin=SimpleNamespace(role="admin"))
 
     assert loader.disabled_skills == {"web-search"}
     assert result["changed_skills"] == ["web-search"]
@@ -300,7 +300,7 @@ async def test_create_agent_persists_general_purpose_subagent_flag(app_and_heade
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         payload = {
-            "name": "Delegating Agent",
+            "name": "delegating-agent",
             "system_prompt": "Delegate when useful.",
             "default_model": "gpt-4",
             "enable_general_purpose_subagent": True,
@@ -322,12 +322,12 @@ async def test_create_agent_accepts_subagents_payload(app_and_headers):
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         payload = {
-            "name": "Delegating Agent",
+            "name": "delegating-agent",
             "system_prompt": "Delegate when useful.",
             "default_model": "gpt-4",
             "subagents": [
                 {
-                    "agent_id": "__power__",
+                    "agent_id": "power",
                     "delegation_description": "当你需要查询 funboost 知识时调用它",
                 }
             ],
@@ -337,14 +337,14 @@ async def test_create_agent_accepts_subagents_payload(app_and_headers):
         assert create_resp.status_code == 201
         created = create_resp.json()
         assert "subagent_ids" not in created
-        assert created["subagents"][0]["agent_id"] == "__power__"
+        assert created["subagents"][0]["agent_id"] == "power"
         assert created["subagents"][0]["delegation_description"] == "当你需要查询 funboost 知识时调用它"
 
         list_resp = await client.get("/api/agents", headers=headers)
         assert list_resp.status_code == 200
         listed = next(a for a in list_resp.json() if a["id"] == created["id"])
         assert "subagent_ids" not in listed
-        assert listed["subagents"][0]["agent_id"] == "__power__"
+        assert listed["subagents"][0]["agent_id"] == "power"
 
 
 @pytest.mark.asyncio
@@ -353,12 +353,12 @@ async def test_create_agent_rejects_blank_subagent_delegation_description(app_an
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         payload = {
-            "name": "Delegating Agent",
+            "name": "delegating-agent",
             "system_prompt": "Delegate when useful.",
             "default_model": "gpt-4",
             "subagents": [
                 {
-                    "agent_id": "__power__",
+                    "agent_id": "power",
                     "delegation_description": "   ",
                 }
             ],
@@ -374,7 +374,7 @@ async def test_update_agent_persists_general_purpose_subagent_flag(app_and_heade
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post("/api/agents", json={
-            "name": "Delegating Agent",
+            "name": "delegating-agent",
             "system_prompt": "Original",
             "default_model": "gpt-4",
         }, headers=headers)
@@ -399,12 +399,12 @@ async def test_update_agent_replaces_subagents_payload(app_and_headers):
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post("/api/agents", json={
-            "name": "Delegating Agent",
+            "name": "delegating-agent",
             "system_prompt": "Original",
             "default_model": "gpt-4",
             "subagents": [
                 {
-                    "agent_id": "__power__",
+                    "agent_id": "power",
                     "delegation_description": "旧描述",
                 }
             ],
@@ -414,7 +414,7 @@ async def test_update_agent_replaces_subagents_payload(app_and_headers):
         update_resp = await client.put(f"/api/agents/{agent_id}", json={
             "subagents": [
                 {
-                    "agent_id": "__empty__",
+                    "agent_id": "empty",
                     "delegation_description": "新描述",
                 }
             ],
@@ -425,7 +425,7 @@ async def test_update_agent_replaces_subagents_payload(app_and_headers):
         assert "subagent_ids" not in updated
         assert updated["subagents"] == [
             {
-                "agent_id": "__empty__",
+                "agent_id": "empty",
                 "delegation_description": "新描述",
             }
         ]
@@ -437,7 +437,7 @@ async def test_update_agent_serializes_subagents_for_db_json_column(app_and_head
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post("/api/agents", json={
-            "name": "Delegating Agent",
+            "name": "delegating-agent",
             "system_prompt": "Original",
             "default_model": "gpt-4",
         }, headers=headers)
@@ -446,11 +446,11 @@ async def test_update_agent_serializes_subagents_for_db_json_column(app_and_head
         update_resp = await client.put(f"/api/agents/{agent_id}", json={
             "subagents": [
                 {
-                    "agent_id": "__power__",
+                    "agent_id": "power",
                     "delegation_description": "当需要分析数据时调用它",
                 },
                 {
-                    "agent_id": "__empty__",
+                    "agent_id": "empty",
                     "delegation_description": "当需要隔离执行简单任务时调用它",
                 }
             ],
@@ -459,11 +459,11 @@ async def test_update_agent_serializes_subagents_for_db_json_column(app_and_head
         assert update_resp.status_code == 200
         assert update_resp.json()["subagents"] == [
             {
-                "agent_id": "__power__",
+                "agent_id": "power",
                 "delegation_description": "当需要分析数据时调用它",
             },
             {
-                "agent_id": "__empty__",
+                "agent_id": "empty",
                 "delegation_description": "当需要隔离执行简单任务时调用它",
             },
         ]
@@ -475,7 +475,7 @@ async def test_create_agent_rejects_nonexistent_subagent_id(app_and_headers):
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         payload = {
-            "name": "Delegating Agent",
+            "name": "delegating-agent",
             "system_prompt": "Delegate when useful.",
             "default_model": "gpt-4",
             "subagents": [
@@ -496,16 +496,16 @@ async def test_create_agent_rejects_duplicate_subagent_id(app_and_headers):
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         payload = {
-            "name": "Delegating Agent",
+            "name": "delegating-agent",
             "system_prompt": "Delegate when useful.",
             "default_model": "gpt-4",
             "subagents": [
                 {
-                    "agent_id": "__power__",
+                    "agent_id": "power",
                     "delegation_description": "描述一",
                 },
                 {
-                    "agent_id": "__power__",
+                    "agent_id": "power",
                     "delegation_description": "描述二",
                 }
             ],

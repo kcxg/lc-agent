@@ -1,5 +1,4 @@
 """Converts MCP tool schemas into LangChain StructuredTool instances."""
-from __future__ import annotations
 
 from typing import Any
 

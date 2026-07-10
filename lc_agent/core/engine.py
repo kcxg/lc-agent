@@ -1,10 +1,8 @@
 ﻿# lc_agent/core/engine.py
-from __future__ import annotations
-
 import logging
 from dataclasses import dataclass
 import re
-from typing import Annotated, Any, AsyncIterator
+from typing import Annotated, Any, AsyncIterator, Literal
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
@@ -12,7 +10,7 @@ from langchain.agents.middleware.summarization import SummarizationMiddleware
 from langchain.agents.middleware.todo import WRITE_TODOS_SYSTEM_PROMPT, WRITE_TODOS_TOOL_DESCRIPTION
 try:
     from langchain.agents.middleware.types import AgentMiddleware as _AgentMiddlewareBase
-    from langchain_core.messages import SystemMessage as _SystemMessage
+    from langchain_core.messages import SystemMessage
     _HAS_MIDDLEWARE_BASE = True
 except ImportError:
     _AgentMiddlewareBase = object  # type: ignore[misc,assignment]
@@ -29,6 +27,7 @@ from lc_agent.core.http_trace_httpx import TracingAsyncClient
 from lc_agent.core.models import AgentPreset, ModelInfo
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool as lc_tool
+from pydantic import Field as _PydanticField
 
 from lc_agent.tools.registry import ToolRegistry
 
@@ -58,22 +57,24 @@ _LOAD_SKILL_DESCRIPTION = (
 class _SystemBlockMiddleware(_AgentMiddlewareBase):  # type: ignore[misc]
     """Injects a text block as a separate system message content block."""
 
-    def __init__(self, text: str, middleware_name: str) -> None:
+    def __init__(self, text: str, middleware_name: str, *, prepend: bool = False) -> None:
         super().__init__()
         self._text = text
         self._middleware_name = middleware_name
+        self._prepend = prepend
 
     @property
     def name(self) -> str:  # type: ignore[override]
         return self._middleware_name
 
     def _patched_system(self, existing: Any) -> Any:
-        block_text = f"\n\n{self._text}"
-        if existing is not None:
-            new_content = [*existing.content_blocks, {"type": "text", "text": block_text}]
+        if self._prepend:
+            new_block = {"type": "text", "text": self._text}
+            new_content = [new_block, *(existing.content_blocks if existing is not None else [])]
         else:
-            new_content = [{"type": "text", "text": block_text}]
-        return _SystemMessage(content=new_content)  # type: ignore[call-arg]
+            new_block = {"type": "text", "text": f"\n\n{self._text}"}
+            new_content = [*(existing.content_blocks if existing is not None else []), new_block]
+        return SystemMessage(content_blocks=new_content)  # type: ignore[call-arg]
 
     def wrap_model_call(self, request: Any, handler: Any) -> Any:
         return handler(request.override(system_message=self._patched_system(request.system_message)))
@@ -84,6 +85,63 @@ class _SystemBlockMiddleware(_AgentMiddlewareBase):  # type: ignore[misc]
 
 # Keep old name as alias for backwards compatibility
 _SkillsPromptMiddleware = _SystemBlockMiddleware
+
+# --------------------------------------------------------------------------- #
+# Subagent prompts
+# --------------------------------------------------------------------------- #
+
+SUBAGENT_DELEGATION_PROMPT = (
+    "In order to complete the objective that the user asks of you, "
+    "you have access to a number of standard tools.\n\n"
+    "You receive a single task message and cannot ask for clarification or send follow-up messages. "
+    "Complete the task entirely within this one invocation.\n\n"
+    "Only your **last assistant message** is returned as the final output — "
+    "every message you produce during tool use (including thoughts between tool calls) is discarded. "
+    "After finishing all tool use, write a single complete answer in your final message. "
+    "Do NOT say 'as shown above' or reference any intermediate tool output — "
+    "your final message must be fully self-contained and contain the complete answer."
+)
+
+TASK_SYSTEM_PROMPT = """\
+## task（子智能体调度器）
+
+你拥有 `task` 工具，可以将独立任务委派给专用子智能体完成。\
+这些子智能体是一次性的，仅在任务期间存在，完成后返回单一结果。
+
+**每次子智能体调用都是无状态且单次往返（stateless, one-shot）**：子智能体看不到你的对话历史、记忆或上下文，\
+你也无法向它追加消息。它只会收到你在 `description` 参数里写的内容，并在唯一一次回复中返回结果。\
+因此，`description` 必须包含子智能体**独立完成任务**所需的全部背景和上下文，\
+并明确说明它需要在唯一回复中返回什么内容（格式、语言、字数等）。
+
+`description` 错误示例（子智能体无法访问你的对话历史）：
+- ❌ "帮我查一下" （无背景、无上下文、无输出要求）
+- ❌ "修复上面讨论的 bug" （子智能体没有"上面"的对话上下文）
+
+**子智能体的返回结果对用户不可见**——它只返回给你。你有责任将结果整合后再呈现给用户，而不是直接转发原文。
+
+子智能体的完整生命周期：
+1. **派遣** → 在 `description` 里写明角色、任务、期望输出格式和语言
+2. **执行** → 子智能体自主完成任务
+3. **返回** → 子智能体以单条消息返回结果给你
+4. **整合** → 你将结果融合到当前对话，呈现给用户
+
+**重要：若有多个独立任务，必须在同一条消息中同时发起多个 `task` 调用并行执行，而不是逐一等待。**\
+并行调用能显著减少用户等待时间，请务必利用：
+- ❌ 错误：先调用 `task(A)`，等 A 返回后再调用 `task(B)`
+- ✅ 正确：在同一条 assistant 消息里同时发出 `task(A)` 和 `task(B)` 两个工具调用
+- ⚠️ 例外：若 B 依赖 A 的结果，则必须等 A 返回后才能发起 B
+
+何时使用 `task`：
+- 任务复杂、多步骤，且可以完整委派，不需要你参与中间过程
+- 任务相互独立，可以并行启动以节省时间（例如：同时研究 A 话题和 B 话题）
+- 任务需要大量工具调用或 token，委派可以避免你的上下文窗口被污染
+- 你只关心子智能体的最终输出，不需要中间步骤
+
+何时**不**使用 `task`：
+- 任务简单（几次工具调用或快速查询即可）
+- 你需要看到中间推理过程（task 工具会隐藏中间步骤）
+- 委派的子任务过于简短，拆分只会增加延迟而没有收益
+- 任务依赖你的当前上下文，无法独立表达为完整的委派描述"""
 
 
 @dataclass(frozen=True)
@@ -99,8 +157,13 @@ _GENERAL_PURPOSE_DESCRIPTION = (
 )
 
 
-def _extract_subagent_result(messages: list[Any], limit: int = 2) -> str:
-    texts: list[str] = []
+def _extract_subagent_result(messages: list[Any]) -> str:
+    """Extract the last non-empty AI message text from a subagent's message list.
+
+    Iterates in reverse to skip any trailing empty messages that some providers
+    (e.g. Anthropic Claude) may append after the final tool call.
+    Returns the first non-empty AI text found — the subagent's conclusive answer.
+    """
     for msg in reversed(messages):
         if getattr(msg, "type", None) != "ai":
             continue
@@ -115,11 +178,8 @@ def _extract_subagent_result(messages: list[Any], limit: int = 2) -> str:
         else:
             text = str(content).strip()
         if text:
-            texts.append(text)
-        if len(texts) >= limit:
-            break
-    # Subagents may emit the substantive answer, then update write_todos and emit a short closing message.
-    return "\n\n".join(reversed(texts))
+            return text
+    return ""
 
 try:
     from langchain_core.tools import InjectedToolCallId
@@ -181,7 +241,7 @@ class AgentEngine:
         """Return available models."""
         return self._models
 
-    BUILTIN_IDS = {"__chat__", "__empty__", "__power__"}
+    BUILTIN_IDS = {"chat", "empty", "power"}
 
     def get_builtin_presets(self) -> list[AgentPreset]:
         """Return the three built-in agent presets."""
@@ -189,8 +249,9 @@ class AgentEngine:
         default_model = agent_conf.get("default_model", "")
         return [
             AgentPreset(
-                id="__chat__",
-                name="Chat",
+                id="chat",
+                name="chat",
+                display_name="普通对话",
                 system_prompt="You are a helpful assistant. Respond in the user's language.",
                 default_model=default_model,
                 allowed_tool_groups=[],
@@ -200,8 +261,9 @@ class AgentEngine:
                 default_enabled=False,
             ),
             AgentPreset(
-                id="__empty__",
-                name="Empty",
+                id="empty",
+                name="empty",
+                display_name="空模板",
                 system_prompt=agent_conf.get("system_prompt", "You are a helpful assistant."),
                 default_model=default_model,
                 allowed_tool_groups=None,
@@ -211,8 +273,9 @@ class AgentEngine:
                 default_enabled=False,
             ),
             AgentPreset(
-                id="__power__",
-                name="Power",
+                id="power",
+                name="power",
+                display_name="全功能",
                 system_prompt=agent_conf.get("system_prompt", "You are a helpful assistant."),
                 default_model=default_model,
                 allowed_tool_groups=None,
@@ -262,12 +325,12 @@ class AgentEngine:
                 logger.warning("Subagent preset not found: %s — skipping", subagent_id)
                 continue
             subagent_preset = self._resolve_preset(subagent_id)
-            display_name = subagent_preset.name
-            subagent_type = display_name
+            display_name = subagent_preset.display_name or subagent_preset.name
+            subagent_type = subagent_preset.name
             suffix = 1
             while subagent_type in registry:
                 suffix += 1
-                subagent_type = f"{display_name}#{subagent_id.replace('-', '')[:8] or suffix}"
+                subagent_type = f"{subagent_preset.name}-{suffix}"
             registry[subagent_type] = SubAgentDescriptor(
                 subagent_type=subagent_type,
                 preset_id=subagent_id,
@@ -287,8 +350,8 @@ class AgentEngine:
                 "enable_general_purpose_subagent": False,
             })
             self._presets[gp_id] = gp_preset
-            registry["通用助手"] = SubAgentDescriptor(
-                subagent_type="通用助手",
+            registry["general-purpose"] = SubAgentDescriptor(
+                subagent_type="general-purpose",
                 preset_id=gp_id,
                 display_name="通用助手",
                 description=_GENERAL_PURPOSE_DESCRIPTION,
@@ -350,6 +413,20 @@ class AgentEngine:
         description_lines = [
             "Delegate a task to one configured sub-agent.",
             "",
+            "Each call is **stateless and one-shot**: the sub-agent only sees what you put in",
+            "the `description` argument. Therefore `description` must be fully self-contained:",
+            "include ALL background, specify exactly what to return in the **final and only reply**",
+            "(sections, format, language, length).",
+            "",
+            "**Good description example**:",
+            "  \"The user is building a Python project using LangChain. Please research LangChain",
+            "  v0.3's checkpointing mechanism, focusing on: (1) InMemorySaver vs SqliteSaver",
+            "  differences, (2) per-user memory configuration. Return a detailed Chinese analysis",
+            "  with code examples, in sections: Overview / Comparison / Recommendation.\"",
+            "**Bad description examples**:",
+            "  ❌ \"Research LangChain memory.\" (no context, no output format)",
+            "  ❌ \"Fix the checkpoint bug we discussed above.\" (sub-agent has no 'above' context)",
+            "",
             "Use the exact `subagent_type` value from the list below.",
             "Do not rename it, paraphrase it, translate it, or invent a new value.",
             "",
@@ -362,7 +439,7 @@ class AgentEngine:
                 "",
                 f"subagent_type: {descriptor.subagent_type}",
                 "",
-                "delegation_description:",
+                "when_to_use:",
                 descriptor.description,
                 "",
             ])
@@ -370,25 +447,46 @@ class AgentEngine:
             description_lines.pop()
         task_description = "\n".join(description_lines)
 
+        available_types = sorted(descriptor.subagent_type for descriptor in registry.values())
+        subagent_type_field_desc = (
+            f"The type of subagent to use. Must be exactly one of: "
+            f"{', '.join(repr(t) for t in available_types)}. "
+            "Do not translate or modify it."
+        )
+        description_field_desc = (
+            "A detailed description of the task for the subagent to perform autonomously. "
+            "Must include ALL necessary background and context — the subagent cannot access your "
+            "conversation history and you cannot send follow-up messages. "
+            "Specify exactly what the subagent must return in its final and only reply "
+            "(sections, format, language, length)."
+        )
+
         if _HAS_INJECTED_TOOL_CALL_ID:
             @lc_tool("task", description=task_description)
             async def task(
-                subagent_type: str,
-                description: str,
+                subagent_type: Annotated[Literal[*available_types], _PydanticField(  # type: ignore[valid-type]
+                    description=subagent_type_field_desc,
+                )],
+                description: Annotated[str, _PydanticField(description=description_field_desc)],
                 tool_call_id: Annotated[str, InjectedToolCallId],
                 config: RunnableConfig,
             ) -> str:
                 return await _run_subagent(subagent_type, description, config, tool_call_id)
         else:
             @lc_tool("task", description=task_description)
-            async def task(subagent_type: str, description: str, config: RunnableConfig) -> str:
+            async def task(
+                subagent_type: Annotated[Literal[*available_types], _PydanticField(  # type: ignore[valid-type]
+                    description=subagent_type_field_desc,
+                )],
+                description: Annotated[str, _PydanticField(description=description_field_desc)],
+                config: RunnableConfig,
+            ) -> str:
                 import uuid
 
                 tool_call_id = ((config or {}).get("configurable") or {}).get("tool_call_id") or uuid.uuid4().hex
                 return await _run_subagent(subagent_type, description, config, tool_call_id)
 
         return task
-
     def build_agent(
         self,
         preset: AgentPreset | None = None,
@@ -403,6 +501,9 @@ class AgentEngine:
         self._current_preset = preset
 
         system_prompt = preset.system_prompt
+        # Subagents need an explicit reminder that only the final message is returned to the caller
+        if _depth > 0 and not _HAS_MIDDLEWARE_BASE:
+            system_prompt = f"{system_prompt}\n\n{SUBAGENT_DELEGATION_PROMPT}"
         tools = self.tool_registry.get_filtered_tools(preset.allowed_tool_groups)
 
         _memory_middleware: _SystemBlockMiddleware | None = None
@@ -495,14 +596,24 @@ class AgentEngine:
         llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
 
         middleware = []
+        if _depth > 0 and _HAS_MIDDLEWARE_BASE:
+            middleware.append(_SystemBlockMiddleware(
+                SUBAGENT_DELEGATION_PROMPT, "SubagentDelegationMiddleware", prepend=True
+            ))
         if _memory_middleware is not None:
             middleware.append(_memory_middleware)
         if _skills_middleware is not None:
             middleware.append(_skills_middleware)
-        middleware.append(TodoListMiddleware(
-            system_prompt=TODO_SYSTEM_PROMPT,
-            tool_description=TODO_TOOL_DESCRIPTION,
-        ))
+        if _depth == 0 and subagent_registry:
+            if _HAS_MIDDLEWARE_BASE:
+                middleware.append(_SystemBlockMiddleware(TASK_SYSTEM_PROMPT, "TaskSystemPromptMiddleware"))
+            else:
+                system_prompt = f"{system_prompt}\n\n{TASK_SYSTEM_PROMPT}"
+        if _depth == 0:
+            middleware.append(TodoListMiddleware(
+                system_prompt=TODO_SYSTEM_PROMPT,
+                tool_description=TODO_TOOL_DESCRIPTION,
+            ))
         middleware.extend(self._build_summarization_middleware(preset))
 
         # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
@@ -767,7 +878,7 @@ class AgentEngine:
         self,
         message: str,
         thread_id: str,
-        preset_id: str = "__chat__",
+        preset_id: str = "chat",
         model_id: str = "",
         user_id: str = "anonymous",
     ) -> str:
@@ -790,7 +901,7 @@ class AgentEngine:
         self,
         message: str,
         thread_id: str,
-        preset_id: str = "__chat__",
+        preset_id: str = "chat",
         model_id: str = "",
         history: list[dict[str, str]] | None = None,
         llm_params: dict | None = None,

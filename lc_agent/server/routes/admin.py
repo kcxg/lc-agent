@@ -55,7 +55,7 @@ async def create_user(
     )
     db.add(user)
 
-    access = UserAgentAccess(user_id=user.id, agent_id="__chat__")
+    access = UserAgentAccess(user_id=user.id, agent_id="chat")
     db.add(access)
 
     await db.commit()

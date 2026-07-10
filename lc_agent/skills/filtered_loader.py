@@ -3,7 +3,6 @@
 All skills default to ON.  Disabled skills are tracked in a blacklist set.
 """
 
-from __future__ import annotations
 
 from pathlib import Path
 

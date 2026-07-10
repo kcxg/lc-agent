@@ -270,6 +270,30 @@ npm run test:code-agent
 
 模型、思考参数、工具组、MCP、Skills、Agent 默认态都可以通过前端热切换。只有修改 Python 代码、安装新依赖或调整底层服务部署时才需要重启对应服务。
 
+### lc-agent 能不能联网查询问题？
+
+答： 你购买apikey后，模型厂商是不会自动送你联网功能的，联网实际是通过工具调用。
+所以你可以配置mcp，市面上能联网的mcp有很多
+
+例如配置 Open Web Search MCP，你在docker里面启动mcp服务，然后配置到config.jsonc里面的mcp_servers，agent可以勾选启用这个mcp，这样`agent`就能联网查询新闻了，而且可以启用web-search这个skill，引导ai何时联网，怎么高效使用这个mcp的各个工具。
+```jsonc
+{
+    ...其他配置...
+  "mcp_servers": {
+
+    // Web 搜索 MCP
+     // 实时网页搜索 MCP（SSE 方式）
+      // Open Web Search（多引擎搜索 + 文章抓取，Docker 部署）
+      // 启动: docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
+    "web-search": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp",
+      "enabled": true
+    },
+  }
+}
+```
+
 ## License
 
 MIT

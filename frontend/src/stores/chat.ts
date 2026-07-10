@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, shallowReactive } from 'vue'
 import { ChatSseClient, type SseMessage } from '@/api/sse-client'
 import { useSessionsStore } from '@/stores/sessions'
 import { api } from '@/api/http'
 import { createClientId } from '@/utils/client-id'
+import { createSessionState } from './chat-session-state'
+import type { SessionState } from './chat-session-state'
 
 const INITIAL_MESSAGE_LIMIT = 6
 
@@ -537,36 +539,54 @@ export interface TodoItem {
 }
 
 export const useChatStore = defineStore('chat', () => {
-  const messages = ref<ChatMessage[]>([])
-  const isStreaming = ref(false)
-  const isConnected = computed(() => !!threadId.value)
-  const threadId = ref<string | null>(null)
-  const interrupt = ref<InterruptInfo | null>(null)
-  let sseClient: ChatSseClient | null = null
-  const todos = ref<TodoItem[]>([])
-  const errorMessage = ref<ErrorInfo | null>(null)
+  // --- Session Registry ---
+  // shallowReactive() makes Map.get/set/delete/has reactive (so sidebar streaming
+  // indicators update automatically) without deep-unwrapping the Ref fields
+  // inside SessionState.
+  const activeSessions = shallowReactive(new Map<string, SessionState>())
+  const activeSessionId = ref<string | null>(null)
+  const sessionOffsets = new Map<string, number>()
 
-  const lastMessage = computed(() => messages.value[messages.value.length - 1])
+  // --- Computed delegates to active session (API unchanged for components) ---
+  const _active = (): SessionState | undefined =>
+    activeSessionId.value ? activeSessions.get(activeSessionId.value) : undefined
 
-  let streamStartTime = 0
-  let currentRoundStart = 0
-  let inThinking = false
+  const messages = computed<ChatMessage[]>(() => _active()?.messages.value ?? [])
+  const isStreaming = computed(() => _active()?.isStreaming.value ?? false)
+  const interrupt = computed(() => _active()?.interrupt.value ?? null)
+  const todos = computed(() => _active()?.todos.value ?? [])
+  const errorMessage = computed(() => _active()?.errorMessage.value ?? null)
+  const totalMessageCount = computed(() => _active()?.totalMessageCount.value ?? 0)
+  const hasOlderMessages = computed(() => _active()?.hasOlderMessages.value ?? false)
+  const loadingOlder = computed(() => _active()?.loadingOlder.value ?? false)
+  const isConnected = computed(() => !!activeSessionId.value)
+  const threadId = computed(() => activeSessionId.value)
+  const lastMessage = computed(() => {
+    const msgs = messages.value
+    return msgs[msgs.length - 1] ?? null
+  })
 
-  function _ensureClient(): ChatSseClient {
-    if (!sseClient) {
-      sseClient = new ChatSseClient()
-      _registerHandlers(sseClient)
-    }
-    return sseClient
+  function _createClientForSession(state: SessionState, sessionId: string): ChatSseClient {
+    const client = new ChatSseClient()
+    state.client = client
+    _registerHandlers(client, state, sessionId)
+    return client
   }
 
-  function _registerHandlers(client: ChatSseClient) {
+  function _releaseBackgroundSession(sessionId: string, state: SessionState): void {
+    state.client?.disconnect()
+    state.client = null
+    sessionOffsets.delete(sessionId)
+    activeSessions.delete(sessionId)
+  }
+
+  function _registerHandlers(client: ChatSseClient, state: SessionState, sessionId: string) {
     client.on('thinking', (msg: SseMessage) => {
-      if (!isStreaming.value) {
-        isStreaming.value = true
-        streamStartTime = Date.now()
-        currentRoundStart = Date.now()
-        messages.value.push({
+      if (!state.isStreaming.value) {
+        state.isStreaming.value = true
+        state.streamStartTime = Date.now()
+        state.currentRoundStart = Date.now()
+        state.messages.value.push({
           id: createClientId(),
           role: 'assistant',
           content: '',
@@ -575,10 +595,10 @@ export const useChatStore = defineStore('chat', () => {
           usage: { rounds: [], toolCallCount: 0 },
         })
       }
-      const last = messages.value[messages.value.length - 1]
+      const last = state.messages.value[state.messages.value.length - 1]
       if (last && last.role === 'assistant') {
-        if (!inThinking) {
-          inThinking = true
+        if (!state.inThinking) {
+          state.inThinking = true
           last.content += '<!--THINK_START-->'
         }
         last.content += msg.content || ''
@@ -586,11 +606,11 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     client.on('token', (msg: SseMessage) => {
-      if (!isStreaming.value) {
-        isStreaming.value = true
-        streamStartTime = Date.now()
-        currentRoundStart = Date.now()
-        messages.value.push({
+      if (!state.isStreaming.value) {
+        state.isStreaming.value = true
+        state.streamStartTime = Date.now()
+        state.currentRoundStart = Date.now()
+        state.messages.value.push({
           id: createClientId(),
           role: 'assistant',
           content: '',
@@ -599,10 +619,10 @@ export const useChatStore = defineStore('chat', () => {
           usage: { rounds: [], toolCallCount: 0 },
         })
       }
-      const last = messages.value[messages.value.length - 1]
+      const last = state.messages.value[state.messages.value.length - 1]
       if (last && last.role === 'assistant') {
-        if (inThinking) {
-          inThinking = false
+        if (state.inThinking) {
+          state.inThinking = false
           last.content += '<!--THINK_END-->'
         }
         last.content += msg.content || ''
@@ -610,16 +630,16 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     client.on('content', (msg: SseMessage) => {
-      const last = messages.value[messages.value.length - 1]
+      const last = state.messages.value[state.messages.value.length - 1]
       if (last && last.role === 'assistant') {
         last.content += msg.content || ''
       }
     })
 
     client.on('llm_usage', (msg: SseMessage) => {
-      const last = messages.value[messages.value.length - 1]
+      const last = state.messages.value[state.messages.value.length - 1]
       if (last?.usage) {
-        const roundDuration = currentRoundStart ? Date.now() - currentRoundStart : undefined
+        const roundDuration = state.currentRoundStart ? Date.now() - state.currentRoundStart : undefined
         last.usage.rounds.push({
           inputTokens: msg.input_tokens || 0,
           outputTokens: msg.output_tokens || 0,
@@ -628,16 +648,16 @@ export const useChatStore = defineStore('chat', () => {
           reasoningTokens: msg.reasoning_tokens || 0,
           duration: roundDuration,
         })
-        currentRoundStart = Date.now()
+        state.currentRoundStart = Date.now()
       }
     })
 
     client.on('tool_call', (msg: SseMessage) => {
-      if (!isStreaming.value) {
-        isStreaming.value = true
-        streamStartTime = Date.now()
-        currentRoundStart = Date.now()
-        messages.value.push({
+      if (!state.isStreaming.value) {
+        state.isStreaming.value = true
+        state.streamStartTime = Date.now()
+        state.currentRoundStart = Date.now()
+        state.messages.value.push({
           id: createClientId(),
           role: 'assistant',
           content: '',
@@ -646,10 +666,10 @@ export const useChatStore = defineStore('chat', () => {
           usage: { rounds: [], toolCallCount: 0 },
         })
       }
-      const last = messages.value[messages.value.length - 1]
+      const last = state.messages.value[state.messages.value.length - 1]
       if (last && last.role === 'assistant') {
-        if (inThinking) {
-          inThinking = false
+        if (state.inThinking) {
+          state.inThinking = false
           last.content += '<!--THINK_END-->'
         }
         if (!last.toolCalls) last.toolCalls = []
@@ -675,13 +695,13 @@ export const useChatStore = defineStore('chat', () => {
           last.usage.toolCallCount++
         }
         if (msg.name === 'write_todos' && msg.args?.todos) {
-          todos.value = msg.args.todos as TodoItem[]
+          state.todos.value = msg.args.todos as TodoItem[]
         }
       }
     })
 
     client.on('tool_result', (msg: SseMessage) => {
-      const last = messages.value[messages.value.length - 1]
+      const last = state.messages.value[state.messages.value.length - 1]
       if (last?.toolCalls) {
         const tc = last.toolCalls.find(t => t.name === msg.name && t.status === 'running')
         if (tc) {
@@ -694,49 +714,49 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     client.on('subagent_start', (msg: SseMessage) => {
-      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentStart, threadId.value)
+      const result = applySubAgentEventToMessages(state.messages.value, msg, applySubAgentStart, sessionId)
       if (result.shouldRefresh) {
-        messages.value = [...messages.value]
+        state.messages.value = [...state.messages.value]
       }
     })
 
     client.on('subagent_token', (msg: SseMessage) => {
-      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentToken, threadId.value)
+      const result = applySubAgentEventToMessages(state.messages.value, msg, applySubAgentToken, sessionId)
       if (result.shouldRefresh) {
-        messages.value = [...messages.value]
+        state.messages.value = [...state.messages.value]
       }
     })
 
     client.on('subagent_thinking', (msg: SseMessage) => {
-      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentThinking, threadId.value)
+      const result = applySubAgentEventToMessages(state.messages.value, msg, applySubAgentThinking, sessionId)
       if (result.shouldRefresh) {
-        messages.value = [...messages.value]
+        state.messages.value = [...state.messages.value]
       }
     })
 
     client.on('subagent_tool_call', (msg: SseMessage) => {
-      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentToolCall, threadId.value)
+      const result = applySubAgentEventToMessages(state.messages.value, msg, applySubAgentToolCall, sessionId)
       if (result.shouldRefresh) {
-        messages.value = [...messages.value]
+        state.messages.value = [...state.messages.value]
       }
     })
 
     client.on('subagent_tool_result', (msg: SseMessage) => {
-      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentToolResult, threadId.value)
+      const result = applySubAgentEventToMessages(state.messages.value, msg, applySubAgentToolResult, sessionId)
       if (result.shouldRefresh) {
-        messages.value = [...messages.value]
+        state.messages.value = [...state.messages.value]
       }
     })
 
     client.on('subagent_done', (msg: SseMessage) => {
-      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentDone, threadId.value)
+      const result = applySubAgentEventToMessages(state.messages.value, msg, applySubAgentDone, sessionId)
       if (result.shouldRefresh) {
-        messages.value = [...messages.value]
+        state.messages.value = [...state.messages.value]
       }
     })
 
     client.on('interrupt', (msg: SseMessage) => {
-      interrupt.value = {
+      state.interrupt.value = {
         actionRequests: msg.action_requests || [],
         reviewConfigs: msg.review_configs || [],
         data: msg.data || [],
@@ -744,17 +764,17 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     client.on('done', (msg: SseMessage) => {
-      errorMessage.value = null
-      isStreaming.value = false
-      inThinking = false
-      const last = messages.value[messages.value.length - 1]
+      state.errorMessage.value = null
+      state.isStreaming.value = false
+      state.inThinking = false
+      const last = state.messages.value[state.messages.value.length - 1]
       if (last) {
         last.isStreaming = false
         const isResume = !!msg.is_resume
         const usageData = msg.usage as any[] | undefined
         if (usageData && usageData.length > 0) {
-          if (last.usage && streamStartTime) {
-            last.usage.totalDuration = Date.now() - streamStartTime
+          if (last.usage && state.streamStartTime) {
+            last.usage.totalDuration = Date.now() - state.streamStartTime
           }
           if (last.usage) {
             if (isResume) {
@@ -793,37 +813,43 @@ export const useChatStore = defineStore('chat', () => {
           }
         }
       }
-      if (threadId.value) {
-        setTimeout(() => {
-          const sessionsStore = useSessionsStore()
-          sessionsStore.refreshSessionTitle(threadId.value!)
-        }, 3000)
+      setTimeout(() => {
+        const sessionsStore = useSessionsStore()
+        sessionsStore.refreshSessionTitle(sessionId)
+      }, 3000)
+      // Auto-cleanup: if this session is no longer the active one, release resources
+      if (sessionId !== activeSessionId.value) {
+        _releaseBackgroundSession(sessionId, state)
       }
     })
 
     client.on('cancelled', () => {
-      errorMessage.value = null
-      isStreaming.value = false
-      inThinking = false
-      const last = messages.value[messages.value.length - 1]
+      state.errorMessage.value = null
+      state.isStreaming.value = false
+      state.inThinking = false
+      const last = state.messages.value[state.messages.value.length - 1]
       if (last) last.isStreaming = false
+      // Auto-cleanup: if this session is no longer the active one, release resources
+      if (sessionId !== activeSessionId.value) {
+        _releaseBackgroundSession(sessionId, state)
+      }
     })
 
     client.on('error', (msg: SseMessage) => {
-      isStreaming.value = false
-      if (inThinking) {
-        const last = messages.value[messages.value.length - 1]
+      state.isStreaming.value = false
+      if (state.inThinking) {
+        const last = state.messages.value[state.messages.value.length - 1]
         if (last && last.role === 'assistant') {
           last.content += '<!--THINK_END-->'
         }
-        inThinking = false
+        state.inThinking = false
       }
-      const lastMsg = messages.value[messages.value.length - 1]
+      const lastMsg = state.messages.value[state.messages.value.length - 1]
       if (lastMsg && lastMsg.role === 'assistant') {
         lastMsg.isStreaming = false
       }
       if (msg.title) {
-        errorMessage.value = {
+        state.errorMessage.value = {
           title: msg.title,
           detail: msg.detail || '',
           suggestions: msg.suggestions,
@@ -831,7 +857,7 @@ export const useChatStore = defineStore('chat', () => {
           errorCode: msg.error_code,
         }
       } else {
-        errorMessage.value = {
+        state.errorMessage.value = {
           title: 'AI 模型接口请求失败',
           detail: msg.message || '',
           suggestions: ['请稍后重试，如问题持续请联系管理员'],
@@ -839,6 +865,10 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
       console.error('[Chat] Error:', msg.message || msg.title)
+      // Auto-cleanup: if this session is no longer the active one, release resources
+      if (sessionId !== activeSessionId.value) {
+        _releaseBackgroundSession(sessionId, state)
+      }
     })
 
     client.on('title_update', (msg: SseMessage) => {
@@ -849,47 +879,93 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  async function connect(existingThreadId?: string) {
-    const client = _ensureClient()
-    if (existingThreadId) {
-      client.setThreadId(existingThreadId)
-      threadId.value = existingThreadId
+  /**
+   * Switch the active session. If the departing session is streaming, it stays
+   * in the registry and continues in the background. If it is idle, it is
+   * released immediately. The arriving session is loaded from DB unless it is
+   * already in the registry (was streaming in background).
+   */
+  async function switchToSession(sessionId: string): Promise<void> {
+    if (activeSessionId.value === sessionId) return
+
+    // Departing session
+    const oldId = activeSessionId.value
+    if (oldId) {
+      const old = activeSessions.get(oldId)
+      if (old && !old.isStreaming.value) {
+        _releaseBackgroundSession(oldId, old)
+      }
+      // Streaming session: keep in map — SSE continues in background
     }
+
+    activeSessionId.value = sessionId
+
+    // Arriving session: already in registry means it was streaming in background
+    if (activeSessions.has(sessionId)) return
+
+    // New session: create state, load messages, connect client
+    const state = createSessionState()
+    activeSessions.set(sessionId, state)
+    await _loadMessagesIntoState(sessionId, state)
+
+    // Stale switch guard: verify this is still the current state object for
+    // this session. Catches the A→B→A rapid-switch case where a second
+    // switchToSession(A) created a new state and replaced ours in the map.
+    // Only return — do NOT delete from the map (that would evict the
+    // replacement state that is still loading).
+    if (activeSessions.get(sessionId) !== state) {
+      return
+    }
+
+    const client = _createClientForSession(state, sessionId)
+    client.setThreadId(sessionId)
+  }
+
+  /** Expose session streaming state for sidebar indicators */
+  function isSessionStreaming(sessionId: string): boolean {
+    return activeSessions.get(sessionId)?.isStreaming.value ?? false
+  }
+
+  function getStreamingSessionIds(): string[] {
+    return [...activeSessions.keys()].filter(id =>
+      activeSessions.get(id)?.isStreaming.value
+    )
   }
 
   async function sendMessage(
     content: string,
-    presetId: string = '__chat__',
+    presetId: string = 'chat',
     modelId: string = '',
     options: SendMessageOptions = {},
   ) {
     if (!content.trim()) return
 
-    errorMessage.value = null
     const sessionsStore = useSessionsStore()
     const sessionId = sessionsStore.currentSessionId
     if (sessionId && sessionsStore.isLocalSession(sessionId)) {
       const isFirstMessage = sessionsStore.currentSession?.message_count === 0
       const realId = await sessionsStore.persistSession(sessionId, modelId)
-      await connect(realId)
+      await switchToSession(realId)
       if (isFirstMessage) {
         sessionsStore.updateTitleLocal(realId, content.trim().slice(0, 30))
       }
-    } else if (!threadId.value) {
-      if (sessionId) await connect(sessionId)
+    } else if (!activeSessionId.value) {
+      if (sessionId) await switchToSession(sessionId)
     }
 
-    const client = _ensureClient()
-    if (!threadId.value) return
+    const state = activeSessionId.value ? activeSessions.get(activeSessionId.value) : undefined
+    if (!state?.client) return
 
-    messages.value.push({
+    state.errorMessage.value = null
+
+    state.messages.value.push({
       id: createClientId(),
       role: 'user',
       content: content.trim(),
       timestamp: Date.now(),
     })
 
-    client.sendMessage(content.trim(), presetId, modelId, {
+    state.client.sendMessage(content.trim(), presetId, modelId, {
       replaceFromMessageId: options.replaceFromMessageId,
       history: options.history,
       llmParams: options.llmParams,
@@ -898,12 +974,13 @@ export const useChatStore = defineStore('chat', () => {
 
   function respondToInterrupt(
     approved: boolean,
-    presetId: string = '__chat__',
+    presetId: string = 'chat',
     permanentlyAllow?: string,
     llmParams?: Record<string, any> | null,
   ) {
-    const client = _ensureClient()
-    const count = interrupt.value?.actionRequests?.length || 1
+    const state = _active()
+    if (!state?.client) return
+    const count = state.interrupt.value?.actionRequests?.length || 1
     const decisions = Array.from({ length: count }, () => ({
       type: approved ? 'approve' : 'reject',
     }))
@@ -911,11 +988,11 @@ export const useChatStore = defineStore('chat', () => {
     if (permanentlyAllow) {
       resumePayload.permanently_allow = permanentlyAllow
     }
-    client.sendInterruptResume(resumePayload, presetId, undefined, llmParams)
-    interrupt.value = null
-    isStreaming.value = true
-    currentRoundStart = Date.now()
-    const last = messages.value[messages.value.length - 1]
+    state.client.sendInterruptResume(resumePayload, presetId, undefined, llmParams)
+    state.interrupt.value = null
+    state.isStreaming.value = true
+    state.currentRoundStart = Date.now()
+    const last = state.messages.value[state.messages.value.length - 1]
     if (last && last.role === 'assistant') {
       last.isStreaming = true
     }
@@ -923,103 +1000,110 @@ export const useChatStore = defineStore('chat', () => {
 
   function resumeInterrupt(
     resumeValue: any,
-    presetId: string = '__chat__',
+    presetId: string = 'chat',
     model?: string,
     llmParams?: Record<string, any> | null,
   ) {
-    const client = _ensureClient()
-    client.sendInterruptResume(resumeValue, presetId, model, llmParams)
-    interrupt.value = null
-    isStreaming.value = true
-    currentRoundStart = Date.now()
-    const last = messages.value[messages.value.length - 1]
+    const state = _active()
+    if (!state?.client) return
+    state.client.sendInterruptResume(resumeValue, presetId, model, llmParams)
+    state.interrupt.value = null
+    state.isStreaming.value = true
+    state.currentRoundStart = Date.now()
+    const last = state.messages.value[state.messages.value.length - 1]
     if (last && last.role === 'assistant') {
       last.isStreaming = true
     }
   }
 
-  const totalMessageCount = ref(0)
-  const hasOlderMessages = computed(() => {
-    const loaded = messages.value.length
-    return totalMessageCount.value > loaded
-  })
-  const loadingOlder = ref(false)
-  let _currentOffset = 0
-
-  async function loadMessages(sessionId: string) {
+  async function _loadMessagesIntoState(sessionId: string, state: SessionState): Promise<void> {
     const sessionsStore = useSessionsStore()
     if (sessionsStore.isLocalSession(sessionId)) {
-      totalMessageCount.value = 0
-      _currentOffset = 0
-      messages.value = []
+      state.totalMessageCount.value = 0
+      sessionOffsets.set(sessionId, 0)
+      state.messages.value = []
+      state.hasOlderMessages.value = false
       return
     }
     try {
       const resp = await api.getSessionMessages(sessionId, { limit: INITIAL_MESSAGE_LIMIT })
       const total = resp?.total ?? 0
       const rawMessages = resp?.messages ?? resp
-      totalMessageCount.value = total
-      _currentOffset = resp?.offset ?? 0
+      state.totalMessageCount.value = total
+      sessionOffsets.set(sessionId, resp?.offset ?? 0)
 
       // Always set messages on API success — this ensures session switches always
       // replace the current messages, even when the target session returns empty.
-      messages.value = normalizeHistoryMessages(
+      state.messages.value = normalizeHistoryMessages(
         Array.isArray(rawMessages) ? rawMessages : []
       )
+      state.hasOlderMessages.value = total > state.messages.value.length
     } catch (e) {
       // On API failure keep current messages (graceful degradation)
       console.error('[Chat] Failed to load messages:', e)
     }
   }
 
+  async function loadMessages(sessionId: string): Promise<void> {
+    // If the target session is in the registry, load into its own state.
+    // Otherwise fall back to the currently active session — this supports
+    // temporary display of sub-session messages without a full session switch.
+    const targetState = activeSessions.get(sessionId) ?? _active()
+    if (targetState) {
+      await _loadMessagesIntoState(sessionId, targetState)
+    }
+  }
+
   async function loadOlderMessages(sessionId: string) {
-    if (!hasOlderMessages.value || loadingOlder.value || _currentOffset <= 0) return
-    loadingOlder.value = true
+    const state = _active()
+    if (!state) return
+    const currentOffset = sessionOffsets.get(sessionId) ?? 0
+    if (!state.hasOlderMessages.value || state.loadingOlder.value || currentOffset <= 0) return
+    state.loadingOlder.value = true
     try {
       const olderPageSize = INITIAL_MESSAGE_LIMIT
-      const newOffset = Math.max(0, _currentOffset - olderPageSize)
-      const newLimit = _currentOffset - newOffset
+      const newOffset = Math.max(0, currentOffset - olderPageSize)
+      const newLimit = currentOffset - newOffset
       if (newLimit <= 0) return
 
       const resp = await api.getSessionMessages(sessionId, { limit: newLimit, offset: newOffset })
       const olderRaw = resp?.messages ?? []
       if (olderRaw.length === 0) return
 
-      _currentOffset = newOffset
+      sessionOffsets.set(sessionId, newOffset)
       const olderNormalized = normalizeHistoryMessages(olderRaw)
-      messages.value = [...olderNormalized, ...messages.value]
+      state.messages.value = [...olderNormalized, ...state.messages.value]
+      state.hasOlderMessages.value = state.totalMessageCount.value > state.messages.value.length
     } catch (e) {
       console.error('[Chat] Failed to load older messages:', e)
     } finally {
-      loadingOlder.value = false
+      state.loadingOlder.value = false
     }
   }
 
   function stopGeneration() {
-    if (sseClient && isStreaming.value) {
-      sseClient.sendCancel()
+    const state = _active()
+    if (state?.client && state.isStreaming.value) {
+      state.client.sendCancel()
     }
   }
 
   function clearMessages() {
-    messages.value = []
-    todos.value = []
+    const state = _active()
+    if (state) {
+      state.messages.value = []
+      state.todos.value = []
+      state.interrupt.value = null
+      state.errorMessage.value = null
+    }
   }
 
   function truncateAfterMessage(messageId: string) {
-    const idx = messages.value.findIndex(m => m.id === messageId)
+    const state = _active()
+    if (!state) return
+    const idx = state.messages.value.findIndex(m => m.id === messageId)
     if (idx < 0) return
-    messages.value = messages.value.slice(0, idx)
-  }
-
-  function disconnect() {
-    sseClient?.disconnect()
-    sseClient = null
-    errorMessage.value = null
-    isStreaming.value = false
-    threadId.value = null
-    todos.value = []
-    inThinking = false
+    state.messages.value = state.messages.value.slice(0, idx)
   }
 
   return {
@@ -1034,7 +1118,9 @@ export const useChatStore = defineStore('chat', () => {
     totalMessageCount,
     hasOlderMessages,
     loadingOlder,
-    connect,
+    switchToSession,
+    isSessionStreaming,
+    getStreamingSessionIds,
     loadMessages,
     loadOlderMessages,
     sendMessage,
@@ -1043,6 +1129,5 @@ export const useChatStore = defineStore('chat', () => {
     resumeInterrupt,
     clearMessages,
     truncateAfterMessage,
-    disconnect,
   }
 })

@@ -100,18 +100,18 @@ async def test_set_user_agents(client_and_token):
 
     resp = await client.put(
         f"/api/admin/users/{user_id}/agents",
-        json={"agent_ids": ["__chat__", "__power__"]},
+        json={"agent_ids": ["chat", "power"]},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
-    assert set(resp.json()["agent_ids"]) == {"__chat__", "__power__"}
+    assert set(resp.json()["agent_ids"]) == {"chat", "power"}
 
     resp2 = await client.get(
         f"/api/admin/users/{user_id}/agents",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp2.status_code == 200
-    assert set(resp2.json()["agent_ids"]) == {"__chat__", "__power__"}
+    assert set(resp2.json()["agent_ids"]) == {"chat", "power"}
 
 
 @pytest.mark.asyncio

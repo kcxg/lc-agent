@@ -296,11 +296,11 @@ Agent Preset 的 `allowed_tool_groups` / `allowed_mcp_servers` / `allowed_skills
 
 #### 内置预设（硬编码在框架中）
 
-| ID | 行为 |
-|----|------|
-| `__chat__` | 纯聊天，无工具 |
-| `__empty__` | 默认不启用工具 |
-| `__power__` | 默认启用所有工具 |
+| ID | display_name | 行为 |
+|----|--------------|------|
+| `chat` | 普通对话 | 纯聊天，无工具 |
+| `empty` | 空模板 | 默认不启用工具 |
+| `power` | 全功能 | 默认启用所有工具 |
 
 #### 用户网页创建的预设
 
@@ -328,9 +328,9 @@ app.add_agent(name="my_agent", graph=my_compiled_graph, description="描述")
 
 客户端发送:
 ```json
-{"type": "message", "content": "用户消息", "preset_id": "__power__", "model": "ds-deepseek-v4-flash"}
+{"type": "message", "content": "用户消息", "preset_id": "power", "model": "ds-deepseek-v4-flash"}
 {"type": "cancel"}
-{"type": "interrupt_response", "approved": true, "preset_id": "__power__"}
+{"type": "interrupt_response", "approved": true, "preset_id": "power"}
 ```
 
 服务端流式返回:
@@ -398,6 +398,7 @@ from langchain_agentskills.loaders import DirectorySkillLoader, CompositeSkillLo
 5. **MCP 服务器** — 类型分 `local`(subprocess)、`sse`、`http`(streamable HTTP)
 6. **LiteLLM** — bfzs 通过 LiteLLM 代理访问各家 LLM，默认 `http://localhost:4000/v1`
 7. **新增功能前先查生态** — 见下方"架构原则"
+8. **禁止在 Python 文件顶部写 `from __future__ import annotations`** — 此语句会把当前模块所有函数注解变为惰性字符串，LangChain 的 `@tool` / `@lc_tool` 装饰器在构建 Pydantic schema 时调用 `get_type_hints()`，会在全局作用域解析注解字符串，导致函数内局部变量（如动态生成的 `Field(description=...)` 引用）报 `NameError`。Python 3.12 无需此语句，项目内已有该语句的文件可以直接删除。
 
 ## 10. 架构原则：优先复用 LangChain 生态
 

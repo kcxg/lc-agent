@@ -58,6 +58,11 @@
             >
               <span class="session-rail" aria-hidden="true"></span>
               <span v-if="session.is_pinned" class="session-pin-indicator">📌</span>
+              <span
+                v-if="chatStore.isSessionStreaming(session.id)"
+                class="session-streaming-dot"
+                title="正在生成中"
+              />
               <span class="session-item-title">{{ session.title || '新对话' }}</span>
               <div class="session-item-meta">
                 <button
@@ -119,11 +124,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { InputInstance } from 'element-plus'
 import { useSessionsStore, type Session } from '@/stores/sessions'
 import { useAgentsStore } from '@/stores/agents'
+import { useChatStore } from '@/stores/chat'
 
 const props = defineProps<{ collapsed: boolean }>()
 
 const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()
+const chatStore = useChatStore()
 
 const deleteDialogVisible = ref(false)
 const deleteTargetId = ref<string | null>(null)
@@ -168,7 +175,7 @@ const collapsedGroups = ref<Set<string>>(loadCollapsedGroups())
 
 const activeAgentName = computed(() => {
   const session = sessionsStore.sessions.find(s => s.id === sessionsStore.currentSessionId)
-  return agentsStore.getAgentName(session?.agent_id || '__chat__')
+  return agentsStore.getAgentName(session?.agent_id || 'chat')
 })
 
 const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
@@ -199,7 +206,7 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
   const buckets = new Map<string, Session[]>()
 
   for (const session of filteredSessions.value) {
-    const agentId = session.agent_id || '__chat__'
+    const agentId = session.agent_id || 'chat'
     const list = buckets.get(agentId) || []
     list.push(session)
     buckets.set(agentId, list)
@@ -210,7 +217,7 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
       const agentName = agentsStore.getAgentName(agentId)
       const sorted = sessions.slice().sort(compareSessions)
       const visibleCount = getVisibleCount(agentId)
-      const totalCount = sessionsStore.sessions.filter(s => (s.agent_id || '__chat__') === agentId).length
+      const totalCount = sessionsStore.sessions.filter(s => (s.agent_id || 'chat') === agentId).length
       return {
         agentId,
         agentName,
@@ -575,6 +582,21 @@ onBeforeUnmount(() => {
 .session-pin-indicator {
   flex-shrink: 0;
   font-size: 12px;
+}
+
+.session-streaming-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--el-color-primary, #409eff);
+  animation: streaming-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes streaming-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .session-item-title {

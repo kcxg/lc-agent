@@ -15,6 +15,7 @@ class AgentPresetDB(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     name: str
+    display_name: str | None = Field(default=None)
     system_prompt: str = ""
     default_model: str = ""
     allowed_tool_groups: list[str] | None = Field(default=None, sa_column=Column(JSON))
@@ -35,7 +36,7 @@ class SessionMeta(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     title: str = "新对话"
-    agent_id: str = "__chat__"
+    agent_id: str = "chat"
     model: str = ""
     user_id: str = Field(default="", index=True)
     parent_session_id: str | None = Field(default=None, index=True)

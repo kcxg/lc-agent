@@ -188,7 +188,7 @@ class TestAgentEngine:
         from lc_agent.core.engine import AgentEngine
         engine = AgentEngine(sample_config)
         preset = engine.get_default_preset()
-        assert preset.id == "__chat__"
+        assert preset.id == "chat"
         assert preset.system_prompt == "You are a helpful assistant. Respond in the user's language."
         assert preset.default_model == "test-model"
 
@@ -219,15 +219,15 @@ class TestAgentEngine:
 
         monkeypatch.setattr(engine, "build_agent", fake_build_agent)
 
-        agent_a = engine._get_or_build_agent("__chat__", model_id="ark-deepseek-v4-flash")
-        agent_b = engine._get_or_build_agent("__chat__", model_id="ark-deepseek-v4-flash")
-        agent_c = engine._get_or_build_agent("__chat__")
+        agent_a = engine._get_or_build_agent("chat", model_id="ark-deepseek-v4-flash")
+        agent_b = engine._get_or_build_agent("chat", model_id="ark-deepseek-v4-flash")
+        agent_c = engine._get_or_build_agent("chat")
 
         assert agent_a is agent_b
         assert agent_a is not agent_c
         assert built == [
-            ("ark-deepseek-v4-flash", "__chat__::model::ark-deepseek-v4-flash"),
-            ("test-model", "__chat__"),
+            ("ark-deepseek-v4-flash", "chat::model::ark-deepseek-v4-flash"),
+            ("test-model", "chat"),
         ]
         assert engine.get_default_preset().default_model == "test-model"
 

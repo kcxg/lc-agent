@@ -779,10 +779,8 @@ watch(
         subLiveToolCallId.value = null
         return
       }
-      // Returning from historical mode: reconnect main session
-      chatStore.disconnect()
+      // Returning from historical mode: reload main session messages
       await chatStore.loadMessages(newId)
-      await chatStore.connect(newId)
     }
   },
 )
@@ -925,9 +923,6 @@ function handleMarkdownClick(event: MouseEvent) {
 }
 
 onMounted(() => {
-  if (!chatStore.isConnected && !chatStore.threadId) {
-    chatStore.connect()
-  }
   document.addEventListener('click', handleMarkdownClick)
 })
 

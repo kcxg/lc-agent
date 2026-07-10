@@ -1,6 +1,5 @@
 """Sub-agent stream run tracking for SSE events."""
 
-from __future__ import annotations
 
 import asyncio
 import time

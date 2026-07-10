@@ -58,7 +58,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  function createLocalSession(agentId: string = '__chat__', model: string = ''): Session {
+  function createLocalSession(agentId: string = 'chat', model: string = ''): Session {
     const existing = sessions.value.find(
       s => s.agent_id === agentId && s.message_count === 0 && localSessionIds.value.has(s.id)
     )
@@ -72,7 +72,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     return ensureLocalSession(id, agentId, model)
   }
 
-  function ensureLocalSession(id: string, agentId: string = '__chat__', model: string = ''): Session {
+  function ensureLocalSession(id: string, agentId: string = 'chat', model: string = ''): Session {
     const existing = sessions.value.find(s => s.id === id)
     if (existing) {
       existing.agent_id = agentId
@@ -120,7 +120,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     return newId
   }
 
-  async function createSession(agentId: string = '__chat__', model: string = '') {
+  async function createSession(agentId: string = 'chat', model: string = '') {
     const created = await api.createSession({ agent_id: agentId, model })
     sessions.value.unshift({
       ...created,
@@ -208,7 +208,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const agentsStore = useAgentsStore()
     const groups: Record<string, { agentName: string; agentSource: string; sessions: Session[] }> = {}
     for (const s of sessions.value) {
-      const key = s.agent_id || '__chat__'
+      const key = s.agent_id || 'chat'
       if (!groups[key]) {
         const agent = agentsStore.agents.find(a => a.id === key)
         groups[key] = {

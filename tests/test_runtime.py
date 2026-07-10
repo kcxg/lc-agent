@@ -50,8 +50,8 @@ async def test_chat_stream_yields_events(engine_with_provider):
         yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content=" world")}}
 
     mock_agent.astream_events = fake_stream
-    engine_with_provider._agents["__chat__"] = mock_agent
-    engine_with_provider._agent_mcp_gen["__chat__"] = engine_with_provider._mcp_generation
+    engine_with_provider._agents["chat"] = mock_agent
+    engine_with_provider._agent_mcp_gen["chat"] = engine_with_provider._mcp_generation
 
     events = []
     async for event in engine_with_provider.chat_stream("test", "thread-1"):

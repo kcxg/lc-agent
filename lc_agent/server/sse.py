@@ -95,7 +95,7 @@ def _enrich_action_requests_display_names(
 class RunStreamRequest(BaseModel):
     input: str | None = None
     command: dict[str, Any] | None = None
-    preset_id: str = "__chat__"
+    preset_id: str = "chat"
     model: str = ""
     llm_params: dict[str, Any] | None = None
     replace_from_message_id: str | None = None
@@ -215,7 +215,7 @@ async def cancel_run(thread_id: str, request: Request):
 
 
 @router.get("/{thread_id}/state")
-async def get_thread_state(thread_id: str, request: Request, preset_id: str = "__chat__", model: str = ""):
+async def get_thread_state(thread_id: str, request: Request, preset_id: str = "chat", model: str = ""):
     """Check thread state — primarily for pending interrupts."""
     auth_error = await _check_sse_auth(request, thread_id)
     if auth_error is not None:

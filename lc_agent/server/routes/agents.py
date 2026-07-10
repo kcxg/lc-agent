@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -25,10 +26,18 @@ async def get_db(request: Request):
         await session.close()
 
 
+_AGENT_NAME_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]*$')
+_AGENT_NAME_ERROR = (
+    "Agent 名称只能使用英文字母、数字、连字符(-)和下划线(_)，"
+    "且必须以字母开头，例如：code-assistant、researcher_v2"
+)
+
+
 class AgentCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
+    display_name: str | None = None
     system_prompt: str
     default_model: str
     allowed_tool_groups: list[str] | None = None
@@ -37,6 +46,13 @@ class AgentCreateRequest(BaseModel):
     llm_params: dict | None = None
     subagents: list[SubAgentLink] | None = None
     enable_general_purpose_subagent: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_ascii(cls, v: str) -> str:
+        if not _AGENT_NAME_PATTERN.match(v):
+            raise ValueError(_AGENT_NAME_ERROR)
+        return v
 
     @field_validator("subagents")
     @classmethod
@@ -57,6 +73,7 @@ class AgentUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
+    display_name: str | None = None
     system_prompt: str | None = None
     default_model: str | None = None
     allowed_tool_groups: list[str] | None = None
@@ -65,6 +82,13 @@ class AgentUpdateRequest(BaseModel):
     llm_params: dict | None = None
     subagents: list[SubAgentLink] | None = None
     enable_general_purpose_subagent: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_ascii(cls, v: str | None) -> str | None:
+        if v is not None and not _AGENT_NAME_PATTERN.match(v):
+            raise ValueError(_AGENT_NAME_ERROR)
+        return v
 
     @field_validator("subagents")
     @classmethod
@@ -89,6 +113,7 @@ def _preset_to_dict(p: AgentPreset) -> dict:
         return {
             "id": p.id,
             "name": p.name,
+            "display_name": p.display_name,
             "system_prompt": p.system_prompt,
             "default_model": "custom",
             "allowed_tool_groups": [],
@@ -125,6 +150,7 @@ async def list_agents(
         result.append({
             "id": row.id,
             "name": row.name,
+            "display_name": row.display_name,
             "system_prompt": row.system_prompt,
             "default_model": row.default_model,
             "allowed_tool_groups": row.allowed_tool_groups,
@@ -170,6 +196,7 @@ async def create_agent(
     preset_db = AgentPresetDB(
         id=str(uuid.uuid4()),
         name=body.name,
+        display_name=body.display_name,
         system_prompt=body.system_prompt,
         default_model=body.default_model,
         allowed_tool_groups=body.allowed_tool_groups,
@@ -186,6 +213,7 @@ async def create_agent(
     preset = AgentPreset(
         id=preset_db.id,
         name=preset_db.name,
+        display_name=preset_db.display_name,
         system_prompt=preset_db.system_prompt,
         default_model=preset_db.default_model,
         allowed_tool_groups=preset_db.allowed_tool_groups,
@@ -216,16 +244,18 @@ async def list_available_subagents(
         result.append({
             "id": p.id,
             "name": p.name,
+            "display_name": p.display_name,
             "source": "code",
             "description": p.default_delegation_description or "",
         })
 
     for bp in engine.get_builtin_presets():
-        if bp.id == "__chat__":
+        if bp.id == "chat":
             continue
         result.append({
             "id": bp.id,
             "name": bp.name,
+            "display_name": bp.display_name,
             "source": "builtin",
             "description": bp.default_delegation_description or "",
         })
@@ -236,6 +266,7 @@ async def list_available_subagents(
         result.append({
             "id": row.id,
             "name": row.name,
+            "display_name": row.display_name,
             "source": "user",
             "description": "",
         })
@@ -279,6 +310,7 @@ async def update_agent(
     preset = AgentPreset(
         id=preset_db.id,
         name=preset_db.name,
+        display_name=preset_db.display_name,
         system_prompt=preset_db.system_prompt,
         default_model=preset_db.default_model,
         allowed_tool_groups=preset_db.allowed_tool_groups,

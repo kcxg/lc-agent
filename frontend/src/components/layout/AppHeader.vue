@@ -24,13 +24,13 @@
         <el-option
           v-for="agent in agentsStore.agents"
           :key="agent.id"
-          :label="agent.name"
+          :label="agent.display_name || agent.name"
           :value="agent.id"
         >
           <div class="agent-option">
             <span class="agent-option-icon">{{ getAgentIcon(agent) }}</span>
             <div class="agent-option-content">
-              <span class="agent-option-name">{{ agent.name }}</span>
+              <span class="agent-option-name">{{ agent.display_name || agent.name }}</span>
             </div>
             <span :class="['source-tag', `source-tag--${agent.source || 'user'}`]">
               {{ agent.source === 'builtin' ? '内置' : agent.source === 'code' ? '代码' : '自建' }}
@@ -121,8 +121,8 @@ function reloadPage() {
 
 function getAgentIcon(agent: any): string {
   if (agent.source === 'code') return '⚙️'
-  if (agent.id === '__chat__') return '💬'
-  if (agent.id === '__empty__') return '🧩'
+  if (agent.id === 'chat') return '💬'
+  if (agent.id === 'empty') return '🧩'
   if (agent.source === 'builtin') return '✨'
   return '🤖'
 }

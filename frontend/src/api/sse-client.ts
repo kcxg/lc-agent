@@ -92,7 +92,7 @@ export class ChatSseClient {
 
     const body: Record<string, any> = {
       input: content,
-      preset_id: presetId || '__chat__',
+      preset_id: presetId || 'chat',
       model: model || '',
     }
     if (options?.replaceFromMessageId) {
@@ -121,7 +121,7 @@ export class ChatSseClient {
 
     const body: Record<string, any> = {
       command: { resume: resumeValue },
-      preset_id: presetId || '__chat__',
+      preset_id: presetId || 'chat',
       model: model || '',
     }
     if (llmParams && Object.keys(llmParams).length > 0) {
