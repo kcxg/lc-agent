@@ -253,3 +253,4 @@ nul
 # Local tool state
 .codegraph/
 .nezha/
+.zread/
