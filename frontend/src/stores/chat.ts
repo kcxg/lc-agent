@@ -570,6 +570,13 @@ export const useChatStore = defineStore('chat', () => {
     return client
   }
 
+  function _releaseBackgroundSession(sessionId: string, state: SessionState): void {
+    state.client?.disconnect()
+    state.client = null
+    sessionOffsets.delete(sessionId)
+    activeSessions.delete(sessionId)
+  }
+
   function _registerHandlers(client: ChatSseClient, state: SessionState, sessionId: string) {
     client.on('thinking', (msg: SseMessage) => {
       if (!state.isStreaming.value) {
@@ -809,10 +816,7 @@ export const useChatStore = defineStore('chat', () => {
       }, 3000)
       // Auto-cleanup: if this session is no longer the active one, release resources
       if (sessionId !== activeSessionId.value) {
-        state.client?.disconnect()
-        state.client = null
-        activeSessions.delete(sessionId)
-        sessionOffsets.delete(sessionId)
+        _releaseBackgroundSession(sessionId, state)
       }
     })
 
@@ -824,10 +828,7 @@ export const useChatStore = defineStore('chat', () => {
       if (last) last.isStreaming = false
       // Auto-cleanup: if this session is no longer the active one, release resources
       if (sessionId !== activeSessionId.value) {
-        state.client?.disconnect()
-        state.client = null
-        activeSessions.delete(sessionId)
-        sessionOffsets.delete(sessionId)
+        _releaseBackgroundSession(sessionId, state)
       }
     })
 
@@ -863,10 +864,7 @@ export const useChatStore = defineStore('chat', () => {
       console.error('[Chat] Error:', msg.message || msg.title)
       // Auto-cleanup: if this session is no longer the active one, release resources
       if (sessionId !== activeSessionId.value) {
-        state.client?.disconnect()
-        state.client = null
-        activeSessions.delete(sessionId)
-        sessionOffsets.delete(sessionId)
+        _releaseBackgroundSession(sessionId, state)
       }
     })
 
@@ -878,6 +876,8 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
+  let _switchTarget: string | null = null
+
   /**
    * Switch the active session. If the departing session is streaming, it stays
    * in the registry and continues in the background. If it is idle, it is
@@ -887,15 +887,14 @@ export const useChatStore = defineStore('chat', () => {
   async function switchToSession(sessionId: string): Promise<void> {
     if (activeSessionId.value === sessionId) return
 
+    _switchTarget = sessionId
+
     // Departing session
     const oldId = activeSessionId.value
     if (oldId) {
       const old = activeSessions.get(oldId)
       if (old && !old.isStreaming.value) {
-        old.client?.disconnect()
-        old.client = null
-        activeSessions.delete(oldId)
-        sessionOffsets.delete(oldId)
+        _releaseBackgroundSession(oldId, old)
       }
       // Streaming session: keep in map — SSE continues in background
     }
@@ -909,6 +908,14 @@ export const useChatStore = defineStore('chat', () => {
     const state = createSessionState()
     activeSessions.set(sessionId, state)
     await _loadMessagesIntoState(sessionId, state)
+
+    // Stale switch: another switchToSession was called while we were awaiting
+    if (_switchTarget !== sessionId) {
+      activeSessions.delete(sessionId)
+      sessionOffsets.delete(sessionId)
+      return
+    }
+
     const client = _createClientForSession(state, sessionId)
     client.setThreadId(sessionId)
   }
