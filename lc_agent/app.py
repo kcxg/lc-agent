@@ -1,5 +1,4 @@
 # lc_agent/app.py
-from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -228,14 +227,15 @@ class LcAgentApp:
         finally:
             await session.close()
 
-    def add_agent(self, name: str, graph, description: str = "", delegation_description: str = ""):
+    def add_agent(self, name: str, graph, description: str = "", delegation_description: str = "", display_name: str | None = None):
         """Register a pre-built CompiledStateGraph as a named agent.
 
         Args:
-            name: Unique agent identifier
+            name: Unique agent identifier (ASCII slug recommended)
             graph: A compiled LangGraph (must have ainvoke and astream_events)
             description: Human-readable description
             delegation_description: Default delegation guidance for parent agents
+            display_name: Optional human-readable display name (can be non-ASCII)
         """
         if name in self.engine._agents:
             raise ValueError(f"Agent '{name}' already registered")
@@ -247,6 +247,7 @@ class LcAgentApp:
         preset = AgentPreset(
             id=name,
             name=name,
+            display_name=display_name,
             system_prompt=description or f"Custom agent: {name}",
             default_model="custom",
             default_delegation_description=delegation_description,

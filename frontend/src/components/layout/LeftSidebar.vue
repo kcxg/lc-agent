@@ -144,7 +144,7 @@ const collapsedGroups = ref<Set<string>>(loadCollapsedGroups())
 
 const activeAgentName = computed(() => {
   const session = sessionsStore.sessions.find(s => s.id === sessionsStore.currentSessionId)
-  return agentsStore.getAgentName(session?.agent_id || '__chat__')
+  return agentsStore.getAgentName(session?.agent_id || 'chat')
 })
 
 const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
@@ -175,7 +175,7 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
   const buckets = new Map<string, Session[]>()
 
   for (const session of filteredSessions.value) {
-    const agentId = session.agent_id || '__chat__'
+    const agentId = session.agent_id || 'chat'
     const list = buckets.get(agentId) || []
     list.push(session)
     buckets.set(agentId, list)
@@ -186,7 +186,7 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
       const agentName = agentsStore.getAgentName(agentId)
       const sorted = sessions.slice().sort(compareSessions)
       const visibleCount = getVisibleCount(agentId)
-      const totalCount = sessionsStore.sessions.filter(s => (s.agent_id || '__chat__') === agentId).length
+      const totalCount = sessionsStore.sessions.filter(s => (s.agent_id || 'chat') === agentId).length
       return {
         agentId,
         agentName,

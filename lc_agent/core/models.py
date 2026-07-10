@@ -32,6 +32,7 @@ class AgentPreset(BaseModel):
 
     id: str
     name: str
+    display_name: str | None = None
     system_prompt: str
     default_model: str
     default_delegation_description: str = ""

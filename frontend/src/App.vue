@@ -177,7 +177,13 @@ async function restoreSession(sessionId: string) {
       toolsStore.setModel(session.model)
     }
     chatStore.clearMessages()
-    chatStore.disconnect()
+    // If a stream is in progress, abandon (let server finish & save to DB)
+    // instead of aborting — the user will see the complete response on return.
+    if (chatStore.isStreaming) {
+      chatStore.abandonStream()
+    } else {
+      chatStore.disconnect()
+    }
     await chatStore.loadMessages(sessionId)
     await chatStore.connect(sessionId)
     return

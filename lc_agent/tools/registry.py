@@ -1,5 +1,4 @@
 # lc_agent/tools/registry.py
-from __future__ import annotations
 
 import asyncio
 import functools
@@ -17,12 +16,12 @@ _TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 class ToolRegistry:
     """Central registry for all tools, supporting groups and filtering."""
 
-    _instance: ToolRegistry | None = None
+    _instance: 'ToolRegistry | None' = None
     _global_tools: dict[str, dict[str, Any]] = {}
     _group_descriptions: dict[str, str] = {}
     _disabled_groups: set[str] = set()
 
-    def __new__(cls) -> ToolRegistry:
+    def __new__(cls) -> 'ToolRegistry':
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance

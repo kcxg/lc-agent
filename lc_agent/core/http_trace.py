@@ -1,4 +1,4 @@
-from __future__ import annotations
+
 
 import json
 import time
@@ -51,7 +51,7 @@ _SENSITIVE_BODY_KEYS = {
     "access_token",
     "refresh_token",
 }
-_CURRENT_COLLECTOR: ContextVar[HttpTraceCollector | None] = ContextVar(
+_CURRENT_COLLECTOR: 'ContextVar[HttpTraceCollector | None]' = ContextVar(
     "http_trace_collector",
     default=None,
 )

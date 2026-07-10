@@ -92,7 +92,7 @@ export class ChatSseClient {
 
     const body: Record<string, any> = {
       input: content,
-      preset_id: presetId || '__chat__',
+      preset_id: presetId || 'chat',
       model: model || '',
     }
     if (options?.replaceFromMessageId) {
@@ -121,7 +121,7 @@ export class ChatSseClient {
 
     const body: Record<string, any> = {
       command: { resume: resumeValue },
-      preset_id: presetId || '__chat__',
+      preset_id: presetId || 'chat',
       model: model || '',
     }
     if (llmParams && Object.keys(llmParams).length > 0) {
@@ -179,6 +179,20 @@ export class ChatSseClient {
     this._abortController = null
     this._streaming = false
     this._threadId = null
+  }
+
+  /**
+   * Abandon this SSE client without aborting the underlying fetch.
+   * Use when switching sessions while a stream is in progress — the server
+   * keeps generating and will save the message to DB when done.
+   * The caller should discard this instance and create a new one.
+   */
+  abandon(): void {
+    this.handlers.clear()
+    this._streaming = false
+    this._threadId = null
+    // Intentionally NOT aborting _abortController so the server-side stream
+    // runs to completion and saves the AI message to DB.
   }
 
   // --- Internal ---

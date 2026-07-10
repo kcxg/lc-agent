@@ -78,7 +78,7 @@
     >
       <el-checkbox-group v-model="selectedAgentIds" class="agent-checkboxes">
         <el-checkbox v-for="agent in agents" :key="agent.id" :value="agent.id" :label="agent.id">
-          {{ agent.name }}
+          {{ agent.display_name || agent.name }}
           <el-tag size="small" style="margin-left: 6px">{{ agent.source || 'user' }}</el-tag>
         </el-checkbox>
       </el-checkbox-group>
@@ -107,6 +107,7 @@ interface AdminUser {
 interface AgentItem {
   id: string
   name: string
+  display_name?: string | null
   source?: string
 }
 

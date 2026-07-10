@@ -74,6 +74,7 @@ export const api = {
 export async function fetchAvailableSubagents(): Promise<Array<{
   id: string
   name: string
+  display_name: string | null
   source: string
   description: string
 }>> {

@@ -105,7 +105,7 @@ async def generate_title(
     engine: Any,
     thread_id: str,
     first_message: str,
-    preset_id: str = "__chat__",
+    preset_id: str = "chat",
     selected_model_id: str = "",
 ) -> str | None:
     """Generate title from first message using the agent's model.

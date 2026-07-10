@@ -10,6 +10,7 @@ export interface AgentSubagentConfig {
 export interface AgentPreset {
   id: string
   name: string
+  display_name: string | null
   system_prompt: string
   default_model: string
   allowed_tool_groups: string[] | null
@@ -22,11 +23,11 @@ export interface AgentPreset {
   default_enabled: boolean
 }
 
-const BUILTIN_IDS = new Set(['__chat__', '__empty__', '__power__'])
+const BUILTIN_IDS = new Set(['chat', 'empty', 'power'])
 
 export const useAgentsStore = defineStore('agents', () => {
   const agents = ref<AgentPreset[]>([])
-  const currentAgentId = ref('__chat__')
+  const currentAgentId = ref('chat')
 
   const currentAgent = computed(() =>
     agents.value.find(a => a.id === currentAgentId.value) || agents.value[0]
@@ -34,7 +35,7 @@ export const useAgentsStore = defineStore('agents', () => {
 
   const isBuiltin = computed(() => BUILTIN_IDS.has(currentAgentId.value))
 
-  const isChatAgent = computed(() => currentAgentId.value === '__chat__')
+  const isChatAgent = computed(() => currentAgentId.value === 'chat')
 
   const isCodeAgent = computed(() => currentAgent.value?.source === 'code')
 
@@ -63,7 +64,7 @@ export const useAgentsStore = defineStore('agents', () => {
     if (BUILTIN_IDS.has(id)) return
     await api.deleteAgent(id)
     agents.value = agents.value.filter(a => a.id !== id)
-    if (currentAgentId.value === id) currentAgentId.value = '__chat__'
+    if (currentAgentId.value === id) currentAgentId.value = 'chat'
   }
 
   async function selectAgent(id: string) {
@@ -73,7 +74,7 @@ export const useAgentsStore = defineStore('agents', () => {
 
   function getAgentName(agentId: string): string {
     const agent = agents.value.find(a => a.id === agentId)
-    return agent?.name || agentId
+    return agent?.display_name || agent?.name || agentId
   }
 
   function isAgentBuiltin(id: string): boolean {

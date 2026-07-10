@@ -518,7 +518,7 @@ async def test_send_stream_routes_subagent_events_through_tracker(monkeypatch):
         app=SimpleNamespace(state=SimpleNamespace(auth_service=None)),
         is_disconnected=fake_disconnected,
     )
-    req = sse.RunStreamRequest(input="hello", preset_id="__power__", model="")
+    req = sse.RunStreamRequest(input="hello", preset_id="power", model="")
 
     response = await sse._send_stream("thread1", req, request)
     body_chunks = []
@@ -624,7 +624,7 @@ async def test_resume_stream_routes_subagent_events_through_tracker(monkeypatch)
         app=SimpleNamespace(state=SimpleNamespace(auth_service=None)),
         is_disconnected=fake_disconnected,
     )
-    req = sse.RunStreamRequest(command={"resume": {"decisions": []}}, preset_id="__power__", model="")
+    req = sse.RunStreamRequest(command={"resume": {"decisions": []}}, preset_id="power", model="")
 
     response = await sse._resume_stream("thread1", req, request)
     body_chunks = []
@@ -722,7 +722,7 @@ async def test_resume_stream_marks_stale_running_subagent_tool_calls_interrupted
         app=SimpleNamespace(state=SimpleNamespace(auth_service=None)),
         is_disconnected=fake_disconnected,
     )
-    req = sse.RunStreamRequest(command={"resume": {"decisions": []}}, preset_id="__power__", model="")
+    req = sse.RunStreamRequest(command={"resume": {"decisions": []}}, preset_id="power", model="")
 
     response = await sse._resume_stream("thread1", req, request)
     async for _chunk in response.body_iterator:

@@ -14,7 +14,12 @@
       <el-tabs v-model="activeTab">
         <el-tab-pane label="基本设置" name="basic">
       <el-form-item label="名称" required>
-        <el-input v-model="form.name" :disabled="isCodeAgent" placeholder="例如：Code Assistant" />
+        <el-input v-model="form.name" :disabled="isCodeAgent" placeholder="例如：code-assistant、researcher" />
+        <div class="form-hint">只能使用英文字母、数字、连字符(-)和下划线(_)，且必须以字母开头</div>
+      </el-form-item>
+
+      <el-form-item label="显示名称">
+        <el-input v-model="form.display_name" :disabled="isCodeAgent" placeholder="可填中文，例如：代码助手（留空则显示名称字段）" />
       </el-form-item>
 
       <el-form-item label="模型">
@@ -189,7 +194,7 @@
                   :model-value="isSubagentSelected(sa.id)"
                   @update:model-value="toggleSubagent(sa.id, $event)"
                 >
-                  <span class="sa-item-name" style="font-weight: 600;">{{ sa.name }}</span>
+                  <span class="sa-item-name" style="font-weight: 600;">{{ sa.display_name || sa.name }}</span>
                   <el-tag
                     size="small"
                     :type="sa.source === 'code' ? 'info' : sa.source === 'builtin' ? 'warning' : 'primary'"
@@ -281,12 +286,13 @@ const mcpMode = ref<'all' | 'none' | 'custom'>('all')
 const selectedMcpServers = ref<string[]>([])
 const skillsMode = ref<'all' | 'none' | 'custom'>('all')
 const selectedSkills = ref<string[]>([])
-const availableSubagents = ref<Array<{ id: string; name: string; source: string; description: string }>>([])
+const availableSubagents = ref<Array<{ id: string; name: string; display_name: string | null; source: string; description: string }>>([])
 
 const isCodeAgent = ref(false)
 
 const form = ref({
   name: '',
+  display_name: '',
   system_prompt: '',
   default_model: '',
   llm_params: null as Record<string, any> | null,
@@ -305,6 +311,7 @@ async function open(agent?: AgentPreset) {
     editingSource.value = agent.source || 'user'
     isCodeAgent.value = agent.source === 'code'
     form.value.name = agent.name
+    form.value.display_name = agent.display_name ?? ''
     form.value.system_prompt = agent.system_prompt
     form.value.default_model = agent.default_model
     form.value.llm_params = agent.llm_params ?? null
@@ -350,6 +357,7 @@ async function open(agent?: AgentPreset) {
     isCodeAgent.value = false
     form.value = {
       name: '',
+      display_name: '',
       system_prompt: '',
       default_model: toolsStore.currentModel,
       llm_params: null,
@@ -369,6 +377,12 @@ async function open(agent?: AgentPreset) {
 async function handleSave() {
   saving.value = true
   try {
+    const namePattern = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+    if (!namePattern.test(form.value.name)) {
+      ElMessage.error('名称只能使用英文字母、数字、连字符(-)和下划线(_)，且必须以字母开头')
+      return
+    }
+
     const allowed_tool_groups =
       toolGroupMode.value === 'all' ? null :
       toolGroupMode.value === 'none' ? [] :
@@ -397,6 +411,7 @@ async function handleSave() {
 
     const data = {
       name: form.value.name,
+      display_name: form.value.display_name || null,
       system_prompt: form.value.system_prompt,
       default_model: form.value.default_model,
       allowed_tool_groups,
@@ -496,6 +511,13 @@ defineExpose({ open })
 </script>
 
 <style scoped>
+.form-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
 .llm-param-item {
   display: flex;
   flex-direction: column;

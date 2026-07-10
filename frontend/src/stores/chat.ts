@@ -859,7 +859,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendMessage(
     content: string,
-    presetId: string = '__chat__',
+    presetId: string = 'chat',
     modelId: string = '',
     options: SendMessageOptions = {},
   ) {
@@ -898,7 +898,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function respondToInterrupt(
     approved: boolean,
-    presetId: string = '__chat__',
+    presetId: string = 'chat',
     permanentlyAllow?: string,
     llmParams?: Record<string, any> | null,
   ) {
@@ -923,7 +923,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function resumeInterrupt(
     resumeValue: any,
-    presetId: string = '__chat__',
+    presetId: string = 'chat',
     model?: string,
     llmParams?: Record<string, any> | null,
   ) {
@@ -1022,6 +1022,22 @@ export const useChatStore = defineStore('chat', () => {
     inThinking = false
   }
 
+  /**
+   * Abandon the current stream without killing the server-side fetch.
+   * Call this when switching sessions while streaming is active.
+   * The server continues generating and saves the message to DB when done.
+   * The user will see the complete response when they switch back.
+   */
+  function abandonStream() {
+    sseClient?.abandon()
+    sseClient = null
+    errorMessage.value = null
+    isStreaming.value = false
+    threadId.value = null
+    todos.value = []
+    inThinking = false
+  }
+
   return {
     messages,
     isStreaming,
@@ -1044,5 +1060,6 @@ export const useChatStore = defineStore('chat', () => {
     clearMessages,
     truncateAfterMessage,
     disconnect,
+    abandonStream,
   }
 })

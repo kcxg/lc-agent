@@ -13,7 +13,7 @@ router = APIRouter(tags=["sessions"])
 
 class SessionCreateRequest(BaseModel):
     title: str = "新对话"
-    agent_id: str = "__chat__"
+    agent_id: str = "chat"
     model: str = ""
 
 
@@ -64,7 +64,7 @@ async def create_session(
     repo = SessionRepository(db)
 
     # Validate agent access for non-admin
-    if user.role != "admin" and body.agent_id != "__chat__":
+    if user.role != "admin" and body.agent_id != "chat":
         from lc_agent.db.models_auth import UserAgentAccess
         from sqlalchemy import select as sa_select
         result = await db.execute(

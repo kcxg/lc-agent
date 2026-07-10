@@ -10,7 +10,6 @@ regular content stream (e.g. MiniMax-M3), those tags are detected, stripped,
 and the enclosed text is likewise moved to ``reasoning_content``.
 """
 
-from __future__ import annotations
 
 import contextvars
 from typing import Any, ClassVar
