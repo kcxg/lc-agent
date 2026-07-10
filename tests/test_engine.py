@@ -122,7 +122,7 @@ class TestAgentEngine:
         assert captured["context_schema"] is AgentRuntimeContext
 
     def test_build_agent_adds_memory_tools_when_store_enabled(self, sample_config, monkeypatch):
-        from lc_agent.core.engine import AgentEngine
+        from lc_agent.core.engine import AgentEngine, _SystemBlockMiddleware
         from lc_agent.core.memory import MEMORY_SYSTEM_PROMPT
 
         captured = {}
@@ -150,7 +150,7 @@ class TestAgentEngine:
 
         engine.build_agent()
 
-        expected = {
+        expected_tools = {
             "memory__insert_memory",
             "memory__update_memory",
             "memory__get_memory",
@@ -158,8 +158,23 @@ class TestAgentEngine:
             "memory__list_memories",
             "memory__delete_memory",
         }
-        assert expected.issubset({tool.name for tool in captured["tools"]})
-        assert MEMORY_SYSTEM_PROMPT in captured["system_prompt"]
+        assert expected_tools.issubset({tool.name for tool in captured["tools"]})
+
+        # Memory prompt is now injected as a separate middleware content block,
+        # not concatenated into system_prompt.
+        assert MEMORY_SYSTEM_PROMPT not in captured["system_prompt"]
+        middleware_list = captured.get("middleware", [])
+        memory_mw = next(
+            (m for m in middleware_list if getattr(m, "name", None) == "MemoryPromptMiddleware"),
+            None,
+        )
+        assert memory_mw is not None, "MemoryPromptMiddleware not found in middleware list"
+        assert isinstance(memory_mw, _SystemBlockMiddleware)
+        assert memory_mw._text == MEMORY_SYSTEM_PROMPT
+
+        # Middleware order: memory before TodoListMiddleware
+        names = [getattr(m, "name", type(m).__name__) for m in middleware_list]
+        assert names.index("MemoryPromptMiddleware") < names.index("TodoListMiddleware")
 
     def test_parses_models_from_config(self, sample_config):
         from lc_agent.core.engine import AgentEngine
