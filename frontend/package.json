@@ -27,7 +27,7 @@
     "test:chat-empty-state": "node scripts/check-chat-empty-state-contract.mjs",
     "test:auth": "node scripts/check-auth-contract.mjs",
     "test:subagent-reducers": "node scripts/check-subagent-reducers-contract.mjs",
-    "test:agent-editor-general-purpose": "node scripts/check-agent-editor-general-purpose-contract.mjs"
+    "test:agent-editor-general-purpose": "node scripts/check-agent-editor-general-purpose-contract.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
