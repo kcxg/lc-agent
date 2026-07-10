@@ -19,6 +19,15 @@ class McpServerStatus:
     error: str | None = None
 
 
+def _resolve_server_type(conf: dict) -> str:
+    server_type = conf.get("type")
+    if server_type:
+        return server_type
+    if conf.get("url"):
+        return "http"
+    return "local"
+
+
 class McpManager:
     """Manages persistent MCP server connections and tool invocation."""
 
@@ -32,7 +41,7 @@ class McpManager:
 
         for name, conf in config.items():
             enabled = conf.get("enabled", True)
-            server_type = conf.get("type", "local")
+            server_type = _resolve_server_type(conf)
             command = conf.get("command", "")
             if isinstance(command, list):
                 command = " ".join(command)
@@ -107,7 +116,7 @@ class McpManager:
 
     async def _connect_server(self, name: str, conf: dict):
         """Establish a persistent connection to a single MCP server."""
-        server_type = conf.get("type", "local")
+        server_type = _resolve_server_type(conf)
         self._servers[name].status = "connecting"
 
         try:

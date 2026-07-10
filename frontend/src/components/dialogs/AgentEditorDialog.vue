@@ -3,6 +3,7 @@
     v-model="visible"
     :title="isEdit ? '编辑 Agent' : '新建 Agent'"
     width="600px"
+    class="agent-editor-dialog"
     :close-on-click-modal="false"
   >
     <el-alert v-if="isCodeAgent" type="warning" :closable="false" style="margin-bottom: 12px">
@@ -10,6 +11,8 @@
     </el-alert>
 
     <el-form v-if="!isCodeAgent" :model="form" label-width="100px" label-position="top">
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="基本设置" name="basic">
       <el-form-item label="名称" required>
         <el-input v-model="form.name" :disabled="isCodeAgent" placeholder="例如：Code Assistant" />
       </el-form-item>
@@ -161,6 +164,66 @@
           </div>
         </div>
       </el-form-item>
+        </el-tab-pane>
+
+        <el-tab-pane label="子Agent" name="subagents">
+          <div class="subagent-picker">
+            <div class="general-purpose-subagent">
+              <el-checkbox v-model="form.enable_general_purpose_subagent">
+                <span style="font-weight: 600;">启用通用子 Agent</span>
+              </el-checkbox>
+              <p class="picker-hint" style="font-size:12px; color: var(--el-text-color-secondary); margin: 4px 0 12px 24px;">
+                让当前 Agent 可以把复杂任务委派给一个同能力的隔离 worker。该 worker 不会继续调用 task。
+              </p>
+            </div>
+            <p class="picker-hint" style="font-size:12px; color: var(--el-text-color-secondary); margin-bottom: 12px;">
+              选择专业子 Agent，并为每个子 Agent 填写委派说明。
+            </p>
+            <div class="subagent-list">
+              <div
+                v-for="sa in availableSubagents"
+                :key="sa.id"
+                class="subagent-item"
+              >
+                <el-checkbox
+                  :model-value="isSubagentSelected(sa.id)"
+                  @update:model-value="toggleSubagent(sa.id, $event)"
+                >
+                  <span class="sa-item-name" style="font-weight: 600;">{{ sa.name }}</span>
+                  <el-tag
+                    size="small"
+                    :type="sa.source === 'code' ? 'info' : sa.source === 'builtin' ? 'warning' : 'primary'"
+                    style="margin-left: 6px;"
+                  >
+                    {{ sa.source }}
+                  </el-tag>
+                </el-checkbox>
+                <span v-if="sa.description" class="sa-item-desc">
+                  {{ sa.description }}
+                </span>
+                <div v-if="isSubagentSelected(sa.id)" class="subagent-delegation-section">
+                  <p class="subagent-delegation-help">
+                    填写该子 Agent 适合处理什么任务，以便主 Agent 能在正确、合适的时机触发调用它，作用类似 Skill 的 description；不能为空。
+                  </p>
+                  <el-input
+                    :model-value="getSubagentDelegationDescription(sa.id)"
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 4 }"
+                    placeholder="例如：当对话涉及数据分析、报表生成时调用它"
+                    class="subagent-delegation-input"
+                    @update:model-value="setSubagentDelegationDescription(sa.id, $event)"
+                  />
+                </div>
+              </div>
+            </div>
+            <el-empty
+              v-if="availableSubagents.length === 0"
+              description="暂无可用的子 Agent"
+              :image-size="60"
+            />
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-form>
 
     <div v-else class="code-agent-readonly">
@@ -196,8 +259,10 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { fetchAvailableSubagents } from '@/api/http'
 import { useToolsStore } from '@/stores/tools'
-import { useAgentsStore, type AgentPreset } from '@/stores/agents'
+import { useAgentsStore, type AgentPreset, type AgentSubagentConfig } from '@/stores/agents'
 
 const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
 
@@ -206,6 +271,7 @@ const agentsStore = useAgentsStore()
 
 const visible = ref(false)
 const saving = ref(false)
+const activeTab = ref('basic')
 const isEdit = ref(false)
 const editingId = ref('')
 const editingSource = ref<'builtin' | 'code' | 'user'>('user')
@@ -215,6 +281,7 @@ const mcpMode = ref<'all' | 'none' | 'custom'>('all')
 const selectedMcpServers = ref<string[]>([])
 const skillsMode = ref<'all' | 'none' | 'custom'>('all')
 const selectedSkills = ref<string[]>([])
+const availableSubagents = ref<Array<{ id: string; name: string; source: string; description: string }>>([])
 
 const isCodeAgent = ref(false)
 
@@ -223,9 +290,15 @@ const form = ref({
   system_prompt: '',
   default_model: '',
   llm_params: null as Record<string, any> | null,
+  subagents: [] as AgentSubagentConfig[],
+  enable_general_purpose_subagent: false,
 })
 
-function open(agent?: AgentPreset) {
+async function open(agent?: AgentPreset) {
+  activeTab.value = 'basic'
+  const all = await fetchAvailableSubagents()
+  availableSubagents.value = all.filter(sa => sa.id !== (agent?.id ?? ''))
+
   if (agent) {
     isEdit.value = true
     editingId.value = agent.id
@@ -235,6 +308,8 @@ function open(agent?: AgentPreset) {
     form.value.system_prompt = agent.system_prompt
     form.value.default_model = agent.default_model
     form.value.llm_params = agent.llm_params ?? null
+    form.value.subagents = agent.subagents ? agent.subagents.map(item => ({ ...item })) : []
+    form.value.enable_general_purpose_subagent = agent.enable_general_purpose_subagent ?? false
 
     if (agent.allowed_tool_groups === null) {
       toolGroupMode.value = 'all'
@@ -273,12 +348,19 @@ function open(agent?: AgentPreset) {
     editingId.value = ''
     editingSource.value = 'user'
     isCodeAgent.value = false
-    form.value = { name: '', system_prompt: '', default_model: toolsStore.currentModel, llm_params: null }
-    toolGroupMode.value = 'all'
+    form.value = {
+      name: '',
+      system_prompt: '',
+      default_model: toolsStore.currentModel,
+      llm_params: null,
+      subagents: [],
+      enable_general_purpose_subagent: false,
+    }
+    toolGroupMode.value = 'none'
     selectedGroups.value = []
-    mcpMode.value = 'all'
+    mcpMode.value = 'none'
     selectedMcpServers.value = []
-    skillsMode.value = 'all'
+    skillsMode.value = 'none'
     selectedSkills.value = []
   }
   visible.value = true
@@ -302,6 +384,17 @@ async function handleSave() {
       skillsMode.value === 'none' ? [] :
       selectedSkills.value
 
+    if (form.value.subagents.some(item => !item.delegation_description.trim())) {
+      activeTab.value = 'subagents'
+      ElMessage.error('每个已选择的子 Agent 都必须填写非空的委派说明')
+      return
+    }
+
+    const normalizedSubagents = form.value.subagents.map(item => ({
+      agent_id: item.agent_id,
+      delegation_description: item.delegation_description.trim(),
+    }))
+
     const data = {
       name: form.value.name,
       system_prompt: form.value.system_prompt,
@@ -310,6 +403,8 @@ async function handleSave() {
       allowed_mcp_servers,
       allowed_skills,
       llm_params: form.value.llm_params || null,
+      subagents: normalizedSubagents.length > 0 ? normalizedSubagents : null,
+      enable_general_purpose_subagent: form.value.enable_general_purpose_subagent,
     }
 
     if (isEdit.value) {
@@ -326,6 +421,30 @@ async function handleSave() {
 async function handleDelete() {
   await agentsStore.deleteAgent(editingId.value)
   visible.value = false
+}
+
+function isSubagentSelected(agentId: string) {
+  return form.value.subagents.some(item => item.agent_id === agentId)
+}
+
+function getSubagentDelegationDescription(agentId: string) {
+  return form.value.subagents.find(item => item.agent_id === agentId)?.delegation_description || ''
+}
+
+function toggleSubagent(agentId: string, checked: boolean | string | number) {
+  if (checked) {
+    if (!isSubagentSelected(agentId)) {
+      form.value.subagents.push({ agent_id: agentId, delegation_description: '' })
+    }
+    return
+  }
+  form.value.subagents = form.value.subagents.filter(item => item.agent_id !== agentId)
+}
+
+function setSubagentDelegationDescription(agentId: string, value: string | number) {
+  const item = form.value.subagents.find(entry => entry.agent_id === agentId)
+  if (!item) return
+  item.delegation_description = String(value)
 }
 
 function _ensureLlmParams() {
@@ -427,6 +546,67 @@ defineExpose({ open })
   margin-left: 4px;
   opacity: 0.7;
 }
+
+.subagent-picker {
+  width: 100%;
+}
+
+.subagent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.subagent-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-extra-light);
+}
+
+.subagent-item :deep(.el-checkbox) {
+  display: flex;
+  align-items: center;
+  height: auto;
+  width: 100%;
+}
+
+.sa-item-desc {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin-left: 22px;
+  margin-top: 2px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.subagent-delegation-section {
+  margin-top: 8px;
+  margin-left: 22px;
+  padding-right: 10px;
+}
+
+.subagent-delegation-help {
+  margin-top: 0;
+  margin-left: 0;
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+
+.subagent-delegation-input {
+  margin-top: 0;
+  margin-left: 0;
+}
+
 .code-agent-readonly {
   padding: 12px;
   border: 1px solid var(--el-border-color-lighter);
@@ -456,6 +636,34 @@ defineExpose({ open })
   color: var(--el-text-color-primary);
   font-size: 13px;
   text-align: right;
+}
+
+:deep(.agent-editor-dialog) {
+  max-width: min(600px, calc(100vw - 24px));
+}
+
+@media (max-width: 768px) {
+  .subagent-item {
+    padding: 10px 8px;
+  }
+
+  .sa-item-desc {
+    margin-left: 0;
+  }
+
+  .subagent-delegation-section {
+    margin-left: 0;
+    padding-right: 0;
+  }
+
+  .subagent-delegation-help {
+    margin-left: 0;
+  }
+
+  .subagent-delegation-input {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 
 </style>

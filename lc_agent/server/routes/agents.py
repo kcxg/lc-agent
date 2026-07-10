@@ -2,11 +2,11 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 
 from lc_agent.core.engine import AgentEngine
-from lc_agent.core.models import AgentPreset
+from lc_agent.core.models import AgentPreset, SubAgentLink
 from lc_agent.db.engine import get_async_session as _get_db_session
 from lc_agent.db.models import AgentPresetDB
 from lc_agent.db.models_auth import User, UserAgentAccess
@@ -26,6 +26,8 @@ async def get_db(request: Request):
 
 
 class AgentCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     system_prompt: str
     default_model: str
@@ -33,9 +35,27 @@ class AgentCreateRequest(BaseModel):
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
     llm_params: dict | None = None
+    subagents: list[SubAgentLink] | None = None
+    enable_general_purpose_subagent: bool = False
+
+    @field_validator("subagents")
+    @classmethod
+    def validate_subagents(cls, value: list[SubAgentLink] | None) -> list[SubAgentLink] | None:
+        if value is None:
+            return value
+        seen_ids: set[str] = set()
+        for item in value:
+            if not item.delegation_description.strip():
+                raise ValueError("delegation_description must not be blank")
+            if item.agent_id in seen_ids:
+                raise ValueError(f"duplicate subagent agent_id: {item.agent_id}")
+            seen_ids.add(item.agent_id)
+        return value
 
 
 class AgentUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
     system_prompt: str | None = None
     default_model: str | None = None
@@ -43,9 +63,28 @@ class AgentUpdateRequest(BaseModel):
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
     llm_params: dict | None = None
+    subagents: list[SubAgentLink] | None = None
+    enable_general_purpose_subagent: bool | None = None
+
+    @field_validator("subagents")
+    @classmethod
+    def validate_subagents(cls, value: list[SubAgentLink] | None) -> list[SubAgentLink] | None:
+        if value is None:
+            return value
+        seen_ids: set[str] = set()
+        for item in value:
+            if not item.delegation_description.strip():
+                raise ValueError("delegation_description must not be blank")
+            if item.agent_id in seen_ids:
+                raise ValueError(f"duplicate subagent agent_id: {item.agent_id}")
+            seen_ids.add(item.agent_id)
+        return value
 
 
 def _preset_to_dict(p: AgentPreset) -> dict:
+    data = p.model_dump()
+    if data.get("subagents") is not None:
+        data["subagents"] = [item.model_dump() if hasattr(item, "model_dump") else item for item in data["subagents"]]
     if p.source == "code":
         return {
             "id": p.id,
@@ -57,19 +96,12 @@ def _preset_to_dict(p: AgentPreset) -> dict:
             "allowed_skills": [],
             "source": "code",
             "default_enabled": False,
+            "subagents": data.get("subagents"),
+            "enable_general_purpose_subagent": False,
         }
-    return {
-        "id": p.id,
-        "name": p.name,
-        "system_prompt": p.system_prompt,
-        "default_model": p.default_model,
-        "allowed_tool_groups": p.allowed_tool_groups,
-        "allowed_mcp_servers": p.allowed_mcp_servers,
-        "allowed_skills": p.allowed_skills,
-        "llm_params": p.llm_params,
-        "source": p.source,
-        "default_enabled": p.default_enabled,
-    }
+    data["source"] = p.source
+    data["default_enabled"] = p.default_enabled
+    return data
 
 
 @router.get("/agents")
@@ -101,6 +133,8 @@ async def list_agents(
             "llm_params": row.llm_params,
             "source": "user",
             "default_enabled": True,
+            "subagents": row.subagents,
+            "enable_general_purpose_subagent": row.enable_general_purpose_subagent,
         })
 
     if user.role != "admin":
@@ -112,6 +146,18 @@ async def list_agents(
     return result
 
 
+def _validate_subagent_ids_exist(engine: AgentEngine, subagents: list[SubAgentLink] | None) -> None:
+    """Validate that every subagent agent_id refers to a known preset."""
+    if not subagents:
+        return
+    for link in subagents:
+        if not engine._preset_exists(link.agent_id):
+            raise HTTPException(
+                status_code=422,
+                detail=f"subagent agent_id not found: {link.agent_id}",
+            )
+
+
 @router.post("/agents", status_code=201)
 async def create_agent(
     body: AgentCreateRequest,
@@ -120,6 +166,7 @@ async def create_agent(
     admin: User = Depends(require_admin),
 ):
     """Create a new agent preset (persisted to DB)."""
+    _validate_subagent_ids_exist(engine, body.subagents)
     preset_db = AgentPresetDB(
         id=str(uuid.uuid4()),
         name=body.name,
@@ -129,6 +176,8 @@ async def create_agent(
         allowed_mcp_servers=body.allowed_mcp_servers,
         allowed_skills=body.allowed_skills,
         llm_params=body.llm_params,
+        subagents=[item.model_dump() for item in body.subagents] if body.subagents else None,
+        enable_general_purpose_subagent=body.enable_general_purpose_subagent,
     )
     db.add(preset_db)
     await db.commit()
@@ -143,13 +192,55 @@ async def create_agent(
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,
         llm_params=preset_db.llm_params,
+        subagents=[SubAgentLink.model_validate(item) for item in preset_db.subagents] if preset_db.subagents else None,
+        enable_general_purpose_subagent=preset_db.enable_general_purpose_subagent,
     )
     engine._presets[preset.id] = preset
 
-    return {
-        **preset.model_dump(),
-        "source": "user",
-    }
+    return _preset_to_dict(preset)
+
+
+@router.get("/agents/available-subagents")
+async def list_available_subagents(
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Return all presets that can be used as sub-agents.
+
+    Excludes __chat__ builtin. Includes code agents and web presets.
+    """
+    result = []
+
+    for p in engine._custom_presets.values():
+        result.append({
+            "id": p.id,
+            "name": p.name,
+            "source": "code",
+            "description": p.default_delegation_description or "",
+        })
+
+    for bp in engine.get_builtin_presets():
+        if bp.id == "__chat__":
+            continue
+        result.append({
+            "id": bp.id,
+            "name": bp.name,
+            "source": "builtin",
+            "description": bp.default_delegation_description or "",
+        })
+
+    stmt = select(AgentPresetDB)
+    rows = await db.execute(stmt)
+    for row in rows.scalars().all():
+        result.append({
+            "id": row.id,
+            "name": row.name,
+            "source": "user",
+            "description": "",
+        })
+
+    return result
 
 
 @router.put("/agents/{agent_id}")
@@ -164,6 +255,7 @@ async def update_agent(
     if agent_id in engine.BUILTIN_IDS:
         raise HTTPException(status_code=400, detail="Cannot edit builtin agent")
 
+    _validate_subagent_ids_exist(engine, body.subagents)
     update_data = body.model_dump(exclude_unset=True)
 
     if agent_id in engine._custom_presets:
@@ -193,11 +285,13 @@ async def update_agent(
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,
         llm_params=preset_db.llm_params,
+        subagents=[SubAgentLink.model_validate(item) for item in preset_db.subagents] if preset_db.subagents else None,
+        enable_general_purpose_subagent=preset_db.enable_general_purpose_subagent,
     )
     engine._presets[preset.id] = preset
     engine.invalidate_agent_cache(agent_id)
 
-    return {**preset.model_dump(), "source": "user"}
+    return _preset_to_dict(preset)
 
 
 @router.delete("/agents/{agent_id}", status_code=204)
@@ -251,9 +345,10 @@ def activate_agent(
             "reason": "code agent is controlled by its registered graph",
         }
     manager = getattr(request.app.state, "mcp_manager", None)
+    loader = getattr(request.app.state, "filtered_loader", None)
     registry = ToolRegistry()
 
-    if preset.allowed_tool_groups == [] and preset.allowed_mcp_servers == []:
+    if preset.allowed_tool_groups == [] and preset.allowed_mcp_servers == [] and preset.allowed_skills == []:
         return {"agent_id": agent_id, "action": "none", "reason": "preset blocks all"}
 
     target_enabled = preset.default_enabled
@@ -281,7 +376,23 @@ def activate_agent(
             registry._disabled_groups.add(group)
             changed_groups.append(group)
 
-    if changed_mcp or changed_groups:
+    changed_skills = []
+    if loader:
+        all_skill_names = {skill.name for skill in loader.list_all_skills()}
+        if preset.allowed_skills is None:
+            target_skill_names = sorted(all_skill_names)
+        else:
+            target_skill_names = [name for name in preset.allowed_skills if name in all_skill_names]
+        for skill_name in target_skill_names:
+            is_disabled = skill_name in loader.disabled_skills
+            if target_enabled and is_disabled:
+                loader.disabled_skills.discard(skill_name)
+                changed_skills.append(skill_name)
+            elif not target_enabled and not is_disabled:
+                loader.disabled_skills.add(skill_name)
+                changed_skills.append(skill_name)
+
+    if changed_mcp or changed_groups or changed_skills:
         engine._mcp_generation += 1
 
     return {
@@ -289,4 +400,5 @@ def activate_agent(
         "default_enabled": target_enabled,
         "changed_mcp": changed_mcp,
         "changed_groups": changed_groups,
+        "changed_skills": changed_skills,
     }

@@ -2,6 +2,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/api/http'
 
+export interface AgentSubagentConfig {
+  agent_id: string
+  delegation_description: string
+}
+
 export interface AgentPreset {
   id: string
   name: string
@@ -11,6 +16,8 @@ export interface AgentPreset {
   allowed_mcp_servers: string[] | null
   allowed_skills: string[] | null
   llm_params: Record<string, any> | null
+  subagents: AgentSubagentConfig[] | null
+  enable_general_purpose_subagent: boolean
   source: 'builtin' | 'code' | 'user'
   default_enabled: boolean
 }
@@ -60,12 +67,8 @@ export const useAgentsStore = defineStore('agents', () => {
   }
 
   async function selectAgent(id: string) {
+    await api.activateAgent(id)
     currentAgentId.value = id
-    try {
-      await api.activateAgent(id)
-    } catch {
-      // Non-critical: agent may still work without explicit activation
-    }
   }
 
   function getAgentName(agentId: string): string {

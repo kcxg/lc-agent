@@ -25,6 +25,27 @@ export const useSessionsStore = defineStore('sessions', () => {
     sessions.value.find(s => s.id === currentSessionId.value)
   )
 
+  const sessionNavStack = ref<Array<{ session_id: string; label: string }>>([])
+
+  const effectiveThreadId = computed(() => {
+    const stack = sessionNavStack.value
+    return stack.length > 0 ? stack[stack.length - 1].session_id : currentSessionId.value
+  })
+
+  function pushSubSession(sub_session_id: string, label: string) {
+    const last = sessionNavStack.value[sessionNavStack.value.length - 1]
+    if (last?.session_id === sub_session_id) return  // prevent duplicate push on repeated clicks
+    sessionNavStack.value.push({ session_id: sub_session_id, label })
+  }
+
+  function popSubSession() {
+    sessionNavStack.value.pop()
+  }
+
+  function popToRoot() {
+    sessionNavStack.value = []
+  }
+
   function isLocalSession(id: string): boolean {
     return localSessionIds.value.has(id)
   }
@@ -42,6 +63,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       s => s.agent_id === agentId && s.message_count === 0 && localSessionIds.value.has(s.id)
     )
     if (existing) {
+      existing.model = model || existing.model
       currentSessionId.value = existing.id
       return existing
     }
@@ -206,8 +228,9 @@ export const useSessionsStore = defineStore('sessions', () => {
   })
 
   function selectSession(id: string) {
+    sessionNavStack.value = []
     currentSessionId.value = id
   }
 
-  return { sessions, currentSessionId, currentSession, groupedByAgent, init, createSession, createLocalSession, ensureLocalSession, persistSession, isLocalSession, deleteSession, updateTitle, updateTitleLocal, refreshSessionTitle, updateModel, updateModelLocal, setPinned, selectSession }
+  return { sessions, currentSessionId, currentSession, sessionNavStack, effectiveThreadId, pushSubSession, popSubSession, popToRoot, groupedByAgent, init, createSession, createLocalSession, ensureLocalSession, persistSession, isLocalSession, deleteSession, updateTitle, updateTitleLocal, refreshSessionTitle, updateModel, updateModelLocal, setPinned, selectSession }
 })

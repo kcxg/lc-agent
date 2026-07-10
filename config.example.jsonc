@@ -61,6 +61,8 @@
         "streaming": true,
         // LangGraph 最大递归步数（agent 调用工具的最大轮数），默认 100
         "recursion_limit": 100,
+        // 子Agent最大嵌套深度，0 表示禁用子Agent
+        "max_subagent_depth": 2,
 
         // ----- 上下文摘要（自动压缩对话历史） -----
         // 当对话超过 trigger 阈值时，自动用 LLM 生成旧消息的摘要，
@@ -91,6 +93,21 @@
         "url": "sqlite+aiosqlite:///./lc_agent_data.db",
         // LangGraph checkpoint 存储路径
         "checkpoint_path": "./lc_agent_checkpoints.db"
+    },
+
+    "memory": {
+        "enabled": true,
+        "type": "sqlite",
+        "path": "./lc_agent_memory.db",
+        "save_policy": "explicit",
+        "retrieval_policy": "manual",
+        "semantic_search": {
+            "enabled": true,
+            "api_key": "{env:NBRAG_API_KEY}",
+            "base_url": "https://api.siliconflow.cn/v1",
+            "model": "BAAI/bge-m3",
+            "dims": 1024
+        }
     },
 
     

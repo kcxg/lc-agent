@@ -1,28 +1,145 @@
-# lc_agent/core/engine.py
+﻿# lc_agent/core/engine.py
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncIterator
+from dataclasses import dataclass
+import re
+from typing import Annotated, Any, AsyncIterator
 
+from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
+from langchain.agents.middleware.todo import WRITE_TODOS_SYSTEM_PROMPT, WRITE_TODOS_TOOL_DESCRIPTION
+try:
+    from langchain.agents.middleware.types import AgentMiddleware as _AgentMiddlewareBase
+    from langchain_core.messages import SystemMessage as _SystemMessage
+    _HAS_MIDDLEWARE_BASE = True
+except ImportError:
+    _AgentMiddlewareBase = object  # type: ignore[misc,assignment]
+    _HAS_MIDDLEWARE_BASE = False
 
-from lc_agent.core.http_trace import get_http_trace_collector
+from lc_agent.core.http_trace import (
+    HttpTraceCollector,
+    bind_http_trace_collector,
+    get_http_trace_collector,
+    register_subagent_collector,
+    reset_http_trace_collector,
+)
 from lc_agent.core.http_trace_httpx import TracingAsyncClient
 from lc_agent.core.models import AgentPreset, ModelInfo
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool as lc_tool
+
 from lc_agent.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+TODO_FINAL_ANSWER_GUARD = """## Final Answer Guard for `write_todos`
+
+- Do not create todo items whose only purpose is to write, organize, summarize, or deliver the final answer.
+- Before writing the substantive final answer to the user, make your last necessary `write_todos` call.
+- After you start writing the substantive final answer, do not call `write_todos` again in the same turn.
+- If the only remaining todo is about producing the final answer, do not call `write_todos` just to mark it complete. Deliver the final answer directly.
+"""
+
+TODO_SYSTEM_PROMPT = f"{WRITE_TODOS_SYSTEM_PROMPT}\n\n{TODO_FINAL_ANSWER_GUARD}"
+TODO_TOOL_DESCRIPTION = f"{WRITE_TODOS_TOOL_DESCRIPTION}\n\n{TODO_FINAL_ANSWER_GUARD}"
+
+_LOAD_SKILL_DESCRIPTION = (
+    "Retrieve the full step-by-step instructions for a skill. "
+    "This MUST be called before executing any task that matches a skill — "
+    "the brief description in the system prompt is only a trigger hint, "
+    "not the actual procedure. "
+    "Returns the skill's markdown body, available resources, and scripts. "
+    "Skill names are listed in the system prompt under '## Available Skills'."
+)
+
+
+class _SystemBlockMiddleware(_AgentMiddlewareBase):  # type: ignore[misc]
+    """Injects a text block as a separate system message content block."""
+
+    def __init__(self, text: str, middleware_name: str) -> None:
+        super().__init__()
+        self._text = text
+        self._middleware_name = middleware_name
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return self._middleware_name
+
+    def _patched_system(self, existing: Any) -> Any:
+        block_text = f"\n\n{self._text}"
+        if existing is not None:
+            new_content = [*existing.content_blocks, {"type": "text", "text": block_text}]
+        else:
+            new_content = [{"type": "text", "text": block_text}]
+        return _SystemMessage(content=new_content)  # type: ignore[call-arg]
+
+    def wrap_model_call(self, request: Any, handler: Any) -> Any:
+        return handler(request.override(system_message=self._patched_system(request.system_message)))
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        return await handler(request.override(system_message=self._patched_system(request.system_message)))
+
+
+# Keep old name as alias for backwards compatibility
+_SkillsPromptMiddleware = _SystemBlockMiddleware
+
+
+@dataclass(frozen=True)
+class SubAgentDescriptor:
+    subagent_type: str
+    preset_id: str
+    display_name: str
+    description: str
+
+
+_GENERAL_PURPOSE_DESCRIPTION = (
+    "当你需要一个与当前智能体能力相近、但在隔离上下文中并行处理复杂任务的工作线程时调用它。"
+)
+
+
+def _extract_subagent_result(messages: list[Any], limit: int = 2) -> str:
+    texts: list[str] = []
+    for msg in reversed(messages):
+        if getattr(msg, "type", None) != "ai":
+            continue
+        content = getattr(msg, "content", "")
+        if isinstance(content, str):
+            text = content.strip()
+        elif isinstance(content, list):
+            text = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            ).strip()
+        else:
+            text = str(content).strip()
+        if text:
+            texts.append(text)
+        if len(texts) >= limit:
+            break
+    # Subagents may emit the substantive answer, then update write_todos and emit a short closing message.
+    return "\n\n".join(reversed(texts))
+
+try:
+    from langchain_core.tools import InjectedToolCallId
+    _HAS_INJECTED_TOOL_CALL_ID = True
+except ImportError:
+    InjectedToolCallId = None  # type: ignore[assignment,misc]
+    _HAS_INJECTED_TOOL_CALL_ID = False
 
 
 class AgentEngine:
     """Core agent engine wrapping langchain.agents.create_agent with middleware support."""
 
-    def __init__(self, config: dict, checkpointer=None):
+    def __init__(self, config: dict, checkpointer=None, store=None):
         self.config = config
         self.tool_registry = ToolRegistry()
         self._checkpointer = checkpointer
+        self._store = store
         self._agents: dict[str, Any] = {}
+        self._agent_subagent_tools: dict[str, set[str]] = {}
+        self._agent_subagent_display_map: dict[str, dict[str, str]] = {}
         self._current_preset: AgentPreset | None = None
         self._models: list[ModelInfo] = self._parse_models(config)
         self._presets: dict[str, AgentPreset] = {}
@@ -30,6 +147,19 @@ class AgentEngine:
         self._agent_mcp_gen: dict[str, int] = {}
         self._mcp_generation: int = 0
         self.recursion_limit: int = config.get("agent", {}).get("recursion_limit", 100)
+
+    def _memory_enabled(self) -> bool:
+        memory_conf = self.config.get("memory", {})
+        if isinstance(memory_conf, dict):
+            return memory_conf.get("enabled", True)
+        return getattr(memory_conf, "enabled", True)
+
+    def _is_code_agent(self, preset_id: str) -> bool:
+        preset = self._resolve_preset(preset_id)
+        return preset.source == "code" or preset_id in self._custom_presets
+
+    def _should_use_memory_context(self, preset_id: str) -> bool:
+        return self._store is not None and self._memory_enabled() and not self._is_code_agent(preset_id)
 
     def _parse_models(self, config: dict) -> list[ModelInfo]:
         """Extract ModelInfo list from config."""
@@ -97,11 +227,175 @@ class AgentEngine:
         """Return the default agent (Chat - safest)."""
         return self.get_builtin_presets()[0]
 
+    def _preset_exists(self, preset_id: str) -> bool:
+        """Return True if preset_id refers to a known preset."""
+        return (
+            preset_id in self.BUILTIN_IDS
+            or preset_id in self._custom_presets
+            or preset_id in self._presets
+        )
+
+    def _build_subagent_registry(
+        self,
+        preset: AgentPreset,
+        depth: int,
+        building_set: frozenset[str],
+    ) -> dict[str, SubAgentDescriptor]:
+        max_depth = self.config.get("agent", {}).get("max_subagent_depth", 2)
+        if depth >= max_depth:
+            return {}
+
+        registry: dict[str, SubAgentDescriptor] = {}
+        subagent_candidates: list[tuple[str, str]] = []
+        if getattr(preset, "subagents", None):
+            for subagent_link in preset.subagents:
+                subagent_candidates.append((
+                    subagent_link.agent_id,
+                    (subagent_link.delegation_description or "").strip(),
+                ))
+
+        for subagent_id, relationship_description in subagent_candidates:
+            if subagent_id in building_set:
+                logger.warning("Subagent circular reference detected: %s — skipping", subagent_id)
+                continue
+            if not self._preset_exists(subagent_id):
+                logger.warning("Subagent preset not found: %s — skipping", subagent_id)
+                continue
+            subagent_preset = self._resolve_preset(subagent_id)
+            display_name = subagent_preset.name
+            subagent_type = display_name
+            suffix = 1
+            while subagent_type in registry:
+                suffix += 1
+                subagent_type = f"{display_name}#{subagent_id.replace('-', '')[:8] or suffix}"
+            registry[subagent_type] = SubAgentDescriptor(
+                subagent_type=subagent_type,
+                preset_id=subagent_id,
+                display_name=display_name,
+                description=(
+                    relationship_description
+                    or (getattr(subagent_preset, "default_delegation_description", "") or "").strip()
+                    or display_name
+                ),
+            )
+
+        if getattr(preset, "enable_general_purpose_subagent", False):
+            gp_id = f"__gp__:{preset.id}"
+            gp_preset = preset.model_copy(update={
+                "id": gp_id,
+                "subagents": None,
+                "enable_general_purpose_subagent": False,
+            })
+            self._presets[gp_id] = gp_preset
+            registry["通用助手"] = SubAgentDescriptor(
+                subagent_type="通用助手",
+                preset_id=gp_id,
+                display_name="通用助手",
+                description=_GENERAL_PURPOSE_DESCRIPTION,
+            )
+
+        return registry
+
+    def _make_task_tool(
+        self,
+        registry: dict[str, SubAgentDescriptor],
+        depth: int,
+        building_set: frozenset[str],
+    ):
+        async def _run_subagent(subagent_type: str, description: str, config: RunnableConfig, tool_call_id: str) -> str:
+            descriptor = registry.get(subagent_type)
+            if descriptor is None:
+                available = ", ".join(sorted(registry))
+                return f"[Sub-agent error: Unknown subagent_type '{subagent_type}'. Available: {available}]"
+
+            try:
+                sub_agent = self._get_or_build_agent(descriptor.preset_id, _depth=depth)
+            except Exception as exc:
+                logger.exception("Subagent %s failed to build: %s", descriptor.preset_id, exc)
+                return f"[Sub-agent error: {exc}]"
+
+            configurable = (config or {}).get("configurable", {})
+            parent_tid = configurable.get("thread_id") or ""
+            lg_ns = configurable.get("checkpoint_ns", "")
+            tc_id = next(
+                (seg.split(":", 1)[1] for seg in lg_ns.split("|") if seg.startswith("tools:")),
+                tool_call_id,
+            )
+            sub_thread_id = f"{parent_tid}--sa--{tc_id}"
+            sub_config = {
+                **(config or {}),
+                "configurable": {
+                    **((config or {}).get("configurable") or {}),
+                    "thread_id": sub_thread_id,
+                    "sub_session_id": sub_thread_id,
+                },
+            }
+
+            _sa_collector = HttpTraceCollector(provider=None, model=None)
+            _trace_token = bind_http_trace_collector(_sa_collector)
+            try:
+                result = await sub_agent.ainvoke(
+                    {"messages": [{"role": "user", "content": description}]},
+                    config=sub_config,
+                )
+                msgs = result.get("messages", [])
+                return _extract_subagent_result(msgs)
+            except Exception as exc:
+                logger.exception("Subagent %s failed: %s", descriptor.preset_id, exc)
+                return f"[Sub-agent error: {exc}]"
+            finally:
+                reset_http_trace_collector(_trace_token)
+                register_subagent_collector(sub_thread_id, _sa_collector)
+
+        description_lines = [
+            "Delegate a task to one configured sub-agent.",
+            "",
+            "Use the exact `subagent_type` value from the list below.",
+            "Do not rename it, paraphrase it, translate it, or invent a new value.",
+            "",
+            "Available subagents:",
+            "",
+        ]
+        for descriptor in registry.values():
+            description_lines.extend([
+                "====================",
+                "",
+                f"subagent_type: {descriptor.subagent_type}",
+                "",
+                "delegation_description:",
+                descriptor.description,
+                "",
+            ])
+        if description_lines and description_lines[-1] == "":
+            description_lines.pop()
+        task_description = "\n".join(description_lines)
+
+        if _HAS_INJECTED_TOOL_CALL_ID:
+            @lc_tool("task", description=task_description)
+            async def task(
+                subagent_type: str,
+                description: str,
+                tool_call_id: Annotated[str, InjectedToolCallId],
+                config: RunnableConfig,
+            ) -> str:
+                return await _run_subagent(subagent_type, description, config, tool_call_id)
+        else:
+            @lc_tool("task", description=task_description)
+            async def task(subagent_type: str, description: str, config: RunnableConfig) -> str:
+                import uuid
+
+                tool_call_id = ((config or {}).get("configurable") or {}).get("tool_call_id") or uuid.uuid4().hex
+                return await _run_subagent(subagent_type, description, config, tool_call_id)
+
+        return task
+
     def build_agent(
         self,
         preset: AgentPreset | None = None,
         cache_key: str | None = None,
         llm_params: dict | None = None,
+        building_set: frozenset[str] | None = None,
+        _depth: int = 0,
     ):
         """Build a LangGraph ReAct agent from preset."""
         if preset is None:
@@ -111,49 +405,108 @@ class AgentEngine:
         system_prompt = preset.system_prompt
         tools = self.tool_registry.get_filtered_tools(preset.allowed_tool_groups)
 
+        _memory_middleware: _SystemBlockMiddleware | None = None
+        _skills_middleware: _SystemBlockMiddleware | None = None
         if hasattr(self, '_skills_toolkit') and self._skills_toolkit:
             allowed = preset.allowed_skills
             if allowed is None or allowed:
-                skill_tools = [
-                    t for t in self._skills_toolkit.get_tools()
-                    if t.name != "list_skills"
-                ]
+                skill_tools = []
+                for _t in self._skills_toolkit.get_tools():
+                    if _t.name == "list_skills":
+                        continue
+                    if _t.name == "load_skill":
+                        try:
+                            _t = _t.model_copy(update={"description": _LOAD_SKILL_DESCRIPTION})
+                        except Exception:
+                            pass
+                    skill_tools.append(_t)
                 tools = tools + skill_tools
                 loader = self._skills_toolkit._resolved_loader
                 if loader:
                     all_skills = loader.list_skills()
                     if allowed is not None:
                         all_skills = [s for s in all_skills if s.name in allowed]
-                    if all_skills:
-                        lines = ["# Available Skills", ""]
-                        for s in all_skills:
-                            lines.append(f"- **{s.name}**: {s.description}")
-                        lines.append("")
-                        lines.append(
-                            "Use `load_skill` to get full instructions for a skill, "
-                            "`read_skill_resource` to read its resources, "
-                            "and `run_skill_script` to execute its scripts."
-                        )
-                        system_prompt = f"{system_prompt}\n\n" + "\n".join(lines)
+                    if all_skills and _HAS_MIDDLEWARE_BASE:
+                        import json as _json
+                        skill_entries = [
+                            {
+                                "skill_name": s.name,
+                                "description": s.description.splitlines()[0],
+                            }
+                            for s in all_skills
+                        ]
+                        lines = [
+                            "## Available Skills",
+                            "",
+                            "The descriptions below are **triggers** — they tell you WHEN a skill applies.",
+                            "The actual step-by-step instructions, required tools, and constraints are INSIDE the skill.",
+                            "",
+                            "**MANDATORY RULE**: When the user's request matches a skill's description,",
+                            "you MUST call `load_skill(skill_name=\"<skill_name>\")` FIRST to retrieve",
+                            "the full instructions, then follow them exactly.",
+                            "Do NOT skip this step and proceed with your default approach.",
+                            "",
+                            "```json",
+                            _json.dumps(skill_entries, ensure_ascii=False, indent=2),
+                            "```",
+                            "",
+                            "After loading a skill, you may also call `read_skill_resource` to fetch",
+                            "its reference files or `run_skill_script` to execute its scripts.",
+                        ]
+                        _skills_middleware = _SystemBlockMiddleware("\n".join(lines), "SkillsPromptMiddleware")
 
         if hasattr(self, '_mcp_manager') and self._mcp_manager:
             mcp_tools = self._mcp_manager.get_filtered_langchain_tools(preset.allowed_mcp_servers)
             tools = tools + mcp_tools
 
-        model_info = self._find_model(preset.default_model)
-        effective_params = {**(preset.llm_params or {}), **(llm_params or {})}
-        llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
-
-        from langchain.agents import create_agent
-
         kwargs: dict[str, Any] = {}
         if self._checkpointer:
             kwargs["checkpointer"] = self._checkpointer
 
-        middleware = [TodoListMiddleware()]
+        if self._store is not None and self._memory_enabled():
+            from lc_agent.core.memory import (
+                AgentRuntimeContext,
+                MEMORY_SYSTEM_PROMPT,
+                build_memory_tools,
+            )
+
+            tools = tools + build_memory_tools()
+            if _HAS_MIDDLEWARE_BASE:
+                _memory_middleware = _SystemBlockMiddleware(MEMORY_SYSTEM_PROMPT, "MemoryPromptMiddleware")
+            else:
+                system_prompt = f"{system_prompt}\n\n{MEMORY_SYSTEM_PROMPT}"
+            kwargs["store"] = self._store
+            kwargs["context_schema"] = AgentRuntimeContext
+
+        new_building = (building_set or frozenset()) | {preset.id}
+        subagent_registry = self._build_subagent_registry(preset, depth=_depth, building_set=new_building)
+        subagent_tool_names: set[str] = set()
+        subagent_display_map: dict[str, str] = {}
+        if subagent_registry:
+            tools.append(self._make_task_tool(subagent_registry, _depth + 1, new_building))
+            subagent_tool_names = {"task"}
+            subagent_display_map = {
+                descriptor.subagent_type: descriptor.display_name
+                for descriptor in subagent_registry.values()
+            }
+
+        model_info = self._find_model(preset.default_model)
+        effective_params = {**(preset.llm_params or {}), **(llm_params or {})}
+        llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
+
+        middleware = []
+        if _memory_middleware is not None:
+            middleware.append(_memory_middleware)
+        if _skills_middleware is not None:
+            middleware.append(_skills_middleware)
+        middleware.append(TodoListMiddleware(
+            system_prompt=TODO_SYSTEM_PROMPT,
+            tool_description=TODO_TOOL_DESCRIPTION,
+        ))
         middleware.extend(self._build_summarization_middleware(preset))
 
-        if hasattr(self, '_permissions_service') and self._permissions_service:
+        # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
+        if hasattr(self, '_permissions_service') and self._permissions_service and _depth == 0:
             from langchain.agents.middleware import HumanInTheLoopMiddleware
             interrupt_on = {
                 tool.name: {
@@ -174,7 +527,10 @@ class AgentEngine:
             **kwargs,
         )
 
-        self._agents[cache_key or preset.id] = agent
+        resolved_cache_key = cache_key or preset.id
+        self._agents[resolved_cache_key] = agent
+        self._agent_subagent_tools[resolved_cache_key] = subagent_tool_names
+        self._agent_subagent_display_map[resolved_cache_key] = subagent_display_map
         return agent
 
     def _build_tracing_async_client(self, model_info: ModelInfo | None, model_id: str):
@@ -301,12 +657,52 @@ class AgentEngine:
             return self._presets[preset_id]
         return self.get_default_preset()
 
-    def _get_agent_cache_key(self, preset_id: str, model_id: str = "", llm_params: dict | None = None) -> str:
+    def _get_agent_cache_key(
+        self,
+        preset_id: str,
+        model_id: str = "",
+        llm_params: dict | None = None,
+        _depth: int = 0,
+    ) -> str:
         key = f"{preset_id}::model::{model_id}" if model_id else preset_id
         if llm_params:
             import json
             key = f"{key}::llm::{json.dumps(llm_params, sort_keys=True)}"
+        if _depth:
+            key = f"{key}::depth::{_depth}"
         return key
+
+    def get_subagent_tool_names(
+        self,
+        preset_id: str,
+        model_id: str = "",
+        llm_params: dict | None = None,
+        _depth: int = 0,
+    ) -> set[str]:
+        """Return the set of tool names (not IDs) that are sub-agents for the given preset."""
+        cache_key = self._get_agent_cache_key(
+            preset_id,
+            model_id if self._find_model(model_id) else "",
+            llm_params=llm_params,
+            _depth=_depth,
+        )
+        return self._agent_subagent_tools.get(cache_key, set())
+
+    def get_subagent_display_name_map(
+        self,
+        preset_id: str,
+        model_id: str = "",
+        llm_params: dict | None = None,
+        _depth: int = 0,
+    ) -> dict[str, str]:
+        """Return {tool_name: display_name} for sub-agents of the given preset."""
+        cache_key = self._get_agent_cache_key(
+            preset_id,
+            model_id if self._find_model(model_id) else "",
+            llm_params=llm_params,
+            _depth=_depth,
+        )
+        return self._agent_subagent_display_map.get(cache_key, {})
 
     def invalidate_agent_cache(self, preset_id: str, keep_exact: bool = False) -> None:
         """Remove cached agents for a preset, including model/llm_params override variants."""
@@ -319,11 +715,15 @@ class AgentEngine:
         for key in keys:
             self._agents.pop(key, None)
             self._agent_mcp_gen.pop(key, None)
+            self._agent_subagent_tools.pop(key, None)
+            self._agent_subagent_display_map.pop(key, None)
 
     def invalidate_all_agents(self) -> None:
         """Remove all cached agents, forcing rebuild on next use."""
         self._agents.clear()
         self._agent_mcp_gen.clear()
+        self._agent_subagent_tools.clear()
+        self._agent_subagent_display_map.clear()
 
     def _resolve_preset_for_model(self, preset_id: str, model_id: str = "") -> AgentPreset:
         preset = self._resolve_preset(preset_id)
@@ -336,6 +736,7 @@ class AgentEngine:
         preset_id: str,
         model_id: str = "",
         llm_params: dict | None = None,
+        _depth: int = 0,
     ):
         """Get cached agent or build a new one. Rebuilds preset agents if MCP state changed."""
         preset = self._resolve_preset(preset_id)
@@ -351,25 +752,35 @@ class AgentEngine:
             preset_id,
             model_id if preset.default_model == model_id else "",
             llm_params=llm_params,
+            _depth=_depth,
         )
         mcp_gen = getattr(self, '_mcp_generation', 0)
         cached = self._agents.get(cache_key)
         cached_gen = self._agent_mcp_gen.get(cache_key, -1)
         if cached is None or cached_gen != mcp_gen:
-            agent = self.build_agent(preset, cache_key=cache_key, llm_params=llm_params)
+            agent = self.build_agent(preset, cache_key=cache_key, llm_params=llm_params, _depth=_depth)
             self._agent_mcp_gen[cache_key] = mcp_gen
             return agent
         return cached
 
-    async def chat(self, message: str, thread_id: str, preset_id: str = "__chat__", model_id: str = "") -> str:
+    async def chat(
+        self,
+        message: str,
+        thread_id: str,
+        preset_id: str = "__chat__",
+        model_id: str = "",
+        user_id: str = "anonymous",
+    ) -> str:
         """Send a message and get a response (non-streaming)."""
         agent = self._get_or_build_agent(preset_id, model_id)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
-        result = await agent.ainvoke(
-            {"messages": [{"role": "user", "content": message}]},
-            config=config,
-        )
+        invoke_kwargs: dict[str, Any] = {"config": config}
+        if self._should_use_memory_context(preset_id):
+            from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
+
+            invoke_kwargs["context"] = AgentRuntimeContext(user_id=normalize_memory_user_id(user_id))
+        result = await agent.ainvoke({"messages": [{"role": "user", "content": message}]}, **invoke_kwargs)
         messages = result.get("messages", [])
         if messages:
             return messages[-1].content
@@ -383,6 +794,7 @@ class AgentEngine:
         model_id: str = "",
         history: list[dict[str, str]] | None = None,
         llm_params: dict | None = None,
+        user_id: str = "anonymous",
     ) -> AsyncIterator[dict]:
         """Stream chat responses as events."""
         agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
@@ -390,10 +802,14 @@ class AgentEngine:
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
         input_messages = list(history or [])
         input_messages.append({"role": "user", "content": message})
+        stream_kwargs: dict[str, Any] = {"config": config, "version": "v2"}
+        if self._should_use_memory_context(preset_id):
+            from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
+
+            stream_kwargs["context"] = AgentRuntimeContext(user_id=normalize_memory_user_id(user_id))
         async for event in agent.astream_events(
             {"messages": input_messages},
-            config=config,
-            version="v2",
+            **stream_kwargs,
         ):
             yield event
 

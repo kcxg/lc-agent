@@ -3,8 +3,11 @@
 All functions accept db_url as the first argument and are self-contained —
 no dependency on the WebSocket handler class.
 """
-
+import logging
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 
 async def get_session_message_count(db_url: str, thread_id: str) -> int:
@@ -62,7 +65,8 @@ async def ensure_session(
         finally:
             await session.close()
     except Exception:
-        pass
+        logger.exception("Failed to ensure session %s", thread_id)
+        raise
 
 
 async def increment_session_message_count(db_url: str, thread_id: str) -> None:
@@ -77,7 +81,8 @@ async def increment_session_message_count(db_url: str, thread_id: str) -> None:
         finally:
             await session.close()
     except Exception:
-        pass
+        logger.exception("Failed to increment message count for session %s", thread_id)
+        raise
 
 
 async def save_title(db_url: str, thread_id: str, title: str) -> None:
@@ -92,7 +97,8 @@ async def save_title(db_url: str, thread_id: str, title: str) -> None:
         finally:
             await session.close()
     except Exception:
-        pass
+        logger.exception("Failed to save title for session %s", thread_id)
+        raise
 
 
 async def generate_title(
@@ -118,8 +124,8 @@ async def generate_title(
             if preset:
                 model_id = model_id or preset.default_model
         return await engine.generate_title(first_message, model_id)
-    except Exception as e:
-        print(f"[persistence] Title generation failed: {e}")
+    except Exception:
+        logger.exception("Title generation failed for session %s", thread_id)
         return None
 
 
@@ -151,8 +157,9 @@ async def save_ui_message(
             )
         finally:
             await session.close()
-    except Exception as e:
-        print(f"[persistence] Failed to persist UI message for {thread_id}: {e}")
+    except Exception:
+        logger.exception("Failed to persist UI message for session %s", thread_id)
+        raise
 
 
 async def truncate_from_message(db_url: str, thread_id: str, message_id: str) -> None:
@@ -167,8 +174,9 @@ async def truncate_from_message(db_url: str, thread_id: str, message_id: str) ->
             await repo.truncate_from_message(thread_id, message_id)
         finally:
             await session.close()
-    except Exception as e:
-        print(f"[persistence] Failed to truncate UI messages for {thread_id}: {e}")
+    except Exception:
+        logger.exception("Failed to truncate UI messages for session %s", thread_id)
+        raise
 
 
 async def load_resume_context(db_url: str, thread_id: str) -> tuple[list[dict[str, Any]], int]:
@@ -234,5 +242,68 @@ async def append_to_last_assistant_message(
             await session.commit()
         finally:
             await session.close()
-    except Exception as e:
-        print(f"[persistence] Failed to update last assistant message for {thread_id}: {e}")
+    except Exception:
+        logger.exception("Failed to update last assistant message for session %s", thread_id)
+        raise
+
+
+async def create_subsession(
+    db_url: str,
+    sub_session_id: str,
+    parent_session_id: str,
+    tool_call_id: str,
+    agent_id: str,
+    title: str,
+    user_id: str = "",
+) -> None:
+    """Create a sub-session record linked to its parent session."""
+    try:
+        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.models import SessionMeta
+
+        session = get_async_session(db_url)
+        try:
+            new_session = SessionMeta(
+                id=sub_session_id,
+                title=title,
+                agent_id=agent_id,
+                model="",
+                user_id=user_id,
+                message_count=0,
+                parent_session_id=parent_session_id,
+                tool_call_id=tool_call_id,
+            )
+            session.add(new_session)
+            await session.commit()
+        finally:
+            await session.close()
+    except Exception:
+        logger.exception("Failed to create sub-session %s", sub_session_id)
+        raise
+
+
+async def save_subsession_delegation_message(
+    db_url: str,
+    sub_session_id: str,
+    query: str,
+) -> None:
+    """Insert the synthetic delegation message as the first message in a sub-session."""
+    await save_ui_message(db_url, sub_session_id, "system", f"委托任务: {query}")
+
+
+async def finalize_subsession_message(
+    db_url: str,
+    sub_session_id: str,
+    content: str,
+    tool_calls: list[dict] | None = None,
+    usage: dict | None = None,
+    http_traces: list[dict] | None = None,
+) -> None:
+    """Save the sub-agent's assistant message and increment message count."""
+    await save_ui_message(
+        db_url, sub_session_id, "assistant", content,
+        tool_calls=tool_calls,
+        usage=usage,
+        http_traces=http_traces,
+    )
+    await increment_session_message_count(db_url, sub_session_id)

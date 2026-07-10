@@ -70,3 +70,12 @@ export const api = {
   updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>
     fetchApi<any>('/settings/summarization', { method: 'PUT', body: JSON.stringify(data) }),
 }
+
+export async function fetchAvailableSubagents(): Promise<Array<{
+  id: string
+  name: string
+  source: string
+  description: string
+}>> {
+  return fetchApi('/agents/available-subagents')
+}

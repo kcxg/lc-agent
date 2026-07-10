@@ -65,6 +65,23 @@ export interface ContentSegment {
   toolCall?: ToolCall
 }
 
+export interface SubAgentEntry {
+  tool_call_id: string
+  name: string
+  sub_session_id: string
+  query: string
+  status: 'running' | 'done' | 'error' | 'cancelled' | 'interrupted'
+  tokenPreview: string
+  toolCallCount: number
+  tokenCount: number
+  tokens: string
+  thinking: string
+  thinkCount: number
+  innerToolCalls: Array<{ name: string; status: string; args?: unknown; result?: string }>
+  duration?: number
+  httpTraces?: HttpTrace[]
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'tool'
@@ -72,7 +89,9 @@ export interface ChatMessage {
   timestamp: number
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
+  subAgents?: Record<string, SubAgentEntry>
   isStreaming?: boolean
+  isSystem?: boolean
   usage?: MessageUsage
   httpTraces?: HttpTrace[]
   httpTracesCount?: number
@@ -83,10 +102,12 @@ export interface ToolCall {
   runId?: string
   args?: Record<string, any>
   result?: string
-  status: 'pending' | 'running' | 'done' | 'error'
+  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled' | 'interrupted'
   startTime?: number
   duration?: number
   resultLength?: number
+  is_subagent?: boolean
+  sub_session_id?: string
 }
 
 export interface InterruptInfo {
@@ -110,7 +131,13 @@ function normalizeToolStatus(status: any): ToolCall['status'] {
   if (status === 'pending' || status === 'running' || status === 'done' || status === 'error') {
     return status
   }
+  if (status === 'cancelled' || status === 'interrupted') return status
   if (status === 'success') return 'done'
+  return 'done'
+}
+
+function normalizeSubAgentDoneStatus(status: any): SubAgentEntry['status'] {
+  if (status === 'error' || status === 'cancelled' || status === 'interrupted') return status
   return 'done'
 }
 
@@ -181,6 +208,17 @@ function normalizeHttpTraces(raw: any): HttpTrace[] | undefined {
 }
 
 function normalizeHistoryMessage(msg: any): ChatMessage | null {
+  if (msg.role === 'system') {
+    const content = msg.content || ''
+    return {
+      id: msg.id || createClientId(),
+      role: 'user',
+      content,
+      timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now(),
+      isSystem: true,
+    }
+  }
+
   const role = msg.role === 'human' ? 'user' : msg.role === 'ai' ? 'assistant' : msg.role
   if (!['user', 'assistant', 'tool'].includes(role)) return null
 
@@ -193,10 +231,33 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     startTime: tc.startTime ?? tc.start_time,
     duration: tc.duration,
     resultLength: tc.resultLength ?? tc.result_length ?? tc.result?.length,
+    is_subagent: tc.is_subagent || false,
+    sub_session_id: tc.sub_session_id || '',
   }))
   const usage = normalizeHistoryUsage(msg.usage)
   if (usage && toolCalls.length > usage.toolCallCount) {
     usage.toolCallCount = toolCalls.length
+  }
+
+  const subAgents: Record<string, SubAgentEntry> = {}
+  for (const tc of toolCalls) {
+    if (tc.is_subagent && tc.runId) {
+      subAgents[tc.runId] = {
+        tool_call_id: tc.runId,
+        name: tc.name,
+        sub_session_id: tc.sub_session_id || '',
+        query: typeof tc.args === 'object' ? (tc.args?.query || '') : '',
+        status: tc.status === 'running' ? 'running' : normalizeSubAgentDoneStatus(tc.status),
+        tokenPreview: tc.result || '',
+        toolCallCount: 0,
+        tokenCount: 0,
+        tokens: '',
+        thinking: '',
+        thinkCount: 0,
+        innerToolCalls: [],
+        duration: tc.duration,
+      }
+    }
   }
 
   const httpTraces = normalizeHttpTraces(msg.http_traces || msg.httpTraces)
@@ -212,6 +273,7 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     content,
     timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now(),
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    subAgents: Object.keys(subAgents).length > 0 ? subAgents : undefined,
     usage,
     httpTraces,
     httpTracesCount,
@@ -257,6 +319,216 @@ function mergeFinalUsageRounds(targetRounds: LlmRoundUsage[], rawRounds: any[]) 
       targetRounds.push(normalized)
     }
   })
+}
+
+export interface SubAgentReducerResult {
+  changed: boolean
+  shouldRefresh: boolean
+}
+
+const SUBAGENT_UNCHANGED: SubAgentReducerResult = { changed: false, shouldRefresh: false }
+
+type SubAgentReducer = (
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+  parentThreadId?: string | null,
+) => SubAgentReducerResult
+
+function getSubAgentToolCallId(msg: SseMessage): string {
+  return msg.tool_call_id || msg.run_id || ''
+}
+
+function findSubAgentMessage(
+  messages: ChatMessage[],
+  toolCallId: string,
+  allowLastAssistantFallback = false,
+): ChatMessage | undefined {
+  if (!toolCallId) return undefined
+  let lastAssistant: ChatMessage | undefined
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.role !== 'assistant') continue
+    if (allowLastAssistantFallback && message.role === 'assistant' && !lastAssistant) {
+      lastAssistant = message
+    }
+    if (message.subAgents?.[toolCallId]) return message
+    if (message.toolCalls?.some(t => t.runId === toolCallId)) return message
+  }
+  return allowLastAssistantFallback ? lastAssistant : undefined
+}
+
+export function applySubAgentEventToMessages(
+  messages: ChatMessage[],
+  msg: SseMessage,
+  reducer: SubAgentReducer,
+  parentThreadId?: string | null,
+): SubAgentReducerResult {
+  const toolCallId = getSubAgentToolCallId(msg)
+  const message = findSubAgentMessage(messages, toolCallId, msg.type === 'subagent_start')
+  return reducer(message, msg, parentThreadId)
+}
+
+export function applySubAgentStart(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+  parentThreadId?: string | null,
+): SubAgentReducerResult {
+  if (!message || message.role !== 'assistant') return SUBAGENT_UNCHANGED
+
+  const toolCallId = msg.tool_call_id || msg.run_id || ''
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const subSessionId = msg.sub_session_id
+    || (parentThreadId ? `${parentThreadId}--sa--${toolCallId}` : '')
+
+  const existing = message.subAgents?.[toolCallId]
+  const entry: SubAgentEntry = {
+    tool_call_id: toolCallId,
+    name: msg.name || msg.subagent_type || existing?.name || '子 Agent',
+    sub_session_id: subSessionId || existing?.sub_session_id || '',
+    query: msg.query || msg.description || existing?.query || '',
+    status: 'running',
+    tokenPreview: existing?.tokenPreview || '',
+    toolCallCount: existing?.toolCallCount || 0,
+    tokenCount: existing?.tokenCount || 0,
+    tokens: existing?.tokens || '',
+    thinking: existing?.thinking || '',
+    thinkCount: existing?.thinkCount || 0,
+    innerToolCalls: existing?.innerToolCalls || [],
+    duration: existing?.duration,
+    httpTraces: existing?.httpTraces,
+  }
+  if (!message.subAgents) {
+    message.subAgents = {}
+  }
+  message.subAgents[toolCallId] = entry
+
+  let tc = message.toolCalls?.find(t => t.runId === toolCallId)
+  if (!tc) {
+    message.toolCalls = message.toolCalls || []
+    tc = {
+      name: 'task',
+      runId: toolCallId,
+      args: msg.description ? { description: msg.description } : undefined,
+      status: 'running',
+      startTime: Date.now(),
+      is_subagent: true,
+      sub_session_id: subSessionId,
+    }
+    message.toolCalls.push(tc)
+  }
+  tc.is_subagent = true
+  tc.sub_session_id = subSessionId
+  return { changed: true, shouldRefresh: true }
+}
+
+export function applySubAgentToken(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message?.subAgents) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents[toolCallId]
+  if (!sa) return SUBAGENT_UNCHANGED
+
+  const newCount = sa.tokenCount + 1
+  message.subAgents[toolCallId] = { ...sa, tokens: sa.tokens + (msg.content || ''), tokenCount: newCount }
+  return { changed: true, shouldRefresh: newCount % 3 === 0 }
+}
+
+export function applySubAgentThinking(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message?.subAgents) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents[toolCallId]
+  if (!sa) return SUBAGENT_UNCHANGED
+
+  const newThinkCount = sa.thinkCount + 1
+  message.subAgents[toolCallId] = {
+    ...sa,
+    thinking: sa.thinking + (msg.content || ''),
+    thinkCount: newThinkCount,
+  }
+  return { changed: true, shouldRefresh: newThinkCount % 5 === 0 }
+}
+
+export function applySubAgentToolCall(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message?.subAgents) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents[toolCallId]
+  if (!sa) return SUBAGENT_UNCHANGED
+
+  message.subAgents[toolCallId] = {
+    ...sa,
+    innerToolCalls: [...sa.innerToolCalls, {
+      name: msg.name || '',
+      status: 'running',
+      args: msg.args,
+    }],
+    toolCallCount: sa.toolCallCount + 1,
+  }
+  return { changed: true, shouldRefresh: true }
+}
+
+export function applySubAgentToolResult(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message?.subAgents) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents[toolCallId]
+  if (!sa) return SUBAGENT_UNCHANGED
+
+  const updatedCalls = [...sa.innerToolCalls]
+  const idx = [...updatedCalls].reverse().findIndex(
+    t => t.name === msg.name && t.status === 'running',
+  )
+  if (idx === -1) return SUBAGENT_UNCHANGED
+
+  const resultStatus = msg.status === 'error' || msg.is_error ? 'error' : 'done'
+  const realIdx = updatedCalls.length - 1 - idx
+  updatedCalls[realIdx] = { ...updatedCalls[realIdx], result: msg.result, status: resultStatus }
+  message.subAgents[toolCallId] = { ...sa, innerToolCalls: updatedCalls }
+  return { changed: true, shouldRefresh: true }
+}
+
+export function applySubAgentDone(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents?.[toolCallId]
+  const rawHttpTraces = msg.http_traces
+  const saHttpTraces = rawHttpTraces?.length ? normalizeHttpTraces(rawHttpTraces) : undefined
+  const doneStatus = normalizeSubAgentDoneStatus(msg.status)
+  if (sa) {
+    message.subAgents![toolCallId] = {
+      ...sa,
+      status: doneStatus,
+      tokens: sa.tokens,
+      tokenPreview: sa.tokens || msg.result_preview || '',
+      duration: msg.duration ?? sa.duration,
+      httpTraces: saHttpTraces,
+    }
+  }
+  const tc = message.toolCalls?.find(t => t.runId === toolCallId)
+  if (tc) {
+    tc.status = doneStatus
+    tc.result = sa?.tokens || msg.result_preview || ''
+    tc.duration = tc.startTime ? Date.now() - tc.startTime : msg.duration
+    tc.resultLength = (tc.result || '').length
+  }
+  return { changed: !!sa || !!tc, shouldRefresh: true }
 }
 
 export interface TodoItem {
@@ -382,11 +654,8 @@ export const useChatStore = defineStore('chat', () => {
         }
         if (!last.toolCalls) last.toolCalls = []
 
-        const existingRunning = last.toolCalls.find(
-          t => t.name === msg.name && t.status === 'running',
-        )
-        if (existingRunning) {
-          existingRunning.startTime = Date.now()
+        const existingByRunId = last.toolCalls.find(t => t.runId === msg.run_id)
+        if (existingByRunId) {
           return
         }
 
@@ -397,6 +666,8 @@ export const useChatStore = defineStore('chat', () => {
           args: msg.args,
           status: 'running',
           startTime: Date.now(),
+          is_subagent: msg.is_subagent,
+          sub_session_id: msg.sub_session_id,
         }
         last.toolCalls.push(tc)
         last.content += `\n<!--TOOL:${tcIdx}-->\n`
@@ -419,6 +690,48 @@ export const useChatStore = defineStore('chat', () => {
           tc.duration = tc.startTime ? Date.now() - tc.startTime : undefined
           tc.resultLength = msg.result?.length || 0
         }
+      }
+    })
+
+    client.on('subagent_start', (msg: SseMessage) => {
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentStart, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
+      }
+    })
+
+    client.on('subagent_token', (msg: SseMessage) => {
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentToken, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
+      }
+    })
+
+    client.on('subagent_thinking', (msg: SseMessage) => {
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentThinking, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
+      }
+    })
+
+    client.on('subagent_tool_call', (msg: SseMessage) => {
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentToolCall, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
+      }
+    })
+
+    client.on('subagent_tool_result', (msg: SseMessage) => {
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentToolResult, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
+      }
+    })
+
+    client.on('subagent_done', (msg: SseMessage) => {
+      const result = applySubAgentEventToMessages(messages.value, msg, applySubAgentDone, threadId.value)
+      if (result.shouldRefresh) {
+        messages.value = [...messages.value]
       }
     })
 
@@ -634,6 +947,13 @@ export const useChatStore = defineStore('chat', () => {
   let _currentOffset = 0
 
   async function loadMessages(sessionId: string) {
+    const sessionsStore = useSessionsStore()
+    if (sessionsStore.isLocalSession(sessionId)) {
+      totalMessageCount.value = 0
+      _currentOffset = 0
+      messages.value = []
+      return
+    }
     try {
       const resp = await api.getSessionMessages(sessionId, { limit: INITIAL_MESSAGE_LIMIT })
       const total = resp?.total ?? 0
@@ -641,12 +961,13 @@ export const useChatStore = defineStore('chat', () => {
       totalMessageCount.value = total
       _currentOffset = resp?.offset ?? 0
 
-      if (!rawMessages || rawMessages.length === 0) return
-
+      // Always set messages on API success — this ensures session switches always
+      // replace the current messages, even when the target session returns empty.
       messages.value = normalizeHistoryMessages(
         Array.isArray(rawMessages) ? rawMessages : []
       )
     } catch (e) {
+      // On API failure keep current messages (graceful degradation)
       console.error('[Chat] Failed to load messages:', e)
     }
   }

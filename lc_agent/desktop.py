@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 import sys
 
+from lc_agent.utils.loggers import desktop_logger
+
 
 def wait_for_port(host: str, port: int, timeout: float = 30.0):
     deadline = time.monotonic() + timeout
@@ -75,7 +77,7 @@ def _apply_dark_titlebar(title: str):
             time.sleep(0.5)
 
         if not candidates:
-            print(f"[Desktop] No visible window found in PID {pid}")
+            desktop_logger.warning("No visible window found in PID %s", pid)
             return
 
         for hwnd in candidates:
@@ -95,10 +97,10 @@ def _apply_dark_titlebar(title: str):
                 hwnd, 0, 0, 0, 0, 0,
                 0x0020 | 0x0001 | 0x0002 | 0x0004,  # FRAMECHANGED|NOSIZE|NOMOVE|NOZORDER
             )
-            print(f"[Desktop] Dark titlebar applied (hwnd={hwnd}, caption_hr={hr35:#x})")
+            desktop_logger.info("Dark titlebar applied (hwnd=%s, caption_hr=%#x)", hwnd, hr35)
 
-    except Exception as e:
-        print(f"[Desktop] Failed to set dark titlebar: {e}")
+    except Exception:
+        desktop_logger.exception("Failed to set dark titlebar")
 
 
 def _apply_window_icon(title: str):
@@ -141,9 +143,9 @@ def _apply_window_icon(title: str):
                 user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big)
             if small:
                 user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
-            print(f"[Desktop] Window icon set (hwnd={hwnd})")
-    except Exception as e:
-        print(f"[Desktop] Failed to set window icon: {e}")
+            desktop_logger.info("Window icon set (hwnd=%s)", hwnd)
+    except Exception:
+        desktop_logger.exception("Failed to set window icon")
 
 
 def _webview_process(url: str, title: str):
@@ -151,7 +153,7 @@ def _webview_process(url: str, title: str):
     try:
         import webview
     except ImportError:
-        print("[Desktop] pywebview not installed, skipping desktop window.")
+        desktop_logger.warning("pywebview not installed, skipping desktop window")
         return
 
     x, y, width, height = get_work_area()
@@ -183,7 +185,7 @@ def launch_desktop(host: str, port: int, title: str = "lc-agent") -> multiproces
     url_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
     url = f"http://{url_host}:{port}/"
     if not wait_for_port(host, port, timeout=5.0):
-        print(f"服务器 {host}:{port} 未响应")
+        desktop_logger.error("Server %s:%s did not respond", host, port)
         sys.exit(1)
     _webview_process(url, title)
 
@@ -207,9 +209,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     url = args.url or f"http://{args.host}:{args.port}/"
-    print(f"[Desktop] Opening {url}")
+    desktop_logger.info("Opening %s", url)
 
     if not wait_for_port(args.host, args.port, timeout=5.0):
-        print(f"[Desktop] Warning: server at {args.host}:{args.port} not reachable, opening anyway.")
+        desktop_logger.warning("Server at %s:%s not reachable, opening anyway", args.host, args.port)
 
     _webview_process(url, args.title)

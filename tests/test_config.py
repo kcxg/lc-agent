@@ -77,6 +77,68 @@ class TestLoadConfigFromFile:
         assert config["auth"]["session_secret"] == ""
 
 
+def test_memory_api_key_uses_env_placeholder(monkeypatch, tmp_path):
+    from lc_agent.config.loader import load_config_from_file
+
+    monkeypatch.setenv("NBRAG_API_KEY", "env-secret")
+    config_path = tmp_path / "config.jsonc"
+    config_path.write_text(
+        """
+        {
+          "memory": {
+            "semantic_search": {
+              "api_key": "{env:NBRAG_API_KEY}"
+            }
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    config = load_config_from_file(str(config_path))
+
+    assert config["memory"]["semantic_search"]["api_key"] == "env-secret"
+
+
+def test_memory_api_key_keeps_literal_value(tmp_path):
+    from lc_agent.config.loader import load_config_from_file
+
+    config_path = tmp_path / "config.jsonc"
+    config_path.write_text(
+        """
+        {
+          "memory": {
+            "semantic_search": {
+              "api_key": "literal-secret"
+            }
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    config = load_config_from_file(str(config_path))
+
+    assert config["memory"]["semantic_search"]["api_key"] == "literal-secret"
+
+
+def test_memory_defaults_use_durable_sqlite_store():
+    from lc_agent.config.schema import AppConfig
+
+    config = AppConfig()
+
+    assert config.memory.enabled is True
+    assert config.memory.type == "sqlite"
+    assert config.memory.path == "./lc_agent_memory.db"
+    assert config.memory.save_policy == "explicit"
+    assert config.memory.retrieval_policy == "manual"
+    assert config.memory.semantic_search.enabled is True
+    assert config.memory.semantic_search.api_key == "{env:NBRAG_API_KEY}"
+    assert config.memory.semantic_search.base_url == "https://api.siliconflow.cn/v1"
+    assert config.memory.semantic_search.model == "BAAI/bge-m3"
+    assert config.memory.semantic_search.dims == 1024
+
+
 class TestAppConfig:
     def test_validates_minimal_config(self):
         config = AppConfig(
@@ -84,6 +146,10 @@ class TestAppConfig:
             agent={"system_prompt": "Hi", "default_model": "m1", "streaming": True},
         )
         assert config.agent["default_model"] == "m1"
+
+    def test_mcp_server_url_defaults_to_http(self):
+        config = AppConfig(mcp_servers={"remote": {"url": "http://localhost:3000/mcp"}})
+        assert config.mcp_servers["remote"].type == "http"
 
     def test_rejects_missing_agent_section(self):
         with pytest.raises(ValidationError):

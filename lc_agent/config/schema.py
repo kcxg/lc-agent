@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModelConfig(BaseModel):
@@ -30,6 +32,23 @@ class AuthConfig(BaseModel):
     cookie_secure: bool = False
 
 
+class MemorySemanticSearchConfig(BaseModel):
+    enabled: bool = True
+    api_key: str = "{env:NBRAG_API_KEY}"
+    base_url: str = "https://api.siliconflow.cn/v1"
+    model: str = "BAAI/bge-m3"
+    dims: int = 1024
+
+
+class MemoryConfig(BaseModel):
+    enabled: bool = True
+    type: str = "sqlite"
+    path: str = "./lc_agent_memory.db"
+    save_policy: str = "explicit"
+    retrieval_policy: str = "manual"
+    semantic_search: MemorySemanticSearchConfig = Field(default_factory=MemorySemanticSearchConfig)
+
+
 class McpServerConfig(BaseModel):
     type: str = "local"  # "local", "sse", "http"
     command: str | list[str] = ""
@@ -38,10 +57,12 @@ class McpServerConfig(BaseModel):
     url: str = ""
     enabled: bool = True
 
-
-class AuthConfig(BaseModel):
-    secret: str = ""
-    token_expire_days: int = 7
+    @model_validator(mode="before")
+    @classmethod
+    def infer_http_type_from_url(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("url") and not data.get("type"):
+            return {**data, "type": "http"}
+        return data
 
 
 class AppConfig(BaseModel):
@@ -53,11 +74,12 @@ class AppConfig(BaseModel):
         "default_model": "",
         "streaming": True,
         "recursion_limit": 100,
+        "max_subagent_depth": 2,
     })
     mcp: dict = Field(default_factory=dict)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    auth: AuthConfig = Field(default_factory=AuthConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     session: dict = Field(default_factory=lambda: {"db_path": ""})
     ui: dict = Field(default_factory=dict)
     skills: list[str] = Field(default_factory=lambda: ["./skills"])

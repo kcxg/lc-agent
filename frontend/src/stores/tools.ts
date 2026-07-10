@@ -154,6 +154,21 @@ export const useToolsStore = defineStore('tools', () => {
     }
   }
 
+  async function refreshRuntimeToggles() {
+    try {
+      const [groupsData, mcpData, skillsData] = await Promise.all([
+        api.getToolGroups(),
+        api.getMcpServers(),
+        api.getSkills(),
+      ])
+      groups.value = groupsData
+      mcpServers.value = mcpData
+      skills.value = skillsData
+    } catch (e) {
+      console.error('[ToolsStore] Failed to refresh runtime toggles:', e)
+    }
+  }
+
   async function init() {
     try {
       const [groupsData, modelsData, mcpData, skillsData] = await Promise.all([
@@ -173,6 +188,7 @@ export const useToolsStore = defineStore('tools', () => {
         _clearOverrides()
         syncModelWithAgentDefault()
         resetLlmParams()
+        refreshRuntimeToggles()
       })
     } catch (e) {
       console.error('[ToolsStore] Failed to fetch:', e)
@@ -238,7 +254,7 @@ export const useToolsStore = defineStore('tools', () => {
   return {
     groups, models, mcpServers, skills, currentModel, llmParams, mcpRefreshing,
     filteredGroups, filteredMcp, filteredSkills,
-    init, refreshMcpServers, toggleGroup, toggleMcp, toggleSkill,
+    init, refreshMcpServers, refreshRuntimeToggles, toggleGroup, toggleMcp, toggleSkill,
     setModel, setLlmParam, resetLlmParams, syncModelWithAgentDefault,
   }
 })

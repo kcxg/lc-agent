@@ -18,6 +18,7 @@
     "test:sidebar": "node scripts/check-sidebar-agent-cards.mjs",
     "test:session-pinning": "node scripts/check-session-pinning-contract.mjs",
     "test:session-route": "node scripts/check-session-route-restore-contract.mjs",
+    "test:new-chat-right-panel": "node scripts/check-new-chat-right-panel-contract.mjs",
     "test:restart-bfzs": "node scripts/check-restart-bfzs-contract.mjs",
     "test:favicon": "node scripts/check-favicon-contract.mjs",
     "test:responsive": "node scripts/check-responsive-layout.mjs",
@@ -25,6 +26,8 @@
     "test:chat-http-ui": "node scripts/check-chat-http-ui-contract.mjs",
     "test:chat-empty-state": "node scripts/check-chat-empty-state-contract.mjs",
     "test:auth": "node scripts/check-auth-contract.mjs",
+    "test:subagent-reducers": "node scripts/check-subagent-reducers-contract.mjs",
+    "test:agent-editor-general-purpose": "node scripts/check-agent-editor-general-purpose-contract.mjs"
     "preview": "vite preview"
   },
   "dependencies": {

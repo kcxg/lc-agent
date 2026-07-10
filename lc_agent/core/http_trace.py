@@ -226,3 +226,24 @@ def reset_http_trace_collector(token: Token) -> None:
 
 def get_http_trace_collector() -> HttpTraceCollector | None:
     return _CURRENT_COLLECTOR.get()
+
+
+# Sub-agent HTTP traces registry — keyed by sub_thread_id (globally unique per session+tool_call).
+# Using a plain dict avoids ContextVar inheritance issues across asyncio task boundaries.
+_SUBAGENT_TRACES_STORE: dict[str, list] = {}
+
+
+def init_subagent_collector_registry() -> None:
+    """No-op with the global-dict approach; kept for API compatibility."""
+
+
+def register_subagent_collector(sub_thread_id: str, collector: "HttpTraceCollector") -> None:
+    """Store completed sub-agent traces so SSE can retrieve them after ainvoke."""
+    traces = collector.snapshot()
+    if traces:
+        _SUBAGENT_TRACES_STORE[sub_thread_id] = traces
+
+
+def pop_subagent_traces(sub_thread_id: str) -> list:
+    """Return and remove the collected HTTP traces for a sub-agent session."""
+    return _SUBAGENT_TRACES_STORE.pop(sub_thread_id, [])

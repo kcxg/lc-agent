@@ -1,7 +1,7 @@
 # tests/test_engine.py
 import pytest
 
-from lc_agent.core.models import AgentPreset, ModelInfo
+from lc_agent.core.models import AgentPreset, ModelInfo, SubAgentLink
 
 
 class TestAgentPreset:
@@ -36,6 +36,27 @@ class TestAgentPreset:
         )
         assert preset.allowed_tool_groups == ["math", "text"]
 
+    def test_accepts_subagent_links(self):
+        preset = AgentPreset(
+            id="p1",
+            name="主智能体",
+            system_prompt="x",
+            default_model="m1",
+            subagents=[
+                SubAgentLink(
+                    agent_id="child-1",
+                    delegation_description="当你需要查询 funboost 知识时调用它",
+                )
+            ],
+        )
+        assert preset.subagents is not None
+        assert preset.subagents[0].agent_id == "child-1"
+        assert preset.subagents[0].delegation_description == "当你需要查询 funboost 知识时调用它"
+
+    def test_subagents_defaults_to_none(self):
+        preset = AgentPreset(id="p1", name="n", system_prompt="x", default_model="m1")
+        assert preset.subagents is None
+
 
 class TestModelInfo:
     def test_creates_model_info(self):
@@ -54,6 +75,106 @@ class TestAgentEngine:
         from lc_agent.core.engine import AgentEngine
         engine = AgentEngine(sample_config)
         assert engine.config == sample_config
+
+    def test_build_agent_configures_todo_middleware_final_answer_guard(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine
+
+        captured = {}
+        engine = AgentEngine(sample_config)
+
+        monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id, llm_params=None: object())
+        monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+
+        def fake_create_agent(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
+
+        engine.build_agent()
+
+        todo_middleware = captured["middleware"][0]
+        assert "After you start writing the substantive final answer" in todo_middleware.system_prompt
+        assert "do not call `write_todos` again" in todo_middleware.system_prompt
+        assert "Do not create todo items whose only purpose" in todo_middleware.tool_description
+        assert "If the only remaining todo is about producing the final answer" in todo_middleware.tool_description
+
+    def test_build_agent_passes_memory_store_and_context_schema(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine
+        from lc_agent.core.memory import AgentRuntimeContext
+
+        captured = {}
+        store = object()
+        engine = AgentEngine(sample_config, store=store)
+
+        class FakeAgent:
+            pass
+
+        def fake_create_agent(**kwargs):
+            captured.update(kwargs)
+            return FakeAgent()
+
+        monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
+
+        engine.build_agent(cache_key="memory-test")
+
+        assert captured["store"] is store
+        assert captured["context_schema"] is AgentRuntimeContext
+
+    def test_build_agent_adds_memory_tools_when_store_enabled(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine, _SystemBlockMiddleware
+        from lc_agent.core.memory import MEMORY_SYSTEM_PROMPT
+
+        captured = {}
+        config = {
+            **sample_config,
+            "memory": {
+                "enabled": True,
+                "type": "sqlite",
+                "path": "./lc_agent_memory.db",
+                "save_policy": "explicit",
+                "retrieval_policy": "manual",
+                "semantic_search": {"enabled": False},
+            },
+        }
+        engine = AgentEngine(config, store=object())
+
+        monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id, llm_params=None: object())
+        monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+
+        def fake_create_agent(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
+
+        engine.build_agent()
+
+        expected_tools = {
+            "memory__insert_memory",
+            "memory__update_memory",
+            "memory__get_memory",
+            "memory__search_memories",
+            "memory__list_memories",
+            "memory__delete_memory",
+        }
+        assert expected_tools.issubset({tool.name for tool in captured["tools"]})
+
+        # Memory prompt is now injected as a separate middleware content block,
+        # not concatenated into system_prompt.
+        assert MEMORY_SYSTEM_PROMPT not in captured["system_prompt"]
+        middleware_list = captured.get("middleware", [])
+        memory_mw = next(
+            (m for m in middleware_list if getattr(m, "name", None) == "MemoryPromptMiddleware"),
+            None,
+        )
+        assert memory_mw is not None, "MemoryPromptMiddleware not found in middleware list"
+        assert isinstance(memory_mw, _SystemBlockMiddleware)
+        assert memory_mw._text == MEMORY_SYSTEM_PROMPT
+
+        # Middleware order: memory before TodoListMiddleware
+        names = [getattr(m, "name", type(m).__name__) for m in middleware_list]
+        assert names.index("MemoryPromptMiddleware") < names.index("TodoListMiddleware")
 
     def test_parses_models_from_config(self, sample_config):
         from lc_agent.core.engine import AgentEngine
@@ -90,7 +211,7 @@ class TestAgentEngine:
         engine = AgentEngine(config)
         built: list[tuple[str, str | None]] = []
 
-        def fake_build_agent(preset, cache_key=None):
+        def fake_build_agent(preset, cache_key=None, llm_params=None, **_kwargs):
             built.append((preset.default_model, cache_key))
             agent = object()
             engine._agents[cache_key or preset.id] = agent
@@ -136,18 +257,23 @@ class TestAgentEngine:
     async def test_chat_stream_accepts_replay_history(self, sample_config, monkeypatch):
         from lc_agent.core.engine import AgentEngine
 
-        engine = AgentEngine(sample_config)
+        engine = AgentEngine(sample_config, store=object())
         captured = {}
 
         class FakeAgent:
-            async def astream_events(self, inputs, config, version):
+            async def astream_events(self, inputs, *, config, context, version):
                 captured["inputs"] = inputs
                 captured["config"] = config
+                captured["context"] = context
                 captured["version"] = version
                 if False:
                     yield {}
 
-        monkeypatch.setattr(engine, "_get_or_build_agent", lambda preset_id, model_id="": FakeAgent())
+        monkeypatch.setattr(
+            engine,
+            "_get_or_build_agent",
+            lambda preset_id, model_id="", llm_params=None: FakeAgent(),
+        )
 
         events = []
         async for event in engine.chat_stream(
@@ -167,8 +293,70 @@ class TestAgentEngine:
             "configurable": {"thread_id": "thread-1"},
             "recursion_limit": 100,
         }
+        assert captured["context"].user_id == "anonymous"
         assert captured["version"] == "v2"
         assert events == []
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_passes_user_context(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine
+        from lc_agent.core.memory import AgentRuntimeContext
+
+        captured = {}
+        engine = AgentEngine(sample_config, store=object())
+
+        class FakeAgent:
+            async def astream_events(self, payload, *, config, context, version):
+                captured["payload"] = payload
+                captured["config"] = config
+                captured["context"] = context
+                captured["version"] = version
+                if False:
+                    yield {}
+
+        monkeypatch.setattr(engine, "_get_or_build_agent", lambda *args, **kwargs: FakeAgent())
+
+        events = [
+            event async for event in engine.chat_stream(
+                "hello",
+                "thread-1",
+                user_id="user-123",
+            )
+        ]
+
+        assert events == []
+        assert captured["context"] == AgentRuntimeContext(user_id="user-123")
+        assert captured["config"]["configurable"]["thread_id"] == "thread-1"
+        assert captured["version"] == "v2"
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_omits_memory_context_without_store(self, sample_config, monkeypatch):
+        from lc_agent.core.engine import AgentEngine
+
+        captured = {}
+        engine = AgentEngine(sample_config)
+
+        class FakeAgent:
+            async def astream_events(self, payload, **kwargs):
+                captured["payload"] = payload
+                captured["kwargs"] = kwargs
+                if False:
+                    yield {}
+
+        monkeypatch.setattr(engine, "_get_or_build_agent", lambda *args, **kwargs: FakeAgent())
+
+        events = [
+            event async for event in engine.chat_stream(
+                "hello",
+                "thread-1",
+                user_id="user-123",
+            )
+        ]
+
+        assert events == []
+        assert "context" not in captured["kwargs"]
+        assert captured["kwargs"]["config"]["configurable"]["thread_id"] == "thread-1"
+        assert captured["kwargs"]["version"] == "v2"
 
     @pytest.mark.asyncio
     async def test_reset_thread_uses_checkpointer_delete(self, sample_config):

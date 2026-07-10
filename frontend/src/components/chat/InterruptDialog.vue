@@ -3,6 +3,7 @@
     v-model="visible"
     :title="dialogTitle"
     width="500px"
+    class="interrupt-dialog"
     :close-on-click-modal="false"
     :close-on-press-escape="false"
     :show-close="false"
@@ -37,7 +38,11 @@
     <!-- 标准工具审批模式 -->
     <template v-else>
       <div v-for="(action, idx) in allActions" :key="idx" class="action-item" :class="{ compact: !showDetails }">
-        <p><strong>工具:</strong> {{ action.name }}</p>
+        <p>
+          <strong>工具:</strong>
+          <span class="tool-display-name">{{ action.display_name || action.name }}</span>
+          <span v-if="action.display_name" class="tool-internal-name">({{ action.name }})</span>
+        </p>
         <pre v-if="showDetails" class="action-args">{{ JSON.stringify(action.args ?? action.arguments, null, 2) }}</pre>
       </div>
       <el-button
@@ -238,8 +243,24 @@ function reject() {
 
 .free-input {
   margin-top: 8px;
+  width: 100%;
 }
 
+.free-input :deep(.el-input__wrapper),
+.free-input :deep(.el-textarea__inner) {
+  box-sizing: border-box;
+}
+
+.tool-display-name {
+  margin-left: 4px;
+  font-weight: 500;
+}
+.tool-internal-name {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
 .action-item {
   margin-bottom: 14px;
   padding: 12px;
@@ -266,5 +287,47 @@ function reject() {
 
 .expand-btn {
   margin-top: 4px;
+}
+
+.dialog-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+:deep(.interrupt-dialog) {
+  max-width: min(500px, calc(100vw - 24px));
+}
+
+@media (max-width: 768px) {
+  .ask-question {
+    font-size: 14px;
+  }
+
+  .action-item {
+    padding: 10px;
+  }
+
+  .action-args {
+    font-size: 11px;
+    max-height: 40vh;
+  }
+
+  .dialog-footer-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .dialog-footer-actions .el-button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .option-btn {
+    width: 100%;
+    margin-left: 0;
+  }
 }
 </style>

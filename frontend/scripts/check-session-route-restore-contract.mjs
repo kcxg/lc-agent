@@ -36,8 +36,8 @@ expectIncludes('App.vue', files.app, 'async function handleAgentChange(agentId: 
 expectMatch(
   'App.vue',
   files.app,
-  /async function handleAgentChange\(agentId: string\)[\s\S]*sessionsStore\.createLocalSession\(agentId,\s*toolsStore\.currentModel\)/,
-  '用户手动切换 Agent 的处理函数没有创建该 Agent 的本地新会话',
+  /async function handleAgentChange\(agentId: string\)[\s\S]*const sessionModel = getSessionModelForAgent\(agentId\)[\s\S]*applySessionModel\(sessionModel\)[\s\S]*sessionsStore\.createLocalSession\(agentId,\s*sessionModel\)/,
+  '用户手动切换 Agent 时应使用该 Agent 默认设置创建本地新会话',
 )
 expectMatch(
   'App.vue',

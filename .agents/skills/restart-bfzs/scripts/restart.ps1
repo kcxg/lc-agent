@@ -109,7 +109,8 @@ Write-Host "  stderr: $stderrLog"
 $deadline = (Get-Date).AddSeconds(90)
 while ((Get-Date) -lt $deadline) {
     if (Get-PortProcessIds -TargetPort $Port) {
-        Write-Host "  bfzs server is listening on http://$Host_`:$Port" -ForegroundColor Green
+        $startedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        Write-Host "  bfzs server is listening on http://$Host_`:$Port (started at $startedAt)" -ForegroundColor Green
         exit 0
     }
 

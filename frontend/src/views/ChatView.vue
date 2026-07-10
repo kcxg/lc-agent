@@ -1,5 +1,28 @@
 <template>
   <div class="chat-view">
+    <div
+      v-if="sessionsStore.sessionNavStack.length > 0"
+      class="subagent-breadcrumb"
+    >
+      <button class="breadcrumb-back" @click="sessionsStore.popSubSession()">
+        ← 返回
+      </button>
+      <span
+        class="breadcrumb-home"
+        @click="sessionsStore.popToRoot()"
+      >
+        主对话
+      </span>
+      <template
+        v-for="(nav, i) in sessionsStore.sessionNavStack"
+        :key="i"
+      >
+        <span class="breadcrumb-sep"> / </span>
+        <span class="breadcrumb-item" :class="{ 'breadcrumb-active': i === sessionsStore.sessionNavStack.length - 1 }">
+          {{ nav.label }}
+        </span>
+      </template>
+    </div>
     <div ref="messagesContainerRef" class="messages-container">
       <div v-if="messages.length === 0 && !isLoading" class="chat-empty">
         <div class="empty-orb" aria-hidden="true">
@@ -34,6 +57,15 @@
         </template>
         <template #avatar="{ item }">
           <div
+            v-if="item.isSystem"
+            class="role-avatar is-system"
+            title="委托任务"
+            aria-label="委托任务"
+          >
+            <span class="system-avatar-icon">📋</span>
+          </div>
+          <div
+            v-else
             class="role-avatar"
             :class="item.role === 'user' ? 'is-user' : 'is-ai'"
             :title="item.role === 'user' ? '你' : getAssistantLabel()"
@@ -46,7 +78,10 @@
           </div>
         </template>
         <template #header="{ item }">
-          <div v-if="item.role === 'user'" class="role-header is-user">
+          <div v-if="item.isSystem" class="role-header is-system">
+            <span class="role-name">委托任务</span>
+          </div>
+          <div v-else-if="item.role === 'user'" class="role-header is-user">
             <button
               v-if="canEditMessage(item)"
               class="message-edit-btn"
@@ -66,8 +101,11 @@
           </div>
         </template>
         <template #content="{ item }">
-          <div class="bubble-content-wrap">
-            <template v-if="item.segments && item.segments.length > 0">
+          <div class="bubble-content-wrap" :class="{ 'is-system-delegation': item.isSystem }">
+            <div v-if="item.isSystem" class="system-delegation-msg">
+              <div class="markdown-body" v-html="renderMarkdown(item.content || '')" />
+            </div>
+            <template v-else-if="item.segments && item.segments.length > 0">
               <template v-for="(seg, segIdx) in item.segments" :key="segIdx">
                 <div
                   v-if="seg.type === 'text' && seg.text"
@@ -90,6 +128,11 @@
                     v-if="item.toolCalls[seg.toolIndex!]?.name === 'write_todos'"
                     :tool-call="item.toolCalls[seg.toolIndex!]"
                   />
+                  <SubAgentCard
+                    v-else-if="item.toolCalls[seg.toolIndex!]?.is_subagent"
+                    :entry="getSubAgentEntry(item, seg.toolIndex!) || makeFallbackSubAgentEntry(item, seg.toolIndex!)"
+                    @enter="handleEnterSubAgent"
+                  />
                   <ToolCallCard
                     v-else
                     :tool-call="item.toolCalls[seg.toolIndex!]"
@@ -101,7 +144,7 @@
                 v-if="item.httpTraces?.length || item.httpTracesCount"
                 :traces="item.httpTraces"
                 :traces-count="item.httpTracesCount"
-                :session-id="chatStore.threadId || undefined"
+                :session-id="sessionsStore.effectiveThreadId || undefined"
                 :message-id="item.messageId"
                 :rounds="item.usage?.rounds"
               />
@@ -115,7 +158,7 @@
               <span v-else class="user-plain-text">{{ item.content }}</span>
             </template>
             <div
-              v-if="shouldShowReasoningNotice(item)"
+              v-if="!item.isSystem && shouldShowReasoningNotice(item)"
               class="thinking-unavailable"
             >
               <el-icon><Cpu /></el-icon>
@@ -128,7 +171,7 @@
               </div>
             </div>
             <MessageToolbar
-              v-if="getOriginalMessage(item.messageId) && !item.loading"
+              v-if="!item.isSystem && getOriginalMessage(item.messageId) && !item.loading"
               :message="getOriginalMessage(item.messageId)!"
               :model-name="sessionModel"
               :has-thinking="item.hasThinking"
@@ -151,7 +194,13 @@
       />
     </div>
 
+    <div v-if="sessionsStore.sessionNavStack.length > 0" class="subagent-readonly-bar">
+      <span class="subagent-readonly-icon">👁</span>
+      <span>子 Agent 查看模式 — 如需停止或继续输入，请返回主对话</span>
+      <button class="subagent-readonly-back" @click="sessionsStore.popToRoot()">返回主对话</button>
+    </div>
     <ChatInput
+      v-else
       :is-streaming="isStreaming"
       :edit-content="editingContent"
       :is-editing="Boolean(editingMessageId)"
@@ -191,13 +240,15 @@ import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
 import { Cpu, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
-import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo } from '@/stores/chat'
+import { useSessionsStore } from '@/stores/sessions'
+import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
 import { renderMarkdown } from '@/utils/markdown'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import InterruptDialog from '@/components/chat/InterruptDialog.vue'
 import ToolCallCard from '@/components/chat/ToolCallCard.vue'
+import SubAgentCard from '@/components/chat/SubAgentCard.vue'
 import TodoProgressCard from '@/components/chat/TodoProgressCard.vue'
 import HttpTracesGroup from '@/components/chat/HttpTracesGroup.vue'
 import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
@@ -217,6 +268,7 @@ type MessageBubbleItem = BubbleListItemProps & {
   role: 'user' | 'ai'
   messageId: string
   isMarkdown?: boolean
+  isSystem?: boolean
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
   usage?: MessageUsage
@@ -236,6 +288,7 @@ type LoadOlderBubbleItem = BubbleListItemProps & {
   messageId: string
   content: string
   isMarkdown?: boolean
+  isSystem?: boolean
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
   usage?: MessageUsage
@@ -250,6 +303,7 @@ type LoadOlderBubbleItem = BubbleListItemProps & {
 type ChatBubbleItem = MessageBubbleItem | LoadOlderBubbleItem
 
 const chatStore = useChatStore()
+const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()
 const toolsStore = useToolsStore()
 const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder } = storeToRefs(chatStore)
@@ -260,6 +314,98 @@ const showLoadOlderMessages = ref(false)
 const codeModalVisible = ref(false)
 const codeModalSource = ref('')
 const codeModalLanguage = ref('')
+
+// Sub-session live mode: when navigating into a sub-session while streaming,
+// we stay connected to the main SSE and render from SubAgentEntry in the store.
+const subLiveToolCallId = ref<string | null>(null)
+
+const subLiveEntry = computed((): SubAgentEntry | null => {
+  if (!subLiveToolCallId.value) return null
+  for (const msg of messages.value) {
+    const entry = msg.subAgents?.[subLiveToolCallId.value]
+    if (entry) return entry
+  }
+  return null
+})
+
+const subLiveBubbleList = computed((): ChatBubbleItem[] => {
+  const entry = subLiveEntry.value
+  if (!entry) return []
+  const items: ChatBubbleItem[] = []
+
+  // User message: the delegation query
+  if (entry.query) {
+    items.push({
+      key: 'sub-query',
+      messageId: 'sub-query',
+      role: 'user',
+      placement: 'end',
+      content: entry.query,
+      shape: 'corner',
+      variant: 'outlined',
+      isMarkdown: false,
+      isSystem: false,
+      hasThinking: false,
+      hasToolCalls: false,
+      hasAnswer: true,
+      isStreamingMessage: false,
+      loading: false,
+      avatarSize: '28px',
+      avatarGap: '8px',
+    })
+  }
+
+  // Build assistant content with embedded markers
+  let content = ''
+  if (entry.thinking?.trim()) {
+    content += `<!--THINK_START-->${entry.thinking}<!--THINK_END-->`
+  }
+  const toolCalls: ToolCall[] = entry.innerToolCalls.map((tc, i) => {
+    content += `\n<!--TOOL:${i}-->\n`
+    return {
+      name: tc.name,
+      runId: `sub-tc-${i}`,
+      args: (typeof tc.args === 'object' && tc.args !== null) ? tc.args as Record<string, unknown> : {},
+      result: tc.result,
+      status: tc.status as ToolCall['status'],
+      startTime: undefined,
+      duration: undefined,
+      resultLength: tc.result?.length,
+    }
+  })
+  if (entry.tokens) {
+    content += entry.tokens
+  }
+
+  const streamingNow = entry.status === 'running'
+  const hasContent = !!(entry.thinking?.trim() || toolCalls.length || entry.tokens)
+  const segs = hasStructuredSegments(content, toolCalls) ? parseSegments(content, toolCalls) : undefined
+
+  items.push({
+    key: 'sub-response',
+    messageId: 'sub-response',
+    role: 'ai',
+    placement: 'start',
+    content: streamingNow && entry.tokens ? content + '▋' : content,
+    shape: 'corner',
+    variant: 'filled',
+    isMarkdown: true,
+    isSystem: false,
+    isStreamingMessage: streamingNow,
+    loading: streamingNow && !hasContent,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    segments: segs,
+    hasThinking: !!entry.thinking?.trim(),
+    hasToolCalls: toolCalls.length > 0,
+    hasAnswer: !!entry.tokens?.trim(),
+    avatarSize: '28px',
+    avatarGap: '8px',
+    httpTraces: entry.httpTraces?.length ? entry.httpTraces : undefined,
+    httpTracesCount: entry.httpTraces?.length || 0,
+  })
+
+  return items
+})
 
 const isLoading = computed(() => {
   const msgs = messages.value
@@ -280,6 +426,9 @@ function createLoadOlderItem(): LoadOlderBubbleItem {
 }
 
 const bubbleList = computed((): ChatBubbleItem[] => {
+  // When in live sub-session mode, render from SubAgentEntry without touching main SSE
+  if (subLiveToolCallId.value !== null) return subLiveBubbleList.value
+
   const items = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
     .map((msg, idx, arr): MessageBubbleItem => {
@@ -298,7 +447,8 @@ const bubbleList = computed((): ChatBubbleItem[] => {
         content: msg.content || '',
         shape: 'corner' as const,
         variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
-        isMarkdown: msg.role !== 'user',
+        isMarkdown: msg.role !== 'user' && !msg.isSystem,
+        isSystem: msg.isSystem,
         toolCalls: msg.toolCalls,
         usage: msg.usage,
         segments: segs,
@@ -330,11 +480,72 @@ function getOriginalMessage(messageId: string) {
   return messages.value.find(m => m.id === messageId)
 }
 
+function getSubAgentEntry(item: ChatBubbleItem, toolIndex: number): SubAgentEntry | undefined {
+  const msg = getOriginalMessage(item.messageId)
+  const tc = item.toolCalls?.[toolIndex]
+  if (!msg?.subAgents || !tc?.runId) return undefined
+  return msg.subAgents[tc.runId]
+}
+
+function makeFallbackSubAgentEntry(item: ChatBubbleItem, toolIndex: number): SubAgentEntry {
+  const tc = item.toolCalls?.[toolIndex]
+  return {
+    tool_call_id: tc?.runId || '',
+    name: tc?.name || '子Agent',
+    sub_session_id: tc?.sub_session_id || '',
+    query: typeof tc?.args === 'object' ? String((tc.args as Record<string, unknown>)?.query || (tc.args as Record<string, unknown>)?.description || '') : '',
+    status: (tc?.status === 'done'
+      ? 'done'
+      : tc?.status === 'error'
+        ? 'error'
+        : tc?.status === 'cancelled'
+          ? 'cancelled'
+          : tc?.status === 'interrupted'
+            ? 'interrupted'
+            : 'running') as 'running' | 'done' | 'error' | 'cancelled' | 'interrupted',
+    tokenPreview: tc?.result || '',
+    toolCallCount: 0,
+    tokenCount: 0,
+    tokens: '',
+    thinking: '',
+    thinkCount: 0,
+    innerToolCalls: [],
+    duration: tc?.duration,
+  }
+}
+
+function getLiveToolCallIdFromSubSession(subSessionId: string): string | null {
+  const parts = subSessionId.split('--sa--')
+  if (parts.length < 2) return null
+  return parts.slice(1).join('--sa--')
+}
+
+function hasLiveSubAgentEntry(toolCallId: string): boolean {
+  return messages.value.some(msg => Boolean(msg.subAgents?.[toolCallId]))
+}
+
+function handleEnterSubAgent(subSessionId: string, name: string) {
+  if (chatStore.isStreaming) {
+    if (subLiveToolCallId.value !== null) return
+    const toolCallId = getLiveToolCallIdFromSubSession(subSessionId)
+    if (toolCallId && !hasLiveSubAgentEntry(toolCallId)) return
+  }
+  sessionsStore.pushSubSession(subSessionId, name)
+}
+
 function getAssistantLabel(): string {
+  const stack = sessionsStore.sessionNavStack
+  if (stack.length > 0) {
+    return stack[stack.length - 1].label || 'AI'
+  }
   return agentsStore.currentAgent?.name || 'AI'
 }
 
 function getModelLabel(): string {
+  if (sessionsStore.sessionNavStack.length > 0) {
+    // In sub-session view, model info is not available; show nothing
+    return ''
+  }
   if (agentsStore.isCodeAgent) return '代码内定义'
   const model = toolsStore.currentModel || agentsStore.currentAgent?.default_model || ''
   if (!model) return '模型未选择'
@@ -348,8 +559,10 @@ function isThinkingExpanded(item: ChatBubbleItem): boolean {
 
 function canEditMessage(item: ChatBubbleItem) {
   return item.role === 'user'
+    && !item.isSystem
     && lastUserMessage.value?.id === item.messageId
     && !isStreaming.value
+    && sessionsStore.sessionNavStack.length === 0
 }
 
 function startEditMessage(item: ChatBubbleItem) {
@@ -539,6 +752,55 @@ watch(errorMessage, (newError) => {
   }
 })
 
+watch(
+  () => sessionsStore.sessionNavStack.length,
+  async (newLen, oldLen) => {
+    if (newLen === 0 && oldLen === 0) return
+    const newId = sessionsStore.effectiveThreadId
+    if (!newId) return
+
+    if (newLen > 0) {
+      if (chatStore.isStreaming) {
+        const toolCallId = getLiveToolCallIdFromSubSession(newId)
+        if (toolCallId && hasLiveSubAgentEntry(toolCallId)) {
+          subLiveToolCallId.value = toolCallId
+          return
+        }
+        sessionsStore.popSubSession()
+        return
+      }
+      // Historical mode: load sub-session from DB
+      chatStore.clearMessages()
+      await chatStore.loadMessages(newId)
+    } else {
+      // Returning to root
+      if (subLiveToolCallId.value !== null) {
+        // Returning from live mode: just clear live state; main messages are still intact
+        subLiveToolCallId.value = null
+        return
+      }
+      // Returning from historical mode: reconnect main session
+      chatStore.disconnect()
+      await chatStore.loadMessages(newId)
+      await chatStore.connect(newId)
+    }
+  },
+)
+
+// When streaming ends while in live sub-session, auto-switch to historical mode
+watch(isStreaming, async (newVal, oldVal) => {
+  if (!newVal && oldVal && subLiveToolCallId.value !== null && sessionsStore.sessionNavStack.length > 0) {
+    const subSessionId = sessionsStore.effectiveThreadId
+    // Give backend a moment to persist the sub-session messages
+    await new Promise(resolve => setTimeout(resolve, 600))
+    subLiveToolCallId.value = null
+    if (subSessionId) {
+      chatStore.clearMessages()
+      await chatStore.loadMessages(subSessionId)
+    }
+  }
+})
+
 watch(() => messages.value[messages.value.length - 1]?.id, () => {
   scrollMessagesToBottom()
 }, { flush: 'post' })
@@ -684,6 +946,75 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+.subagent-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: var(--el-color-primary-light-9);
+  border-bottom: 1px solid var(--el-color-primary-light-7);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.breadcrumb-back {
+  padding: 3px 9px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 6px;
+  background: white;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.breadcrumb-back:hover {
+  background: var(--el-color-primary-light-9);
+}
+.breadcrumb-home {
+  color: var(--el-color-primary);
+  cursor: pointer;
+}
+.breadcrumb-home:hover {
+  text-decoration: underline;
+}
+.breadcrumb-sep {
+  color: var(--el-text-color-disabled);
+}
+.breadcrumb-item {
+  color: var(--el-text-color-secondary);
+}
+.breadcrumb-active {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  cursor: default;
+}
+
+.subagent-readonly-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--el-color-info-light-9);
+  border-top: 1px solid var(--el-color-info-light-5);
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+.subagent-readonly-icon {
+  font-size: 15px;
+}
+.subagent-readonly-back {
+  margin-left: auto;
+  padding: 4px 12px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 6px;
+  background: var(--el-bg-color);
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.subagent-readonly-back:hover {
+  background: var(--el-color-primary-light-9);
+}
+
 .messages-container {
   --chat-assistant-bubble-width: min(85%, 920px);
   --chat-user-bubble-max-width: min(78%, 720px);
@@ -827,6 +1158,34 @@ onBeforeUnmount(() => {
   color: #d8f3dc;
   background: linear-gradient(135deg, #15382a, #0b2119);
   border-color: rgba(74, 222, 128, 0.32);
+}
+
+.role-avatar.is-system {
+  background: color-mix(in srgb, var(--el-color-info) 14%, var(--el-bg-color));
+  border-color: color-mix(in srgb, var(--el-color-info) 35%, var(--el-border-color));
+}
+
+.system-avatar-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.role-header.is-system {
+  color: var(--el-color-info);
+  font-weight: 600;
+}
+
+.system-delegation-msg {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed color-mix(in srgb, var(--el-color-info) 40%, var(--el-border-color));
+  background: color-mix(in srgb, var(--el-color-info) 8%, var(--el-bg-color));
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.bubble-content-wrap.is-system-delegation {
+  max-width: 100%;
 }
 
 .role-header {

@@ -50,7 +50,7 @@ class SessionRepository:
         self.session = session
 
     async def list_all(self, limit: int = 50, user_id: str | None = None) -> list[SessionMeta]:
-        stmt = select(SessionMeta)
+        stmt = select(SessionMeta).where(~SessionMeta.id.contains("--sa--"))
         if user_id:
             stmt = stmt.where(SessionMeta.user_id == user_id)
         stmt = stmt.order_by(SessionMeta.updated_at.desc()).limit(limit)

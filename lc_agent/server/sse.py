@@ -5,6 +5,7 @@ API design aligns with LangGraph /threads/{id}/runs/stream pattern.
 """
 
 import asyncio
+import logging
 import time
 import traceback
 from typing import Any
@@ -17,11 +18,16 @@ from lc_agent.core.engine import AgentEngine
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
     bind_http_trace_collector,
+    init_subagent_collector_registry,
     reset_http_trace_collector,
 )
 from lc_agent.server import persistence, stream_utils
+from lc_agent.server.subagent_tracker import SubAgentRunTracker
+from lc_agent.utils.loggers import server_logger
 
 router = APIRouter(prefix="/api/threads", tags=["chat-sse"])
+
+logger = logging.getLogger(__name__)
 
 _cancel_flags: dict[str, bool] = {}
 _run_locks: dict[str, asyncio.Lock] = {}
@@ -41,6 +47,46 @@ def _get_engine() -> AgentEngine:
     if _engine is None:
         raise RuntimeError("SSE module not configured. Call sse.configure() first.")
     return _engine
+
+
+def _extract_existing_subsession_ids(tool_calls: list[dict[str, Any]]) -> set[str]:
+    return {
+        sub_session_id
+        for tool_call in tool_calls
+        if isinstance((sub_session_id := tool_call.get("sub_session_id")), str) and sub_session_id
+    }
+
+
+def _mark_stale_running_subagent_tool_calls_interrupted(
+    tool_calls: list[dict[str, Any]],
+    active_subagent_tool_call_ids: set[str],
+) -> None:
+    for tool_call in tool_calls:
+        if not tool_call.get("is_subagent"):
+            continue
+        if tool_call.get("status") != "running":
+            continue
+        run_id = tool_call.get("runId") or tool_call.get("run_id")
+        if isinstance(run_id, str) and run_id in active_subagent_tool_call_ids:
+            continue
+        tool_call["status"] = "interrupted"
+
+
+def _enrich_action_requests_display_names(
+    action_requests: list[dict[str, Any]],
+    subagent_display_map: dict[str, str],
+) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for action_request in action_requests:
+        args = action_request.get("args")
+        subagent_type = args.get("subagent_type") if isinstance(args, dict) else None
+        if isinstance(subagent_type, str) and subagent_type in subagent_display_map:
+            enriched.append({**action_request, "display_name": subagent_display_map[subagent_type]})
+        elif action_request.get("name") in subagent_display_map:
+            enriched.append({**action_request, "display_name": subagent_display_map[action_request["name"]]})
+        else:
+            enriched.append(action_request)
+    return enriched
 
 
 # --- Request Models ---
@@ -251,6 +297,28 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             tool_calls: list[dict[str, Any]] = []
             in_thinking = False
             last_event_time = time.time()
+            active_subagent_tool_call_ids: set[str] = set()
+            # Ensure the agent is built (and subagent tools are cached) before streaming
+            try:
+                engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
+            except Exception as _e:
+                logger.warning("Failed to pre-build agent for subagent tool name lookup: %s", _e)
+            subagent_display_map = engine.get_subagent_display_name_map(
+                preset_id, model_id=model_id or "", llm_params=llm_params,
+            )
+            subagent_tool_names = engine.get_subagent_tool_names(
+                preset_id, model_id=model_id or "", llm_params=llm_params,
+            )
+            subagent_tracker = SubAgentRunTracker(
+                db_url=_db_url,
+                parent_thread_id=thread_id,
+                user_id=user.id if user else "",
+                subagent_display_map=subagent_display_map,
+                tool_calls=tool_calls,
+            )
+
+            # Initialize sub-agent HTTP trace collector registry for this stream
+            init_subagent_collector_registry()
 
             if is_first:
                 preliminary_title = content[:30].strip()
@@ -274,21 +342,51 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             trace_token = bind_http_trace_collector(trace_collector)
 
             try:
-                stream = engine.chat_stream(content, thread_id, preset_id, **stream_kwargs)
+                stream = engine.chat_stream(
+                    content,
+                    thread_id,
+                    preset_id,
+                    user_id=user.id if user else "anonymous",
+                    **stream_kwargs,
+                )
                 async for event in stream:
                     if _cancel_flags.get(thread_id):
+                        for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
+                            yield stream_utils.format_sse_event(evt_type, evt_data)
+                        await subagent_tracker.drain()
                         yield stream_utils.format_sse_event("cancelled", {})
                         return
 
                     if await request.is_disconnected():
                         _cancel_flags[thread_id] = True
+                        for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
+                            yield stream_utils.format_sse_event(evt_type, evt_data)
+                        await subagent_tracker.drain()
                         return
 
                     in_thinking = stream_utils.accumulate_display_state(
                         event, content_parts, tool_calls, in_thinking,
+                        subagent_tool_names=subagent_tool_names,
+                        thread_id=thread_id,
+                        subagent_display_map=subagent_display_map,
+                        active_subagent_tool_call_ids=active_subagent_tool_call_ids,
                     )
 
-                    for evt_type, evt_data in stream_utils.convert_stream_event(event):
+                    for evt_type, evt_data in stream_utils.convert_stream_event(
+                        event,
+                        subagent_tool_names=subagent_tool_names,
+                        subagent_display_map=subagent_display_map,
+                        active_subagent_tool_call_ids=active_subagent_tool_call_ids,
+                    ):
+                        if evt_type == "subagent_start":
+                            tool_call_id = evt_data.get("tool_call_id")
+                            if isinstance(tool_call_id, str):
+                                active_subagent_tool_call_ids.add(tool_call_id)
+                        elif evt_type == "subagent_done":
+                            tool_call_id = evt_data.get("tool_call_id")
+                            if isinstance(tool_call_id, str):
+                                active_subagent_tool_call_ids.discard(tool_call_id)
+                        evt_type, evt_data = subagent_tracker.handle_event(evt_type, evt_data)
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()
 
@@ -328,13 +426,17 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                         first_value = all_interrupts[0].get("value")
                         if isinstance(first_value, dict):
                             if "action_requests" in first_value:
-                                interrupt_payload["action_requests"] = first_value["action_requests"]
+                                reqs = first_value["action_requests"]
+                                # Enrich with display_name for sub-agent tools
+                                if subagent_display_map:
+                                    reqs = _enrich_action_requests_display_names(reqs, subagent_display_map)
+                                interrupt_payload["action_requests"] = reqs
                             if "review_configs" in first_value:
                                 interrupt_payload["review_configs"] = first_value["review_configs"]
                         yield stream_utils.format_sse_event("interrupt", interrupt_payload)
                         interrupt_sent = True
-            except Exception as e:
-                print(f"[SSE] Failed to check interrupt state: {e}")
+            except Exception:
+                server_logger.exception("Failed to check interrupt state")
 
             http_traces = trace_collector.snapshot()
             if http_traces:
@@ -348,6 +450,8 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 done_payload["usage"] = usage_rounds
             if http_traces:
                 done_payload["http_traces"] = http_traces
+
+            await subagent_tracker.drain()
 
             if content_parts or tool_calls or usage_rounds or http_traces:
                 await persistence.save_ui_message(
@@ -371,6 +475,10 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
         except Exception as e:
             traceback.print_exc()
+            if "subagent_tracker" in locals():
+                for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="error"):
+                    yield stream_utils.format_sse_event(evt_type, evt_data)
+                await subagent_tracker.drain()
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
             error_info["message"] = str(e)
@@ -411,9 +519,29 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             content_parts: list[str] = []
             in_thinking = False
             last_event_time = time.time()
+            active_subagent_tool_call_ids: set[str] = set()
 
             existing_tool_calls, existing_trace_count = await persistence.load_resume_context(_db_url, thread_id)
             tool_calls: list[dict[str, Any]] = list(existing_tool_calls)
+            # Ensure the agent is built (and subagent tools are cached) before streaming
+            try:
+                engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
+            except Exception as _e:
+                logger.warning("Failed to pre-build agent for subagent tool name lookup: %s", _e)
+            subagent_display_map = engine.get_subagent_display_name_map(
+                preset_id, model_id=model_id or "", llm_params=llm_params,
+            )
+            subagent_tool_names = engine.get_subagent_tool_names(
+                preset_id, model_id=model_id or "", llm_params=llm_params,
+            )
+            subagent_tracker = SubAgentRunTracker(
+                db_url=_db_url,
+                parent_thread_id=thread_id,
+                user_id=user.id if user else "",
+                subagent_display_map=subagent_display_map,
+                tool_calls=tool_calls,
+                existing_subsession_ids=_extract_existing_subsession_ids(tool_calls),
+            )
             from langgraph.types import Command
 
             agent = engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
@@ -438,24 +566,54 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             trace_token = bind_http_trace_collector(trace_collector)
 
             try:
+                stream_kwargs: dict[str, Any] = {"config": config, "version": "v2"}
+                if engine._should_use_memory_context(preset_id):
+                    from lc_agent.core.memory import AgentRuntimeContext, normalize_memory_user_id
+
+                    stream_kwargs["context"] = AgentRuntimeContext(
+                        user_id=normalize_memory_user_id(user.id if user else "anonymous"),
+                    )
                 async for event in agent.astream_events(
                     Command(resume=resume_value),
-                    config=config,
-                    version="v2",
+                    **stream_kwargs,
                 ):
                     if _cancel_flags.get(thread_id):
+                        for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
+                            yield stream_utils.format_sse_event(evt_type, evt_data)
+                        await subagent_tracker.drain()
                         yield stream_utils.format_sse_event("cancelled", {})
                         return
 
                     if await request.is_disconnected():
                         _cancel_flags[thread_id] = True
+                        for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
+                            yield stream_utils.format_sse_event(evt_type, evt_data)
+                        await subagent_tracker.drain()
                         return
 
                     in_thinking = stream_utils.accumulate_display_state(
                         event, content_parts, tool_calls, in_thinking,
+                        subagent_tool_names=subagent_tool_names,
+                        thread_id=thread_id,
+                        subagent_display_map=subagent_display_map,
+                        active_subagent_tool_call_ids=active_subagent_tool_call_ids,
                     )
 
-                    for evt_type, evt_data in stream_utils.convert_stream_event(event):
+                    for evt_type, evt_data in stream_utils.convert_stream_event(
+                        event,
+                        subagent_tool_names=subagent_tool_names,
+                        subagent_display_map=subagent_display_map,
+                        active_subagent_tool_call_ids=active_subagent_tool_call_ids,
+                    ):
+                        if evt_type == "subagent_start":
+                            tool_call_id = evt_data.get("tool_call_id")
+                            if isinstance(tool_call_id, str):
+                                active_subagent_tool_call_ids.add(tool_call_id)
+                        elif evt_type == "subagent_done":
+                            tool_call_id = evt_data.get("tool_call_id")
+                            if isinstance(tool_call_id, str):
+                                active_subagent_tool_call_ids.discard(tool_call_id)
+                        evt_type, evt_data = subagent_tracker.handle_event(evt_type, evt_data)
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()
 
@@ -493,13 +651,16 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                         first_value = all_interrupts[0].get("value")
                         if isinstance(first_value, dict):
                             if "action_requests" in first_value:
-                                interrupt_payload["action_requests"] = first_value["action_requests"]
+                                reqs = first_value["action_requests"]
+                                if subagent_display_map:
+                                    reqs = _enrich_action_requests_display_names(reqs, subagent_display_map)
+                                interrupt_payload["action_requests"] = reqs
                             if "review_configs" in first_value:
                                 interrupt_payload["review_configs"] = first_value["review_configs"]
                         yield stream_utils.format_sse_event("interrupt", interrupt_payload)
                         interrupt_sent = True
             except Exception as e:
-                print(f"[SSE] Failed to check interrupt state after resume: {e}")
+                server_logger.exception("Failed to check interrupt state after resume")
 
             if isinstance(resume_value, dict):
                 permanently_allow = resume_value.get("permanently_allow")
@@ -508,12 +669,24 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                     if user and user.role == "admin":
                         request.app.state.permissions.allow_tool(permanently_allow)
 
+            _mark_stale_running_subagent_tool_calls_interrupted(
+                tool_calls,
+                active_subagent_tool_call_ids,
+            )
+
             http_traces = trace_collector.snapshot()
+            if http_traces:
+                for i in range(len(http_traces)):
+                    marker = f"\n<!--HTTP:{existing_trace_count + i}-->\n"
+                    content_parts.append(marker)
+                    yield stream_utils.format_sse_event("content", {"content": marker})
             done_payload: dict[str, Any] = {"is_resume": True}
             if usage_rounds:
                 done_payload["usage"] = usage_rounds
             if http_traces:
                 done_payload["http_traces"] = http_traces
+
+            await subagent_tracker.drain()
 
             new_content = "".join(content_parts)
             if new_content or tool_calls or usage_rounds or http_traces:
@@ -529,6 +702,10 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
 
         except Exception as e:
             traceback.print_exc()
+            if "subagent_tracker" in locals():
+                for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="error"):
+                    yield stream_utils.format_sse_event(evt_type, evt_data)
+                await subagent_tracker.drain()
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
             error_info["message"] = str(e)

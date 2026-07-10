@@ -9,6 +9,76 @@ import time
 from typing import Any
 
 
+def _get_checkpoint_ns(event: dict) -> str:
+    """Return the langgraph_checkpoint_ns metadata string (empty = main agent)."""
+    return event.get("metadata", {}).get("langgraph_checkpoint_ns", "")
+
+
+def _extract_subagent_tool_call_id(checkpoint_ns: str) -> str | None:
+    """Return tool_call_id if this event is INSIDE a sub-agent's execution.
+
+    Sub-agents inherit the parent's checkpoint_ns and append their own layers,
+    producing a multi-segment namespace separated by "|":
+      - Main agent tool execution:   "tools:{task_uuid}"          (single segment)
+      - Sub-agent internal event:    "tools:{task_uuid}|agent"    (multiple segments)
+      - Sub-agent internal tool:     "tools:{uuid}|...|tools:{uuid2}" (multiple segments)
+
+    Returns None for single-segment namespaces (main-agent-level events).
+    Returns the task_uuid from the first "tools:" segment when multi-segment.
+    """
+    segments = checkpoint_ns.split("|")
+    if len(segments) <= 1:
+        # Single segment: main-agent-level event — NOT inside a sub-agent
+        return None
+    # Multiple segments: we are executing inside a sub-agent graph
+    for seg in segments:
+        if seg.startswith("tools:"):
+            return seg.split(":", 1)[1]
+    return None
+
+
+def _extract_tools_task_id(checkpoint_ns: str) -> str | None:
+    """Extract the LangGraph task UUID from the first 'tools:{uuid}' segment.
+
+    Unlike _extract_subagent_tool_call_id, this works for both single-segment
+    (main-agent tool call) and multi-segment (sub-agent internal) namespaces.
+    Used to build the sub_thread_id key that matches engine.py.
+    """
+    for seg in checkpoint_ns.split("|"):
+        if seg.startswith("tools:"):
+            return seg.split(":", 1)[1]
+    return None
+
+
+def _extract_task_subagent_type(tool_name: str, tool_input: Any, subagent_tool_names: set[str] | None) -> str | None:
+    if not subagent_tool_names or tool_name not in subagent_tool_names:
+        return None
+    if tool_name != "task":
+        return tool_name
+    if not isinstance(tool_input, dict):
+        return None
+    subagent_type = tool_input.get("subagent_type")
+    if not isinstance(subagent_type, str) or not subagent_type.strip():
+        return None
+    return subagent_type.strip()
+
+
+def _is_subagent_tool_end(
+    tool_name: str,
+    tool_input: Any,
+    subagent_tool_names: set[str] | None,
+    active_subagent_tool_call_ids: set[str] | None,
+    tool_call_id: str,
+) -> bool:
+    if not subagent_tool_names or tool_name not in subagent_tool_names:
+        return False
+    if tool_name != "task":
+        return True
+    if isinstance(tool_input, dict) and tool_input:
+        return _extract_task_subagent_type(tool_name, tool_input, subagent_tool_names) is not None
+    return bool(active_subagent_tool_call_ids and tool_call_id in active_subagent_tool_call_ids)
+
+
 def format_sse_event(event_type: str, data: dict) -> str:
     """Format a single SSE event frame.
 
@@ -24,7 +94,12 @@ def format_sse_event(event_type: str, data: dict) -> str:
 SSE_HEARTBEAT = ": heartbeat\n\n"
 
 
-def convert_stream_event(event: dict) -> list[tuple[str, dict]]:
+def convert_stream_event(
+    event: dict,
+    subagent_tool_names: set[str] | None = None,
+    subagent_display_map: dict[str, str] | None = None,
+    active_subagent_tool_call_ids: set[str] | None = None,
+) -> list[tuple[str, dict]]:
     """Convert an astream_events v2 event into SSE event tuples.
 
     Returns a list of (event_type, payload_dict) for each client-visible
@@ -32,6 +107,9 @@ def convert_stream_event(event: dict) -> list[tuple[str, dict]]:
     if the event has no client-visible representation.
     """
     results: list[tuple[str, dict]] = []
+    checkpoint_ns = _get_checkpoint_ns(event)
+    sa_tool_call_id = _extract_subagent_tool_call_id(checkpoint_ns)
+    is_in_subagent = sa_tool_call_id is not None
     kind = event.get("event", "")
 
     if kind == "on_chat_model_stream":
@@ -39,38 +117,123 @@ def convert_stream_event(event: dict) -> list[tuple[str, dict]]:
         if chunk:
             additional = getattr(chunk, "additional_kwargs", None) or {}
             reasoning = additional.get("reasoning_content") or additional.get("reasoning")
-            if reasoning:
-                results.append(("thinking", {"content": reasoning}))
+            text = ""
             if hasattr(chunk, "content") and chunk.content:
                 content = chunk.content
                 if isinstance(content, list):
                     content = "".join(
                         p.get("text", "") if isinstance(p, dict) else str(p) for p in content
                     )
-                results.append(("token", {"content": content}))
+                text = content
+            if is_in_subagent:
+                if reasoning:
+                    results.append(("subagent_thinking", {"tool_call_id": sa_tool_call_id, "content": reasoning}))
+                if text:
+                    results.append(("subagent_token", {"tool_call_id": sa_tool_call_id, "content": text}))
+            else:
+                if reasoning:
+                    results.append(("thinking", {"content": reasoning}))
+                if text:
+                    results.append(("token", {"content": text}))
 
     elif kind == "on_tool_start":
         tool_name = event.get("name", "")
         tool_input = event.get("data", {}).get("input", {})
         if not isinstance(tool_input, (dict, list, str, int, float, bool, type(None))):
             tool_input = str(tool_input)
-        results.append(("tool_call", {
-            "name": tool_name,
-            "run_id": event.get("run_id", ""),
-            "args": tool_input,
-        }))
+        # NOTE: LangGraph's ToolNode runs ALL tools inside "tools:{tc_id}" checkpoint_ns,
+        # so is_in_subagent is True even for the main agent calling a sub-agent tool.
+        # We MUST check by tool name first to correctly classify sub-agent invocations.
+        subagent_type = _extract_task_subagent_type(tool_name, tool_input, subagent_tool_names)
+        if subagent_type:
+            # Main agent calling a sub-agent tool (is_in_subagent is False here
+            # because the main-agent ToolNode has a single-segment checkpoint_ns).
+            # Use _extract_tools_task_id (works for single-segment too) to get the
+            # LangGraph task UUID, which matches the tc_id engine.py registers.
+            tool_input_dict = tool_input if isinstance(tool_input, dict) else {}
+            sa_tc_id = (
+                _extract_tools_task_id(checkpoint_ns)  # LangGraph task UUID (single-segment OK)
+                or event.get("run_id", "")             # fallback
+            )
+            display_args = (
+                {k: v for k, v in tool_input_dict.items() if k != "tool_call_id"}
+                if isinstance(tool_input, dict) else tool_input
+            )
+            display_name = (subagent_display_map or {}).get(subagent_type, subagent_type)
+            query = ""
+            if isinstance(tool_input_dict, dict):
+                query = str(tool_input_dict.get("description") or tool_input_dict.get("query") or tool_input)
+            else:
+                query = str(tool_input)
+            results.append(("tool_call", {
+                "name": display_name,
+                "run_id": sa_tc_id,
+                "args": display_args,
+                "is_subagent": True,
+            }))
+            start_payload = {
+                "name": display_name,
+                "tool_call_id": sa_tc_id,
+                "query": query,
+            }
+            if subagent_type:
+                start_payload["subagent_type"] = subagent_type
+            results.append(("subagent_start", start_payload))
+        elif is_in_subagent:
+            # Sub-agent calling its own internal tool
+            results.append(("subagent_tool_call", {
+                "tool_call_id": sa_tool_call_id,
+                "name": tool_name,
+                "args": tool_input,
+            }))
+        else:
+            # Regular main-agent tool call
+            results.append(("tool_call", {
+                "name": tool_name,
+                "run_id": event.get("run_id", ""),
+                "args": tool_input,
+            }))
 
     elif kind == "on_tool_end":
         tool_name = event.get("name", "")
+        tool_call_id = _extract_tools_task_id(checkpoint_ns) or event.get("run_id", "")
         output = event.get("data", {}).get("output", "")
         if hasattr(output, "content"):
             result_str = output.content if isinstance(output.content, str) else str(output.content)
         else:
             result_str = str(output)
-        results.append(("tool_result", {
-            "name": tool_name,
-            "result": result_str,
-        }))
+        tool_input = event.get("data", {}).get("input", {})
+        if _is_subagent_tool_end(tool_name, tool_input, subagent_tool_names, active_subagent_tool_call_ids, tool_call_id):
+            # Main agent's sub-agent tool finished (single-segment checkpoint_ns)
+            sa_tc_id_end = (
+                _extract_tools_task_id(checkpoint_ns)  # LangGraph task UUID (matches on_tool_start)
+                or event.get("run_id", "")             # fallback
+            )
+            is_error = result_str.startswith("[Sub-agent error:")
+            status = "error" if is_error else "done"
+            results.append(("subagent_done", {
+                "tool_call_id": sa_tc_id_end,
+                "result_preview": result_str[:150],
+                "status": status,
+                "is_error": is_error,
+            }))
+        elif is_in_subagent:
+            # Sub-agent's internal tool finished
+            is_error = result_str.startswith("[Tool error:") or result_str.startswith("Tool error:")
+            status = "error" if is_error else "done"
+            results.append(("subagent_tool_result", {
+                "tool_call_id": sa_tool_call_id,
+                "name": tool_name,
+                "result": result_str,
+                "status": status,
+                "is_error": is_error,
+            }))
+        else:
+            # Regular main-agent tool finished
+            results.append(("tool_result", {
+                "name": tool_name,
+                "result": result_str,
+            }))
 
     return results
 
@@ -80,79 +243,147 @@ def accumulate_display_state(
     content_parts: list[str],
     tool_calls: list[dict[str, Any]],
     in_thinking: bool,
+    subagent_tool_names: set[str] | None = None,
+    thread_id: str | None = None,
+    subagent_display_map: dict[str, str] | None = None,
+    active_subagent_tool_call_ids: set[str] | None = None,
 ) -> bool:
     """Mirror the client display markers so history can replay the same layout.
 
     Mutates content_parts and tool_calls in place. Returns updated in_thinking flag.
     """
     kind = event.get("event", "")
+    checkpoint_ns = _get_checkpoint_ns(event)
+    sa_tool_call_id = _extract_subagent_tool_call_id(checkpoint_ns)
+    is_in_subagent = sa_tool_call_id is not None
 
     if kind == "on_chat_model_stream":
         chunk = event.get("data", {}).get("chunk")
         if not chunk:
             return in_thinking
 
-        additional = getattr(chunk, "additional_kwargs", None) or {}
-        reasoning = additional.get("reasoning_content") or additional.get("reasoning")
-        if reasoning:
-            if not in_thinking:
-                content_parts.append("<!--THINK_START-->")
-                in_thinking = True
-            content_parts.append(reasoning)
+        if not is_in_subagent:
+            additional = getattr(chunk, "additional_kwargs", None) or {}
+            reasoning = additional.get("reasoning_content") or additional.get("reasoning")
+            if reasoning:
+                if not in_thinking:
+                    content_parts.append("<!--THINK_START-->")
+                    in_thinking = True
+                content_parts.append(reasoning)
 
-        if hasattr(chunk, "content") and chunk.content:
+            if hasattr(chunk, "content") and chunk.content:
+                if in_thinking:
+                    content_parts.append("<!--THINK_END-->")
+                    in_thinking = False
+                text = chunk.content
+                if isinstance(text, list):
+                    text = "".join(
+                        p.get("text", "") if isinstance(p, dict) else str(p) for p in text
+                    )
+                content_parts.append(text)
+
+    elif kind == "on_tool_start":
+        tool_name = event.get("name", "")
+        # PRIORITY: check by name first — LangGraph's ToolNode sets checkpoint_ns to
+        # "tools:{tc_id}" for ALL tool calls, so is_in_subagent would be True even for
+        # the main agent calling a sub-agent tool.  Name-based detection is reliable.
+        tool_input = event.get("data", {}).get("input", {})
+        subagent_type = _extract_task_subagent_type(tool_name, tool_input, subagent_tool_names)
+        if subagent_type:
+            # Main agent calling a sub-agent tool (single-segment checkpoint_ns here)
             if in_thinking:
                 content_parts.append("<!--THINK_END-->")
                 in_thinking = False
-            text = chunk.content
-            if isinstance(text, list):
-                text = "".join(
-                    p.get("text", "") if isinstance(p, dict) else str(p) for p in text
-                )
-            content_parts.append(text)
-
-    elif kind == "on_tool_start":
-        if in_thinking:
-            content_parts.append("<!--THINK_END-->")
-            in_thinking = False
-
-        tool_idx = len(tool_calls)
-        tool_input = event.get("data", {}).get("input", {})
-        if not isinstance(tool_input, (dict, list, str, int, float, bool, type(None))):
-            tool_input = str(tool_input)
-        tool_calls.append({
-            "name": event.get("name", ""),
-            "runId": event.get("run_id", ""),
-            "args": tool_input,
-            "status": "running",
-            "startTime": int(time.time() * 1000),
-        })
-        content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
+            tool_input_dict = tool_input if isinstance(tool_input, dict) else {}
+            sa_tc_id = (
+                _extract_tools_task_id(checkpoint_ns)  # LangGraph task UUID (matches engine.py)
+                or event.get("run_id", "")             # fallback
+            )
+            display_args = (
+                {k: v for k, v in tool_input_dict.items() if k != "tool_call_id"}
+                if isinstance(tool_input, dict) else tool_input
+            )
+            sub_session_id = f"{thread_id}--sa--{sa_tc_id}" if thread_id else ""
+            display_name = (subagent_display_map or {}).get(subagent_type, subagent_type)
+            tool_idx = len(tool_calls)
+            tool_calls.append({
+                "name": display_name,
+                "runId": sa_tc_id,
+                "args": display_args,
+                "status": "running",
+                "is_subagent": True,
+                "sub_session_id": sub_session_id,
+                "startTime": int(time.time() * 1000),
+            })
+            content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
+        elif not is_in_subagent:
+            # Regular main-agent tool call (not a sub-agent tool)
+            if in_thinking:
+                content_parts.append("<!--THINK_END-->")
+                in_thinking = False
+            tool_idx = len(tool_calls)
+            tool_input = event.get("data", {}).get("input", {})
+            if not isinstance(tool_input, (dict, list, str, int, float, bool, type(None))):
+                tool_input = str(tool_input)
+            tool_calls.append({
+                "name": tool_name,
+                "runId": event.get("run_id", ""),
+                "args": tool_input,
+                "status": "running",
+                "startTime": int(time.time() * 1000),
+            })
+            content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
+        # else: sub-agent's internal tool call (is_in_subagent=True, not a subagent tool) — skip
 
     elif kind == "on_tool_end":
-        raw_output = event.get("data", {}).get("output", "")
-        if hasattr(raw_output, "content"):
-            result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
-        else:
-            result_str = str(raw_output)
-        run_id = event.get("run_id", "")
-        name = event.get("name", "")
-        tool_call = None
-        if run_id:
-            tool_call = next(
-                (tc for tc in tool_calls if tc.get("runId") == run_id), None,
+        tool_name = event.get("name", "")
+        tool_input = event.get("data", {}).get("input", {})
+        tool_call_id = _extract_tools_task_id(checkpoint_ns) or event.get("run_id", "")
+        if _is_subagent_tool_end(tool_name, tool_input, subagent_tool_names, active_subagent_tool_call_ids, tool_call_id):
+            # Main agent's sub-agent tool finished
+            raw_output = event.get("data", {}).get("output", "")
+            if hasattr(raw_output, "content"):
+                result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
+            else:
+                result_str = str(raw_output)
+            sa_tc_id = (
+                _extract_tools_task_id(checkpoint_ns)  # LangGraph task UUID (matches on_tool_start)
+                or event.get("run_id", "")             # fallback
             )
-        if tool_call is None:
-            tool_call = next(
-                (tc for tc in tool_calls if tc.get("name") == name and tc.get("status") == "running"),
-                None,
-            )
-        if tool_call:
-            start_time = tool_call.get("startTime")
-            tool_call["result"] = result_str
-            tool_call["status"] = "done"
-            tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
-            tool_call["resultLength"] = len(result_str)
+            for tc in tool_calls:
+                if tc.get("runId") == sa_tc_id and tc.get("is_subagent"):
+                    start_time = tc.get("startTime")
+                    tc["status"] = "error" if result_str.startswith("[Sub-agent error:") else "done"
+                    tc["result"] = result_str
+                    tc["duration"] = int(time.time() * 1000) - start_time if start_time else None
+                    tc["resultLength"] = len(result_str)
+                    break
+        elif not is_in_subagent:
+            # Regular main-agent tool finished
+            raw_output = event.get("data", {}).get("output", "")
+            if hasattr(raw_output, "content"):
+                result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
+            else:
+                result_str = str(raw_output)
+            run_id = event.get("run_id", "")
+            name = event.get("name", "")
+            tool_call = None
+            if run_id:
+                tool_call = next(
+                    (tc for tc in tool_calls if tc.get("runId") == run_id), None,
+                )
+            if tool_call is None:
+                tool_call = next(
+                    (tc for tc in tool_calls if tc.get("name") == name and tc.get("status") == "running"),
+                    None,
+                )
+            if tool_call:
+                start_time = tool_call.get("startTime")
+                tool_call["result"] = result_str
+                tool_call["status"] = "done"
+                tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
+                tool_call["resultLength"] = len(result_str)
+        # else: sub-agent's internal tool result (is_in_subagent=True, not a subagent tool) — skip
 
     return in_thinking
 
@@ -161,9 +392,15 @@ def accumulate_usage(event: dict, usage_rounds: list[dict]) -> None:
     """Extract token usage from on_chat_model_end events.
 
     Appends a usage dict to usage_rounds if the event is on_chat_model_end.
+    Sub-agent LLM calls are skipped — they belong to the sub-session.
     """
     kind = event.get("event", "")
     if kind != "on_chat_model_end":
+        return
+
+    # Skip sub-agent LLM calls (they run inside a nested checkpoint_ns)
+    checkpoint_ns = _get_checkpoint_ns(event)
+    if _extract_subagent_tool_call_id(checkpoint_ns) is not None:
         return
 
     output = event.get("data", {}).get("output")

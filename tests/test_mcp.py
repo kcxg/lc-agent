@@ -19,6 +19,34 @@ def test_mcp_manager_empty():
     assert len(manager.servers) == 0
 
 
+def test_mcp_manager_infers_http_type_when_url_present():
+    manager = McpManager({"remote": {"url": "http://localhost:3000/mcp"}})
+    server = manager.get_server("remote")
+    assert server is not None
+    assert server.type == "http"
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_connects_url_only_config_as_http(monkeypatch):
+    manager = McpManager({"remote": {"url": "http://localhost:3000/mcp"}})
+    calls = []
+
+    async def fake_http(name, conf):
+        calls.append((name, conf))
+        manager._servers[name].status = "connected"
+
+    async def fail_stdio(name, conf):
+        raise AssertionError("url-only MCP config should not use stdio")
+
+    monkeypatch.setattr(manager, "_connect_http_persistent", fake_http)
+    monkeypatch.setattr(manager, "_connect_stdio_persistent", fail_stdio)
+
+    await manager.connect_all()
+
+    assert calls == [("remote", {"url": "http://localhost:3000/mcp"})]
+    assert manager.get_server("remote").status == "connected"
+
+
 def test_mcp_server_status_fields():
     status = McpServerStatus(name="test", command="echo")
     assert status.status == "disconnected"

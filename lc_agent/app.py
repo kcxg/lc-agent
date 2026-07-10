@@ -9,8 +9,10 @@ from fastapi import FastAPI
 from langchain_agentskills import SkillsToolkit
 from langchain_agentskills.loaders import CompositeSkillLoader, DirectorySkillLoader
 
+from lc_agent.config.schema import MemoryConfig
 from lc_agent.core.auth import AuthService
 from lc_agent.core.engine import AgentEngine
+from lc_agent.core.memory import aclose_memory_store, create_sqlite_memory_store
 from lc_agent.core.permissions import PermissionsService
 from lc_agent.db.engine import get_async_session, init_db
 from lc_agent.db.models_auth import User
@@ -18,6 +20,7 @@ from lc_agent.mcp.manager import McpManager
 from lc_agent.server.app import create_app, mount_static_files
 from lc_agent.server import sse as sse_module
 from lc_agent.skills.filtered_loader import FilteredSkillLoader
+from lc_agent.utils.loggers import app_logger, mcp_logger
 
 
 def _resolve_sqlite_url(url: str, root: Path) -> str:
@@ -42,6 +45,12 @@ def _resolve_file_path(path: str, root: Path) -> str:
     if file_path.is_absolute():
         return str(file_path)
     return str((root / file_path).resolve())
+
+
+def _get_config_value(config, name: str, default=None):
+    if isinstance(config, dict):
+        return config.get(name, default)
+    return getattr(config, name, default)
 
 
 class LcAgentApp:
@@ -98,33 +107,51 @@ class LcAgentApp:
         """FastAPI lifespan: startup and shutdown logic."""
         import asyncio
 
-        await init_db(self._db_url)
-        await self._init_auth(app)
+        memory_store = None
         try:
-            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-            import aiosqlite
-            conn = await aiosqlite.connect(self._checkpoint_path)
-            saver = AsyncSqliteSaver(conn)
-            await saver.setup()
-            self.engine._checkpointer = saver
-        except Exception as e:
-            print(f"[Warning] Checkpoint saver setup failed, using None: {e}")
-
-        await self._load_presets_from_db()
-
-        async def _connect_mcp_background():
+            await init_db(self._db_url)
+            await self._init_auth(app)
             try:
-                await self.mcp_manager.connect_all()
-                connected = [s for s in self.mcp_manager.servers if s.status == "connected"]
-                if connected:
-                    print(f"[MCP] Connected: {[s.name for s in connected]}")
-            except Exception as e:
-                print(f"[MCP] Background connection error: {e}")
+                from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+                import aiosqlite
+                conn = await aiosqlite.connect(self._checkpoint_path)
+                saver = AsyncSqliteSaver(conn)
+                await saver.setup()
+                self.engine._checkpointer = saver
+            except Exception:
+                app_logger.exception("Checkpoint saver setup failed, using None")
 
-        asyncio.create_task(_connect_mcp_background())
-        try:
+            memory_config = self.config.get("memory")
+            if memory_config is None:
+                memory_config = MemoryConfig().model_dump()
+            if _get_config_value(memory_config, "enabled", False):
+                memory_type = _get_config_value(memory_config, "type", "sqlite")
+                if memory_type != "sqlite":
+                    raise ValueError("Only sqlite long-term memory is supported")
+                memory_path = _resolve_file_path(
+                    _get_config_value(memory_config, "path", "./lc_agent_memory.db"),
+                    Path(self.config.get("_project_root") or Path.cwd()),
+                )
+                memory_store = await create_sqlite_memory_store(memory_path, memory_config=memory_config)
+                self.engine._store = memory_store
+
+            await self._load_presets_from_db()
+
+            async def _connect_mcp_background():
+                try:
+                    await self.mcp_manager.connect_all()
+                    connected = [s for s in self.mcp_manager.servers if s.status == "connected"]
+                    if connected:
+                        mcp_logger.info("Connected MCP servers: %s", [s.name for s in connected])
+                except Exception:
+                    mcp_logger.exception("Background MCP connection error")
+
+            asyncio.create_task(_connect_mcp_background())
             yield
         finally:
+            if memory_store is not None:
+                await aclose_memory_store(memory_store)
+                self.engine._store = None
             await self.mcp_manager.shutdown()
 
     async def _init_auth(self, app: FastAPI) -> None:
@@ -132,7 +159,7 @@ class LcAgentApp:
         auth_config = self.config.get("auth", {})
         secret = auth_config.get("secret", "")
         if not secret:
-            print("[Auth] WARNING: auth.secret not configured, authentication DISABLED")
+            app_logger.warning("auth.secret not configured, authentication disabled")
             return
         if len(secret) < 16:
             raise ValueError("Auth secret must be at least 16 characters")
@@ -162,9 +189,9 @@ class LcAgentApp:
                 )
 
                 await db.commit()
-                print(f"[Auth] Created initial admin: admin / {password}")
+                app_logger.warning("Created initial admin user with default password; change it immediately")
             else:
-                print(f"[Auth] Admin user exists: {admin.username}")
+                app_logger.info("Admin user exists: %s", admin.username)
         finally:
             await db.close()
 
@@ -172,7 +199,7 @@ class LcAgentApp:
         """Load user-created presets from database on startup."""
         from lc_agent.db.engine import get_async_session
         from lc_agent.db.models import AgentPresetDB
-        from lc_agent.core.models import AgentPreset
+        from lc_agent.core.models import AgentPreset, SubAgentLink
         from sqlalchemy import select
 
         session = get_async_session(self._db_url)
@@ -189,23 +216,26 @@ class LcAgentApp:
                     allowed_mcp_servers=row.allowed_mcp_servers,
                     allowed_skills=row.allowed_skills,
                     llm_params=row.llm_params,
+                    subagents=[SubAgentLink.model_validate(item) for item in row.subagents] if row.subagents else None,
+                    enable_general_purpose_subagent=row.enable_general_purpose_subagent,
                 )
                 self.engine._presets[preset.id] = preset
             loaded = len(self.engine._presets)
             if loaded:
-                print(f"[Agents] Loaded {loaded} user presets from database")
+                app_logger.info("Loaded %s user presets from database", loaded)
         except Exception as e:
-            print(f"[Warning] Failed to load presets from DB: {e}")
+            app_logger.exception("Failed to load presets from DB")
         finally:
             await session.close()
 
-    def add_agent(self, name: str, graph, description: str = ""):
+    def add_agent(self, name: str, graph, description: str = "", delegation_description: str = ""):
         """Register a pre-built CompiledStateGraph as a named agent.
 
         Args:
             name: Unique agent identifier
             graph: A compiled LangGraph (must have ainvoke and astream_events)
             description: Human-readable description
+            delegation_description: Default delegation guidance for parent agents
         """
         if name in self.engine._agents:
             raise ValueError(f"Agent '{name}' already registered")
@@ -219,6 +249,7 @@ class LcAgentApp:
             name=name,
             system_prompt=description or f"Custom agent: {name}",
             default_model="custom",
+            default_delegation_description=delegation_description,
             allowed_tool_groups=[],
             allowed_mcp_servers=[],
             allowed_skills=[],
@@ -231,9 +262,7 @@ class LcAgentApp:
         """Start the server (blocking)."""
         from lc_agent import __version__
 
-        print(f"\n  lc_agent v{__version__}")
-        print(f"  Web UI: http://{self.host}:{self.port}")
-        print(f"  API Docs: http://{self.host}:{self.port}/api/docs\n")
+        app_logger.info("lc_agent v%s", __version__)
+        app_logger.info("Web UI: http://%s:%s", self.host, self.port)
+        app_logger.info("API Docs: http://%s:%s/api/docs", self.host, self.port)
         uvicorn.run(self.fastapi_app, host=self.host, port=self.port)
-
-
