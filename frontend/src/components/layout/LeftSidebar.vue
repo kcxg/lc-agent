@@ -58,6 +58,11 @@
             >
               <span class="session-rail" aria-hidden="true"></span>
               <span v-if="session.is_pinned" class="session-pin-indicator">📌</span>
+              <span
+                v-if="chatStore.isSessionStreaming(session.id)"
+                class="session-streaming-dot"
+                title="正在生成中"
+              />
               <span class="session-item-title">{{ session.title || '新对话' }}</span>
               <div class="session-item-meta">
                 <button
@@ -103,11 +108,13 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { useSessionsStore, type Session } from '@/stores/sessions'
 import { useAgentsStore } from '@/stores/agents'
+import { useChatStore } from '@/stores/chat'
 
 const props = defineProps<{ collapsed: boolean }>()
 
 const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()
+const chatStore = useChatStore()
 const emit = defineEmits<{ newChat: []; switchSession: [id: string]; toggleCollapse: [] }>()
 
 const DEFAULT_VISIBLE_COUNT = 5
@@ -543,6 +550,21 @@ onBeforeUnmount(() => {
 .session-pin-indicator {
   flex-shrink: 0;
   font-size: 12px;
+}
+
+.session-streaming-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--el-color-primary, #409eff);
+  animation: streaming-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes streaming-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .session-item-title {
