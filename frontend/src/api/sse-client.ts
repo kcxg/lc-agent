@@ -181,20 +181,6 @@ export class ChatSseClient {
     this._threadId = null
   }
 
-  /**
-   * Abandon this SSE client without aborting the underlying fetch.
-   * Use when switching sessions while a stream is in progress — the server
-   * keeps generating and will save the message to DB when done.
-   * The caller should discard this instance and create a new one.
-   */
-  abandon(): void {
-    this.handlers.clear()
-    this._streaming = false
-    this._threadId = null
-    // Intentionally NOT aborting _abortController so the server-side stream
-    // runs to completion and saves the AI message to DB.
-  }
-
   // --- Internal ---
 
   private async _startStream(body: Record<string, any>): Promise<void> {
