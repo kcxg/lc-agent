@@ -63,11 +63,28 @@ function Get-PortProcessIds {
 
 $pids = Get-PortProcessIds -TargetPort $Port
 if ($pids) {
+    # Phase 1: graceful shutdown (no -Force), lets uvicorn flush DB / WAL
     $pids | ForEach-Object {
-        Write-Host "  Killing PID $_"
-        Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
+        Write-Host "  Sending graceful stop to PID $_"
+        Stop-Process -Id $_ -ErrorAction SilentlyContinue
     }
-    Start-Sleep 20
+    $graceDeadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $graceDeadline) {
+        $alive = $pids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }
+        if (-not $alive) { break }
+        Start-Sleep 1
+    }
+
+    # Phase 2: force-kill anything still alive
+    $stubborn = $pids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }
+    if ($stubborn) {
+        $stubborn | ForEach-Object {
+            Write-Host "  Force-killing PID $_" -ForegroundColor Yellow
+            Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep 3
+    }
+
     $remaining = Get-PortProcessIds -TargetPort $Port
     if ($remaining) {
         throw "Port $Port is still occupied by PID(s): $($remaining -join ', ')"
