@@ -430,8 +430,9 @@ const bubbleList = computed((): ChatBubbleItem[] => {
   const items = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
     .map((msg, idx, arr): MessageBubbleItem => {
-      const segs = msg.role === 'assistant' && hasStructuredSegments(msg.content || '', msg.toolCalls)
-        ? parseSegments(msg.content || '', msg.toolCalls)
+      const msgContent = typeof msg.content === 'string' ? msg.content : ''
+      const segs = msg.role === 'assistant' && hasStructuredSegments(msgContent, msg.toolCalls)
+        ? parseSegments(msgContent, msg.toolCalls)
         : undefined
       const isStreamingMessage =
         msg.role === 'assistant'
@@ -442,7 +443,7 @@ const bubbleList = computed((): ChatBubbleItem[] => {
         messageId: msg.id,
         role: msg.role === 'assistant' ? 'ai' : 'user',
         placement: msg.role === 'user' ? 'end' : 'start',
-        content: msg.content || '',
+        content: msgContent,
         shape: 'corner' as const,
         variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
         isMarkdown: msg.role !== 'user' && !msg.isSystem,
@@ -458,7 +459,7 @@ const bubbleList = computed((): ChatBubbleItem[] => {
         isStreamingMessage,
         loading:
           isStreamingMessage
-          && !msg.content,
+          && !msgContent,
         avatarSize: '28px',
         avatarGap: '8px',
       }
@@ -619,11 +620,16 @@ function getReplayHistory(beforeMessageId: string): ReplayMessage[] {
     .filter((msg): msg is typeof msg & { role: 'user' | 'assistant' } =>
       msg.role === 'user' || msg.role === 'assistant',
     )
-    .map(msg => ({
-      role: msg.role,
-      content: stripUiMarkers(msg.content || ''),
-    }))
-    .filter(msg => msg.content.trim())
+    .map(msg => {
+      if (msg.role === 'user' && Array.isArray(msg.content)) {
+        return { role: msg.role, content: msg.content }
+      }
+      const text = typeof msg.content === 'string' ? msg.content : ''
+      return { role: msg.role, content: stripUiMarkers(text) }
+    })
+    .filter(msg =>
+      Array.isArray(msg.content) ? msg.content.length > 0 : msg.content.trim().length > 0,
+    )
 }
 
 function parseSegments(content: string, toolCalls?: ToolCall[]): ContentSegment[] {
@@ -690,13 +696,7 @@ function handleSend(content: ContentBlock[]) {
     chatStore.truncateAfterMessage(editingMessageId.value)
     cancelEdit()
   }
-  // Bridge: extract text from content blocks for the existing string-based send chain.
-  // Full ContentBlock[] passthrough (images/files) requires Tasks 7-9.
-  const textContent = content
-    .filter(b => b.type === 'text')
-    .map(b => b.text || '')
-    .join('\n')
-  chatStore.sendMessage(textContent, agentsStore.currentAgentId, modelOverride, {
+  chatStore.sendMessage(content, agentsStore.currentAgentId, modelOverride, {
     replaceFromMessageId: editMessageId || undefined,
     history,
     llmParams: toolsStore.llmParams,
