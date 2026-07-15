@@ -518,7 +518,7 @@ async def test_send_stream_routes_subagent_events_through_tracker(monkeypatch):
         app=SimpleNamespace(state=SimpleNamespace(auth_service=None)),
         is_disconnected=fake_disconnected,
     )
-    req = sse.RunStreamRequest(input="hello", preset_id="power", model="")
+    req = sse.RunStreamRequest(input=[{"type": "text", "text": "hello"}], preset_id="power", model="")
 
     response = await sse._send_stream("thread1", req, request)
     body_chunks = []

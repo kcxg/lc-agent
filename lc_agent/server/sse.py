@@ -93,7 +93,7 @@ def _enrich_action_requests_display_names(
 
 
 class RunStreamRequest(BaseModel):
-    input: str | None = None
+    input: list[dict[str, Any]] | None = None
     command: dict[str, Any] | None = None
     preset_id: str = "chat"
     model: str = ""
@@ -245,10 +245,37 @@ async def get_thread_state(thread_id: str, request: Request, preset_id: str = "c
 # --- Internal Stream Implementations ---
 
 
+def _extract_text_from_blocks(content: list[dict[str, Any]]) -> str:
+    """从 content blocks 提取纯文本（用于标题生成等场景）。"""
+    parts = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(block.get("text", ""))
+    return " ".join(parts)
+
+
 async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
     """Handle new message: save to DB, stream agent response as SSE."""
     engine = _get_engine()
-    content = req.input or ""
+    content = req.input or []
+
+    # 空输入校验
+    if not content:
+        async def error_stream():
+            yield stream_utils.format_sse_event("error", {
+                "title": "消息为空",
+                "detail": "消息内容不能为空",
+                "suggestions": ["请输入文本或附加图片/文件"],
+                "error_code": "EMPTY_INPUT",
+                "message": "Empty input",
+            })
+
+        return StreamingResponse(
+            error_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
+
     preset_id = req.preset_id
     model_id = req.model
     llm_params = req.llm_params
@@ -260,7 +287,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
         msg_count = await persistence.get_session_message_count(_db_url, thread_id)
         is_first = msg_count == 0
         if is_first:
-            preliminary_title = content[:30].strip()
+            preliminary_title = _extract_text_from_blocks(content)[:30].strip()
             await persistence.ensure_session(
                 _db_url, thread_id, preliminary_title, preset_id, model_id,
                 user_id=user.id if user else "",
@@ -321,7 +348,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             init_subagent_collector_registry()
 
             if is_first:
-                preliminary_title = content[:30].strip()
+                preliminary_title = _extract_text_from_blocks(content)[:30].strip()
                 yield stream_utils.format_sse_event("title_update", {
                     "thread_id": thread_id,
                     "title": preliminary_title,
@@ -456,7 +483,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             if content_parts or tool_calls or usage_rounds or http_traces:
                 await persistence.save_ui_message(
                     _db_url, thread_id, "assistant",
-                    "".join(content_parts),
+                    [{"type": "text", "text": "".join(content_parts)}],
                     tool_calls=tool_calls or None,
                     usage={
                         "rounds": usage_rounds,
@@ -471,7 +498,9 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             asyncio.create_task(persistence.increment_session_message_count(_db_url, thread_id))
 
             if is_first:
-                asyncio.create_task(_generate_and_yield_title(thread_id, content, preset_id, model_id))
+                asyncio.create_task(
+                    _generate_and_yield_title(thread_id, _extract_text_from_blocks(content), preset_id, model_id)
+                )
 
         except Exception as e:
             traceback.print_exc()
