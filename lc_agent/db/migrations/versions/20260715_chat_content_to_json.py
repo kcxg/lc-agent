@@ -15,7 +15,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # 项目早期无历史包袱，直接清空老数据并改列类型
+    # 项目早期无历史包袱，用户已确认清空老数据
     op.execute("DELETE FROM chat_ui_messages")
     # SQLite 不支持 ALTER COLUMN，需要用 batch_alter_table 重建表
     with op.batch_alter_table("chat_ui_messages") as batch_op:
@@ -24,16 +24,16 @@ def upgrade() -> None:
             existing_type=sa.String(),
             type_=sa.JSON(),
             existing_nullable=False,
-            server_default="[]",
         )
 
 
 def downgrade() -> None:
+    # 降级时也清空数据（list[dict] 数据在 VARCHAR 列中不可读）
+    op.execute("DELETE FROM chat_ui_messages")
     with op.batch_alter_table("chat_ui_messages") as batch_op:
         batch_op.alter_column(
             "content",
             existing_type=sa.JSON(),
             type_=sa.String(),
             existing_nullable=False,
-            server_default="",
         )
