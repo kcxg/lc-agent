@@ -54,7 +54,7 @@ class ChatUiMessage(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     session_id: str = Field(index=True)
     role: str
-    content: str = ""
+    content: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     tool_calls: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
     usage: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     http_traces: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
