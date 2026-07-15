@@ -1,4 +1,4 @@
-﻿# lc_agent/core/engine.py
+# lc_agent/core/engine.py
 import logging
 from dataclasses import dataclass
 import re
@@ -251,7 +251,7 @@ class AgentEngine:
             AgentPreset(
                 id="chat",
                 name="chat",
-                display_name="普通对话",
+                display_name="Chat",
                 system_prompt="You are a helpful assistant. Respond in the user's language.",
                 default_model=default_model,
                 allowed_tool_groups=[],
@@ -263,7 +263,7 @@ class AgentEngine:
             AgentPreset(
                 id="empty",
                 name="empty",
-                display_name="空模板",
+                display_name="Empty",
                 system_prompt=agent_conf.get("system_prompt", "You are a helpful assistant."),
                 default_model=default_model,
                 allowed_tool_groups=None,
@@ -275,7 +275,7 @@ class AgentEngine:
             AgentPreset(
                 id="power",
                 name="power",
-                display_name="全功能",
+                display_name="Power",
                 system_prompt=agent_conf.get("system_prompt", "You are a helpful assistant."),
                 default_model=default_model,
                 allowed_tool_groups=None,
