@@ -242,3 +242,4 @@ nul
 .tmp_pytest/
 .tmp_pytest_run/
 .tmp/bfzs-runlogs
+.tmp/*
