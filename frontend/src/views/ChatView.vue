@@ -430,7 +430,9 @@ const bubbleList = computed((): ChatBubbleItem[] => {
   const items = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
     .map((msg, idx, arr): MessageBubbleItem => {
-      const msgContent = typeof msg.content === 'string' ? msg.content : ''
+      const msgContent = typeof msg.content === 'string'
+        ? msg.content
+        : msg.content.find(b => b.type === 'text')?.text || ''
       const segs = msg.role === 'assistant' && hasStructuredSegments(msgContent, msg.toolCalls)
         ? parseSegments(msgContent, msg.toolCalls)
         : undefined
