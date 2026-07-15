@@ -899,7 +899,7 @@ class AgentEngine:
 
     async def chat_stream(
         self,
-        message: str,
+        message: list[dict[str, Any]],
         thread_id: str,
         preset_id: str = "chat",
         model_id: str = "",
@@ -907,7 +907,10 @@ class AgentEngine:
         llm_params: dict | None = None,
         user_id: str = "anonymous",
     ) -> AsyncIterator[dict]:
-        """Stream chat responses as events."""
+        """Stream chat responses as events.
+
+        message: LangChain content blocks list, e.g. [{"type":"text","text":"..."}, {"type":"image_url","image_url":{"url":"data:..."}}]
+        """
         agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
