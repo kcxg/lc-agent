@@ -147,12 +147,23 @@
               />
             </template>
             <template v-else>
+              <div v-if="item.role === 'user' && item.contentBlocks" class="user-content-blocks">
+                <template v-for="(block, i) in item.contentBlocks" :key="i">
+                  <span v-if="block.type === 'text'" class="user-text-block">{{ block.text }}</span>
+                  <img
+                    v-else-if="block.type === 'image_url' && block.image_url"
+                    :src="block.image_url.url"
+                    class="user-image-block"
+                    @click="previewImage(block.image_url.url)"
+                  />
+                </template>
+              </div>
+              <span v-else-if="item.role === 'user'" class="user-plain-text">{{ item.content }}</span>
               <div
-                v-if="item.isMarkdown"
+                v-else
                 class="markdown-body"
                 v-html="renderMarkdown(stripThinkingMarkers(item.content || ''))"
               />
-              <span v-else class="user-plain-text">{{ item.content }}</span>
             </template>
             <div
               v-if="!item.isSystem && shouldShowReasoningNotice(item)"
@@ -200,6 +211,7 @@
       v-else
       :is-streaming="isStreaming"
       :edit-content="editingContent"
+      :edit-attachments="editingAttachments"
       :is-editing="Boolean(editingMessageId)"
       @send="handleSend"
       @stop="handleStop"
@@ -218,6 +230,12 @@
       :code="codeModalSource"
       :language="codeModalLanguage"
       @close="codeModalVisible = false"
+    />
+
+    <el-image-viewer
+      v-if="imageViewerVisible"
+      :url-list="[imageViewerUrl]"
+      @close="imageViewerVisible = false"
     />
   </div>
 </template>
@@ -239,7 +257,7 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
-import type { ContentBlock } from '@/utils/fileUpload'
+import type { ContentBlock, Attachment } from '@/utils/fileUpload'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
 import { renderMarkdown } from '@/utils/markdown'
@@ -265,6 +283,8 @@ interface ContentSegment {
 type MessageBubbleItem = BubbleListItemProps & {
   role: 'user' | 'ai'
   messageId: string
+  content: string
+  contentBlocks?: ContentBlock[]
   isMarkdown?: boolean
   isSystem?: boolean
   toolCalls?: ToolCall[]
@@ -307,11 +327,14 @@ const toolsStore = useToolsStore()
 const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder } = storeToRefs(chatStore)
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
+const editingAttachments = ref<Attachment[]>([])
 const messagesContainerRef = ref<HTMLElement | null>(null)
 const showLoadOlderMessages = ref(false)
 const codeModalVisible = ref(false)
 const codeModalSource = ref('')
 const codeModalLanguage = ref('')
+const imageViewerVisible = ref(false)
+const imageViewerUrl = ref('')
 
 // Sub-session live mode: when navigating into a sub-session while streaming,
 // we stay connected to the main SSE and render from SubAgentEntry in the store.
@@ -446,6 +469,7 @@ const bubbleList = computed((): ChatBubbleItem[] => {
         role: msg.role === 'assistant' ? 'ai' : 'user',
         placement: msg.role === 'user' ? 'end' : 'start',
         content: msgContent,
+        contentBlocks: msg.role === 'user' && Array.isArray(msg.content) ? msg.content : undefined,
         shape: 'corner' as const,
         variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
         isMarkdown: msg.role !== 'user' && !msg.isSystem,
@@ -569,12 +593,51 @@ function canEditMessage(item: ChatBubbleItem) {
 function startEditMessage(item: ChatBubbleItem) {
   if (!canEditMessage(item)) return
   editingMessageId.value = item.messageId
-  editingContent.value = item.content || ''
+  const blocks = 'contentBlocks' in item ? item.contentBlocks : undefined
+  if (blocks && blocks.length > 0) {
+    const textParts: string[] = []
+    const restoredAtts: Attachment[] = []
+    let attIdx = 0
+    for (const block of blocks) {
+      if (block.type === 'text') {
+        const fileMatch = block.text?.match(/^📎 `([^`]+)`:\n```(\w*)\n([\s\S]*?)\n```$/)
+        if (fileMatch) {
+          const [, name, , content] = fileMatch
+          restoredAtts.push({
+            id: `restore-${attIdx++}`,
+            type: 'text_file',
+            name,
+            textContent: content,
+          })
+        } else if (block.text) {
+          textParts.push(block.text)
+        }
+      } else if (block.type === 'image_url' && block.image_url) {
+        restoredAtts.push({
+          id: `restore-${attIdx++}`,
+          type: 'image',
+          name: `image-${attIdx}.png`,
+          dataUrl: block.image_url.url,
+        })
+      }
+    }
+    editingContent.value = textParts.join('\n')
+    editingAttachments.value = restoredAtts
+  } else {
+    editingContent.value = item.content || ''
+    editingAttachments.value = []
+  }
 }
 
 function cancelEdit() {
   editingMessageId.value = null
   editingContent.value = ''
+  editingAttachments.value = []
+}
+
+function previewImage(url: string) {
+  imageViewerUrl.value = url
+  imageViewerVisible.value = true
 }
 
 function hasStructuredSegments(content: string, toolCalls?: ToolCall[]): boolean {
@@ -1242,6 +1305,26 @@ onBeforeUnmount(() => {
 .user-plain-text {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.user-content-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.user-text-block {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.user-image-block {
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 6px;
+  cursor: zoom-in;
+  border: 1px solid var(--el-border-color);
 }
 
 .tool-call-inline {
