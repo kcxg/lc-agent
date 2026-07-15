@@ -10,7 +10,7 @@ from lc_agent.server import persistence
         (persistence.ensure_session, ("db", "thread1", "title", "agent", "model", "user")),
         (persistence.increment_session_message_count, ("db", "thread1")),
         (persistence.save_title, ("db", "thread1", "title")),
-        (persistence.save_ui_message, ("db", "thread1", "assistant", "content")),
+        (persistence.save_ui_message, ("db", "thread1", "assistant", [{"type": "text", "text": "content"}])),
         (persistence.truncate_from_message, ("db", "thread1", "message1")),
         (persistence.append_to_last_assistant_message, ("db", "thread1", "content")),
         (persistence.create_subsession, ("db", "sub1", "parent1", "tool1", "agent", "title", "user")),
