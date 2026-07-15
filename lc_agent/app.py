@@ -19,6 +19,7 @@ from lc_agent.mcp.manager import McpManager
 from lc_agent.server.app import create_app, mount_static_files
 from lc_agent.server import sse as sse_module
 from lc_agent.skills.filtered_loader import FilteredSkillLoader
+from lc_agent.skills.script_executor import patch_windows_script_executor
 from lc_agent.utils.loggers import app_logger, mcp_logger
 
 
@@ -81,6 +82,7 @@ class LcAgentApp:
             inner = inner_loaders[0] if len(inner_loaders) == 1 else CompositeSkillLoader(inner_loaders)
             self.filtered_loader = FilteredSkillLoader(inner)
             self.skills_toolkit = SkillsToolkit(loaders=[self.filtered_loader])
+            patch_windows_script_executor(self.skills_toolkit)
         else:
             self.filtered_loader = None
             self.skills_toolkit = None
