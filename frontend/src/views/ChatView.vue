@@ -239,6 +239,7 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
+import type { ContentBlock } from '@/utils/fileUpload'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
 import { renderMarkdown } from '@/utils/markdown'
@@ -681,7 +682,7 @@ function parseSegments(content: string, toolCalls?: ToolCall[]): ContentSegment[
   return segments
 }
 
-function handleSend(content: string) {
+function handleSend(content: ContentBlock[]) {
   const editMessageId = editingMessageId.value
   const history = editMessageId ? getReplayHistory(editMessageId) : undefined
   const modelOverride = agentsStore.isCodeAgent ? '' : toolsStore.currentModel
@@ -689,7 +690,13 @@ function handleSend(content: string) {
     chatStore.truncateAfterMessage(editingMessageId.value)
     cancelEdit()
   }
-  chatStore.sendMessage(content, agentsStore.currentAgentId, modelOverride, {
+  // Bridge: extract text from content blocks for the existing string-based send chain.
+  // Full ContentBlock[] passthrough (images/files) requires Tasks 7-9.
+  const textContent = content
+    .filter(b => b.type === 'text')
+    .map(b => b.text || '')
+    .join('\n')
+  chatStore.sendMessage(textContent, agentsStore.currentAgentId, modelOverride, {
     replaceFromMessageId: editMessageId || undefined,
     history,
     llmParams: toolsStore.llmParams,
