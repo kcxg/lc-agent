@@ -249,8 +249,11 @@ def _extract_text_from_blocks(content: list[dict[str, Any]]) -> str:
     """从 content blocks 提取纯文本（用于标题生成等场景）。"""
     parts = []
     for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text", ""))
+        if isinstance(block, dict):
+            if block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif block.get("type") == "text_file":
+                parts.append(block.get("name", ""))
     return " ".join(parts)
 
 
@@ -300,11 +303,12 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
         await persistence.save_ui_message(_db_url, thread_id, "user", content)
     except Exception as e:
         traceback.print_exc()
+        error = e
 
         async def error_stream():
-            error_info = stream_utils.categorize_error(e)
-            error_info["tech_detail"] = str(e)
-            error_info["message"] = str(e)
+            error_info = stream_utils.categorize_error(error)
+            error_info["tech_detail"] = str(error)
+            error_info["message"] = str(error)
             yield stream_utils.format_sse_event("error", error_info)
 
         return StreamingResponse(
@@ -688,7 +692,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                                 interrupt_payload["review_configs"] = first_value["review_configs"]
                         yield stream_utils.format_sse_event("interrupt", interrupt_payload)
                         interrupt_sent = True
-            except Exception as e:
+            except Exception:
                 server_logger.exception("Failed to check interrupt state after resume")
 
             if isinstance(resume_value, dict):

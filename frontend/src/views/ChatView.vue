@@ -156,6 +156,10 @@
                     class="user-image-block"
                     @click="previewImage(block.image_url.url)"
                   />
+                  <div v-else-if="block.type === 'text_file'" class="user-file-block">
+                    <span class="file-icon">📄</span>
+                    <span class="file-name" :title="block.name">{{ block.name }}</span>
+                  </div>
                 </template>
               </div>
               <span v-else-if="item.role === 'user'" class="user-plain-text">{{ item.content }}</span>
@@ -599,19 +603,15 @@ function startEditMessage(item: ChatBubbleItem) {
     const restoredAtts: Attachment[] = []
     let attIdx = 0
     for (const block of blocks) {
-      if (block.type === 'text') {
-        const fileMatch = block.text?.match(/^📎 `([^`]+)`:\n```(\w*)\n([\s\S]*?)\n```$/)
-        if (fileMatch) {
-          const [, name, , content] = fileMatch
-          restoredAtts.push({
-            id: `restore-${attIdx++}`,
-            type: 'text_file',
-            name,
-            textContent: content,
-          })
-        } else if (block.text) {
-          textParts.push(block.text)
-        }
+      if (block.type === 'text' && block.text) {
+        textParts.push(block.text)
+      } else if (block.type === 'text_file') {
+        restoredAtts.push({
+          id: `restore-${attIdx++}`,
+          type: 'text_file',
+          name: block.name || `file-${attIdx}.txt`,
+          textContent: block.textContent || '',
+        })
       } else if (block.type === 'image_url' && block.image_url) {
         restoredAtts.push({
           id: `restore-${attIdx++}`,
@@ -795,13 +795,12 @@ function showErrorNotification(error: ErrorInfo) {
   const tech = error.techDetail ? escapeHtml(error.techDetail) : ''
 
   lastNotificationId = ElMessage({
-    type: 'error',
     dangerouslyUseHTMLString: true,
     showClose: true,
     duration: 0,
     grouping: true,
-    message: `<div style="line-height:1.5;max-width:420px">
-      <strong style="font-size:15px">${t}</strong>
+    message: `<div style="line-height:1.5;max-width:420px;border-left:3px solid var(--el-color-danger);padding:4px 8px">
+      <strong style="font-size:15px;color:var(--el-color-danger)">${t}</strong>
       <div style="margin:6px 0 10px;font-size:13px;color:var(--el-text-color-regular)">${d}</div>
       ${suggestions ? `<div style="font-size:12px;color:var(--el-text-color-secondary)">
         <strong>建议：</strong>
@@ -1325,6 +1324,30 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   cursor: zoom-in;
   border: 1px solid var(--el-border-color);
+}
+
+.user-file-block {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+  font-size: 13px;
+  max-width: 100%;
+}
+
+.user-file-block .file-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.user-file-block .file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--el-text-color-primary);
 }
 
 .tool-call-inline {

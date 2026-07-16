@@ -3,9 +3,12 @@
  */
 
 export interface ContentBlock {
-  type: 'text' | 'image_url'
+  type: 'text' | 'image_url' | 'text_file'
   text?: string
   image_url?: { url: string }
+  name?: string
+  textContent?: string
+  lang?: string
 }
 
 export interface Attachment {
@@ -177,8 +180,10 @@ export function buildContentBlocks(text: string, attachments: Attachment[]): Con
       const ext = getExtension(att.name)
       const lang = EXT_TO_LANG[ext] || ''
       blocks.push({
-        type: 'text',
-        text: `📎 \`${att.name}\`:\n\`\`\`${lang}\n${att.textContent}\n\`\`\``,
+        type: 'text_file',
+        name: att.name,
+        textContent: att.textContent,
+        lang,
       })
     }
   }
