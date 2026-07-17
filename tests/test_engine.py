@@ -277,7 +277,7 @@ class TestAgentEngine:
 
         events = []
         async for event in engine.chat_stream(
-            "新问题",
+            [{"type": "text", "text": "新问题"}],
             "thread-1",
             history=[{"role": "user", "content": "第一问"}],
         ):
@@ -286,7 +286,7 @@ class TestAgentEngine:
         assert captured["inputs"] == {
             "messages": [
                 {"role": "user", "content": "第一问"},
-                {"role": "user", "content": "新问题"},
+                {"role": "user", "content": [{"type": "text", "text": "新问题"}]},
             ]
         }
         assert captured["config"] == {
@@ -318,7 +318,7 @@ class TestAgentEngine:
 
         events = [
             event async for event in engine.chat_stream(
-                "hello",
+                [{"type": "text", "text": "hello"}],
                 "thread-1",
                 user_id="user-123",
             )
@@ -347,7 +347,7 @@ class TestAgentEngine:
 
         events = [
             event async for event in engine.chat_stream(
-                "hello",
+                [{"type": "text", "text": "hello"}],
                 "thread-1",
                 user_id="user-123",
             )

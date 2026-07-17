@@ -133,7 +133,7 @@ async def save_ui_message(
     db_url: str,
     thread_id: str,
     role: str,
-    content: str,
+    content: list[dict[str, Any]],
     *,
     tool_calls: list[dict[str, Any]] | None = None,
     usage: dict[str, Any] | None = None,
@@ -225,7 +225,12 @@ async def append_to_last_assistant_message(
                 return
 
             if content:
-                last_msg.content = (last_msg.content or "") + content
+                existing = list(last_msg.content) if isinstance(last_msg.content, list) else []
+                if existing and isinstance(existing[-1], dict) and existing[-1].get("type") == "text":
+                    existing[-1] = {**existing[-1], "text": (existing[-1].get("text") or "") + content}
+                else:
+                    existing.append({"type": "text", "text": content})
+                last_msg.content = existing
             if all_tool_calls is not None:
                 last_msg.tool_calls = all_tool_calls
             if usage_rounds:
@@ -288,7 +293,9 @@ async def save_subsession_delegation_message(
     query: str,
 ) -> None:
     """Insert the synthetic delegation message as the first message in a sub-session."""
-    await save_ui_message(db_url, sub_session_id, "system", f"委托任务: {query}")
+    await save_ui_message(
+        db_url, sub_session_id, "system", [{"type": "text", "text": f"委托任务: {query}"}],
+    )
 
 
 async def finalize_subsession_message(
@@ -301,7 +308,7 @@ async def finalize_subsession_message(
 ) -> None:
     """Save the sub-agent's assistant message and increment message count."""
     await save_ui_message(
-        db_url, sub_session_id, "assistant", content,
+        db_url, sub_session_id, "assistant", [{"type": "text", "text": content}],
         tool_calls=tool_calls,
         usage=usage,
         http_traces=http_traces,

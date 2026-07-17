@@ -188,7 +188,7 @@ async def test_code_agent_chat_stream_does_not_receive_framework_memory_context(
 
     events = [
         event async for event in app.engine.chat_stream(
-            "hello",
+            [{"type": "text", "text": "hello"}],
             "thread-1",
             preset_id="research",
             user_id="user-123",

@@ -6,6 +6,7 @@ import { api } from '@/api/http'
 import { createClientId } from '@/utils/client-id'
 import { createSessionState } from './chat-session-state'
 import type { SessionState } from './chat-session-state'
+import type { ContentBlock } from '@/utils/fileUpload'
 
 const INITIAL_MESSAGE_LIMIT = 6
 
@@ -87,7 +88,7 @@ export interface SubAgentEntry {
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'tool'
-  content: string
+  content: string | ContentBlock[]
   timestamp: number
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
@@ -120,7 +121,7 @@ export interface InterruptInfo {
 
 export interface ReplayMessage {
   role: 'user' | 'assistant'
-  content: string
+  content: string | ContentBlock[]
 }
 
 export interface SendMessageOptions {
@@ -211,7 +212,13 @@ function normalizeHttpTraces(raw: any): HttpTrace[] | undefined {
 
 function normalizeHistoryMessage(msg: any): ChatMessage | null {
   if (msg.role === 'system') {
-    const content = msg.content || ''
+    const rawContent = msg.content
+    let content = ''
+    if (Array.isArray(rawContent)) {
+      content = rawContent.find((b: any) => b.type === 'text')?.text || ''
+    } else {
+      content = rawContent || ''
+    }
     return {
       id: msg.id || createClientId(),
       role: 'user',
@@ -264,9 +271,24 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
 
   const httpTraces = normalizeHttpTraces(msg.http_traces || msg.httpTraces)
   const httpTracesCount = msg.http_traces_count ?? msg.httpTracesCount ?? httpTraces?.length ?? 0
-  let content = role === 'assistant' ? ensureToolMarkers(msg.content || '', toolCalls) : msg.content || ''
-  if (role === 'assistant' && httpTracesCount > 0) {
-    content = ensureHttpMarkers(content, httpTracesCount)
+  let content: string | ContentBlock[]
+  if (role === 'user') {
+    content = Array.isArray(msg.content)
+      ? msg.content
+      : [{ type: 'text', text: String(msg.content || '') }]
+  } else {
+    const rawContent = msg.content
+    let textContent = ''
+    if (Array.isArray(rawContent)) {
+      textContent = rawContent.find((b: any) => b.type === 'text')?.text || ''
+    } else {
+      textContent = rawContent || ''
+    }
+    textContent = ensureToolMarkers(textContent, toolCalls)
+    if (httpTracesCount > 0) {
+      textContent = ensureHttpMarkers(textContent, httpTracesCount)
+    }
+    content = textContent
   }
 
   return {
@@ -599,9 +621,9 @@ export const useChatStore = defineStore('chat', () => {
       if (last && last.role === 'assistant') {
         if (!state.inThinking) {
           state.inThinking = true
-          last.content += '<!--THINK_START-->'
+          last.content = (last.content as string) + '<!--THINK_START-->'
         }
-        last.content += msg.content || ''
+        last.content = (last.content as string) + (msg.content || '')
       }
     })
 
@@ -623,16 +645,16 @@ export const useChatStore = defineStore('chat', () => {
       if (last && last.role === 'assistant') {
         if (state.inThinking) {
           state.inThinking = false
-          last.content += '<!--THINK_END-->'
+          last.content = (last.content as string) + '<!--THINK_END-->'
         }
-        last.content += msg.content || ''
+        last.content = (last.content as string) + (msg.content || '')
       }
     })
 
     client.on('content', (msg: SseMessage) => {
       const last = state.messages.value[state.messages.value.length - 1]
       if (last && last.role === 'assistant') {
-        last.content += msg.content || ''
+        last.content = (last.content as string) + (msg.content || '')
       }
     })
 
@@ -670,7 +692,7 @@ export const useChatStore = defineStore('chat', () => {
       if (last && last.role === 'assistant') {
         if (state.inThinking) {
           state.inThinking = false
-          last.content += '<!--THINK_END-->'
+          last.content = (last.content as string) + '<!--THINK_END-->'
         }
         if (!last.toolCalls) last.toolCalls = []
 
@@ -690,7 +712,7 @@ export const useChatStore = defineStore('chat', () => {
           sub_session_id: msg.sub_session_id,
         }
         last.toolCalls.push(tc)
-        last.content += `\n<!--TOOL:${tcIdx}-->\n`
+        last.content = (last.content as string) + `\n<!--TOOL:${tcIdx}-->\n`
         if (last.usage) {
           last.usage.toolCallCount++
         }
@@ -809,7 +831,7 @@ export const useChatStore = defineStore('chat', () => {
             last.httpTraces = newTraces
           }
           if (last.httpTraces?.length) {
-            last.content = ensureHttpMarkers(last.content, last.httpTraces.length)
+            last.content = ensureHttpMarkers(last.content as string, last.httpTraces.length)
           }
         }
       }
@@ -840,7 +862,7 @@ export const useChatStore = defineStore('chat', () => {
       if (state.inThinking) {
         const last = state.messages.value[state.messages.value.length - 1]
         if (last && last.role === 'assistant') {
-          last.content += '<!--THINK_END-->'
+          last.content = (last.content as string) + '<!--THINK_END-->'
         }
         state.inThinking = false
       }
@@ -933,12 +955,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function sendMessage(
-    content: string,
+    content: ContentBlock[],
     presetId: string = 'chat',
     modelId: string = '',
     options: SendMessageOptions = {},
   ) {
-    if (!content.trim()) return
+    if (!content.length) return
 
     const sessionsStore = useSessionsStore()
     const sessionId = sessionsStore.currentSessionId
@@ -947,7 +969,8 @@ export const useChatStore = defineStore('chat', () => {
       const realId = await sessionsStore.persistSession(sessionId, modelId)
       await switchToSession(realId)
       if (isFirstMessage) {
-        sessionsStore.updateTitleLocal(realId, content.trim().slice(0, 30))
+        const firstText = content.find(b => b.type === 'text')?.text || ''
+        sessionsStore.updateTitleLocal(realId, firstText.slice(0, 30))
       }
     } else if (!activeSessionId.value) {
       if (sessionId) await switchToSession(sessionId)
@@ -961,11 +984,11 @@ export const useChatStore = defineStore('chat', () => {
     state.messages.value.push({
       id: createClientId(),
       role: 'user',
-      content: content.trim(),
+      content,
       timestamp: Date.now(),
     })
 
-    state.client.sendMessage(content.trim(), presetId, modelId, {
+    state.client.sendMessage(content, presetId, modelId, {
       replaceFromMessageId: options.replaceFromMessageId,
       history: options.history,
       llmParams: options.llmParams,

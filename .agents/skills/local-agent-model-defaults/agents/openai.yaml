@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local Agent Model Defaults"
+  short_description: "Use local LiteLLM defaults for AI agent projects"
+  default_prompt: "Use $local-agent-model-defaults when configuring an AI agent project model or API endpoint."

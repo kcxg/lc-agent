@@ -54,7 +54,7 @@ async def test_chat_stream_yields_events(engine_with_provider):
     engine_with_provider._agent_mcp_gen["chat"] = engine_with_provider._mcp_generation
 
     events = []
-    async for event in engine_with_provider.chat_stream("test", "thread-1"):
+    async for event in engine_with_provider.chat_stream([{"type": "text", "text": "test"}], "thread-1"):
         events.append(event)
 
     assert len(events) == 2

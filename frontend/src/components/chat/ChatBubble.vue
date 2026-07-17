@@ -69,7 +69,7 @@ const toolsStore = useToolsStore()
 
 const renderedSegments = computed((): RenderedSegment[] => {
   const content = props.message.content
-  if (!content) return []
+  if (typeof content !== 'string' || !content) return []
 
   const toolCalls = props.message.toolCalls || []
   const markerRe = /<!--(?:TOOL:(\d+)|THINK_START|THINK_END)-->/g

@@ -3,6 +3,8 @@
  * Uses fetch + ReadableStream to consume server-sent events.
  */
 
+import type { ContentBlock } from '@/utils/fileUpload'
+
 export interface SseMessage {
   type: string
   content?: string
@@ -83,7 +85,7 @@ export class ChatSseClient {
   }
 
   async sendMessage(
-    content: string,
+    content: ContentBlock[],
     presetId?: string,
     model?: string,
     options?: { replaceFromMessageId?: string; history?: any[]; llmParams?: Record<string, any> | null },
