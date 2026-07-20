@@ -109,7 +109,7 @@ export function singleMessageToMarkdown(
 
   const modelSuffix = opts.modelName ? ` (${opts.modelName})` : ''
   const lines: string[] = [`## Assistant${modelSuffix}`, '']
-  const segments = parseContentSegments(msg.content)
+  const segments = parseContentSegments(contentToString(msg.content))
 
   for (const seg of segments) {
     const segText = seg.text || ''
@@ -153,18 +153,14 @@ export function messagesToMarkdown(
 }
 
 export function extractThinking(msg: MessageLike): string {
-<<<<<<< HEAD
-  return parseContentSegments(msg.content)
-=======
-  return parseSegments(contentToString(msg.content))
->>>>>>> main
+  return parseContentSegments(contentToString(msg.content))
     .filter(s => s.type === 'thinking')
     .map(s => s.text || '')
     .join('\n\n')
 }
 
 export function extractToolCalls(msg: MessageLike): string {
-  const segments = parseContentSegments(msg.content)
+  const segments = parseContentSegments(contentToString(msg.content))
   return segments
     .filter(s => s.type === 'tool')
     .map(s => {
@@ -176,11 +172,7 @@ export function extractToolCalls(msg: MessageLike): string {
 }
 
 export function extractAnswer(msg: MessageLike): string {
-<<<<<<< HEAD
-  return parseContentSegments(msg.content)
-=======
-  return parseSegments(contentToString(msg.content))
->>>>>>> main
+  return parseContentSegments(contentToString(msg.content))
     .filter(s => s.type === 'text')
     .map(s => s.text || '')
     .join('\n\n')
