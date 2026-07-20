@@ -44,7 +44,7 @@ class ChatOpenAIReasoning(ChatOpenAI):
     def _default_params(self) -> dict[str, Any]:
         params = super()._default_params
         if "max_completion_tokens" in params:
-            params["max_tokens"] = params["max_completion_tokens"]
+            params["max_tokens"] = params.pop("max_completion_tokens")
         return params
 
     def _get_request_payload(
@@ -56,7 +56,7 @@ class ChatOpenAIReasoning(ChatOpenAI):
     ) -> dict:
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
         if "max_completion_tokens" in payload:
-            payload["max_tokens"] = payload["max_completion_tokens"]
+            payload["max_tokens"] = payload.pop("max_completion_tokens")
         return payload
 
     def _convert_chunk_to_generation_chunk(

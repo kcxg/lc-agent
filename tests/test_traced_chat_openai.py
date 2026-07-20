@@ -38,3 +38,24 @@ def test_create_traced_chat_openai_defaults_to_openai_base_url_for_trace_metadat
     assert str(llm.http_async_client.base_url) == "https://api.openai.com/v1/"
     assert llm.http_async_client.provider is None
     assert llm.http_async_client.model == "gpt-5-mini"
+
+
+def test_chat_openai_reasoning_default_params_restore_legacy_max_tokens_only():
+    """非 OpenAI 兼容端点不能同时收到两个 token 上限字段。"""
+    from lc_agent.core.chat_model import ChatOpenAIReasoning
+
+    llm = ChatOpenAIReasoning(model="test-model", api_key="test-key", max_tokens=123)
+
+    assert llm._default_params["max_tokens"] == 123
+    assert "max_completion_tokens" not in llm._default_params
+
+
+def test_chat_openai_reasoning_request_payload_restores_legacy_max_tokens_only():
+    """实际请求载荷同样必须移除 OpenAI 专用字段，避免 API 400。"""
+    from lc_agent.core.chat_model import ChatOpenAIReasoning
+
+    llm = ChatOpenAIReasoning(model="test-model", api_key="test-key", max_tokens=123)
+    payload = llm._get_request_payload("hello")
+
+    assert payload["max_tokens"] == 123
+    assert "max_completion_tokens" not in payload
