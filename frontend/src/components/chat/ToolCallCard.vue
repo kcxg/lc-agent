@@ -21,7 +21,7 @@
     </div>
     <template v-if="!isCollapsed">
     <div v-if="toolCall.args && Object.keys(toolCall.args).length > 0" class="tool-args">
-      <div v-for="arg in formatArgs(toolCall.args)" :key="arg.key" class="arg-row">
+      <div v-for="arg in formatArgs(toolCall.name, toolCall.args)" :key="arg.key" class="arg-row">
         <span class="arg-key">{{ arg.key }}:</span>
         <span class="arg-value">{{ arg.value }}</span>
       </div>
@@ -198,18 +198,22 @@ function formatSize(len: number): string {
   return `${(len / 1024).toFixed(1)}K chars`
 }
 
-function formatArgs(args: Record<string, any>): { key: string; value: string }[] {
-  return Object.entries(args).map(([k, v]) => {
-    let val: string
-    if (Array.isArray(v)) {
-      val = v.map((item, i) => `${String.fromCharCode(65 + i)}. ${item}`).join('\n')
-    } else if (typeof v === 'string') {
-      val = v
+function formatArgs(name: string, args: Record<string, unknown>): { key: string; value: string }[] {
+  return Object.entries(args).map(([key, value]) => {
+    let formatted: string
+    if (name.endsWith('ask_user') && key === 'options' && Array.isArray(value)) {
+      formatted = value.map((item, index) => `${String.fromCharCode(65 + index)}. ${String(item)}`).join('\n')
+    } else if (typeof value === 'string') {
+      formatted = value
     } else {
-      val = JSON.stringify(v)
+      try {
+        formatted = JSON.stringify(value) ?? String(value)
+      } catch {
+        formatted = String(value)
+      }
     }
-    if (val.length > 200) val = val.slice(0, 200) + '...'
-    return { key: k, value: val }
+    if (formatted.length > 200) formatted = `${formatted.slice(0, 200)}...`
+    return { key, value: formatted }
   })
 }
 

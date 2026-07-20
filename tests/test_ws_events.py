@@ -54,6 +54,27 @@ def test_convert_stream_event_tool_call():
     assert data["args"] == {"city": "Beijing"}
 
 
+def test_convert_stream_event_tool_call_uses_langgraph_task_id():
+    event = {
+        "event": "on_tool_start",
+        "name": "ask_user",
+        "run_id": "transient-run-id",
+        "metadata": {"langgraph_checkpoint_ns": "tools:stable-task-id"},
+        "data": {"input": {"question": "选择颜色"}},
+    }
+
+    results = convert_stream_event(event)
+
+    assert results == [(
+        "tool_call",
+        {
+            "name": "ask_user",
+            "tool_call_id": "stable-task-id",
+            "args": {"question": "选择颜色"},
+        },
+    )]
+
+
 def test_convert_stream_event_tool_result():
     """on_tool_end should produce tool_result event."""
     event = {
@@ -68,6 +89,27 @@ def test_convert_stream_event_tool_result():
     assert etype == "tool_result"
     assert data["name"] == "get_weather"
     assert "Sunny" in data["result"]
+
+
+def test_convert_stream_event_tool_result_uses_langgraph_task_id():
+    event = {
+        "event": "on_tool_end",
+        "name": "ask_user",
+        "run_id": "different-transient-run-id",
+        "metadata": {"langgraph_checkpoint_ns": "tools:stable-task-id"},
+        "data": {"output": "用户回答: 红色"},
+    }
+
+    results = convert_stream_event(event)
+
+    assert results == [(
+        "tool_result",
+        {
+            "name": "ask_user",
+            "tool_call_id": "stable-task-id",
+            "result": "用户回答: 红色",
+        },
+    )]
 
 
 def test_convert_stream_event_ignores_irrelevant():
@@ -114,6 +156,7 @@ def test_accumulate_display_state_tool():
         "event": "on_tool_start",
         "name": "search",
         "run_id": "run-1",
+        "metadata": {"langgraph_checkpoint_ns": "tools:stable-task-id"},
         "data": {"input": {"q": "test"}},
     }
     parts: list[str] = []
@@ -122,6 +165,7 @@ def test_accumulate_display_state_tool():
     in_thinking = accumulate_display_state(event, parts, tools, False)
     assert len(tools) == 1
     assert tools[0]["name"] == "search"
+    assert tools[0]["runId"] == "stable-task-id"
     assert tools[0]["status"] == "running"
     assert "<!--TOOL:0-->" in "".join(parts)
     assert not in_thinking

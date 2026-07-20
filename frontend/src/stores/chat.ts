@@ -696,15 +696,20 @@ export const useChatStore = defineStore('chat', () => {
         }
         if (!last.toolCalls) last.toolCalls = []
 
-        const existingByRunId = last.toolCalls.find(t => t.runId === msg.run_id)
-        if (existingByRunId) {
+        const toolCallId = msg.tool_call_id
+        if (!toolCallId) {
+          console.warn('[Chat] Ignored tool_call without tool_call_id', msg)
+          return
+        }
+        const existingByToolCallId = last.toolCalls.find(t => t.runId === toolCallId)
+        if (existingByToolCallId) {
           return
         }
 
         const tcIdx = last.toolCalls.length
         const tc: ToolCall = {
           name: msg.name || '',
-          runId: msg.run_id,
+          runId: toolCallId,
           args: msg.args,
           status: 'running',
           startTime: Date.now(),
@@ -725,7 +730,12 @@ export const useChatStore = defineStore('chat', () => {
     client.on('tool_result', (msg: SseMessage) => {
       const last = state.messages.value[state.messages.value.length - 1]
       if (last?.toolCalls) {
-        const tc = last.toolCalls.find(t => t.name === msg.name && t.status === 'running')
+        const toolCallId = msg.tool_call_id
+        if (!toolCallId) {
+          console.warn('[Chat] Ignored tool_result without tool_call_id', msg)
+          return
+        }
+        const tc = last.toolCalls.find(t => t.runId === toolCallId)
         if (tc) {
           tc.result = msg.result
           tc.status = 'done'
