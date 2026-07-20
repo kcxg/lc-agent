@@ -8,12 +8,46 @@ from lc_agent.tools.registry import tool
 
 @tool(name="ask_user", group="utility", group_description="通用工具")
 def ask_user(
-    question: Annotated[str, "要问用户的问题"],
-    options: Annotated[list[str] | None, "预设选项列表，展示为 A/B/C/D 供用户点选"] = None,
-    allow_multiple: Annotated[bool, "是否允许用户同时选择多个选项"] = False,
-    allow_free_input: Annotated[bool, "是否允许用户输入自定义文字"] = True,
+    question: Annotated[
+        str,
+        (
+            "向用户展示的问题文本。应清晰简洁，直接表达你需要用户提供的信息或做出的决定。"
+            "示例：'您希望报告覆盖哪个时间段？' / '确认要删除这条记录吗？'"
+        ),
+    ],
+    options: Annotated[
+        list[str] | None,
+        (
+            "候选选项列表，将按 A/B/C/D 顺序展示给用户点选。"
+            "仅在答案范围有限且可枚举时提供（建议 2~6 项）；若用户需要自由填写则不传。"
+            "示例：['本月', '本季度', '自定义时间段']"
+        ),
+    ] = None,
+    allow_multiple: Annotated[
+        bool,
+        (
+            "是否允许用户同时勾选多个选项。True=多选，False=单选（默认）。"
+            "仅在 options 不为空时有意义。场景示例：让用户勾选多个偏好标签时传 True。"
+        ),
+    ] = False,
+    allow_free_input: Annotated[
+        bool,
+        (
+            "是否允许用户在选项之外输入自定义文字。True（默认）=点选与自由输入均可；"
+            "False=强制仅能从 options 中点选，适合需要受控输入的场景。"
+        ),
+    ] = True,
 ) -> str:
-    """向用户提问并等待回复。支持自由文本、单选列表、多选列表、或列表+自由输入混合模式。"""
+    """向用户提问并获取回答。
+
+    当你需要以下情形时使用此工具：
+    - 关键信息缺失，无法从上下文推断，必须由用户补充（自由输入，不传 options）
+    - 需要用户从有限方案中做单选或多选（传 options）
+    - 需要用户确认一个不可逆操作（如删除、发送）
+
+
+    返回值：用户回答的原始文本；若传了 options，返回内容还会附带选项 ID 与文本的对照表（格式：A=选项文本）。
+    """
     payload: dict = {
         "type": "ask_user",
         "question": question,

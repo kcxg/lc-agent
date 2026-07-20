@@ -110,7 +110,7 @@ class ChatUiMessageRepository:
         *,
         session_id: str,
         role: str,
-        content: str = "",
+        content: list[dict] | None = None,
         tool_calls: list[dict] | None = None,
         usage: dict | None = None,
         http_traces: list[dict] | None = None,
@@ -118,7 +118,7 @@ class ChatUiMessageRepository:
         message = ChatUiMessage(
             session_id=session_id,
             role=role,
-            content=content,
+            content=content or [],
             tool_calls=tool_calls,
             usage=usage,
             http_traces=http_traces,

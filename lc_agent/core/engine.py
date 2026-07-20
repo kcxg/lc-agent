@@ -1,7 +1,6 @@
-﻿# lc_agent/core/engine.py
+# lc_agent/core/engine.py
 import logging
 from dataclasses import dataclass
-import re
 from typing import Annotated, Any, AsyncIterator, Literal
 
 from langchain.agents import create_agent
@@ -32,6 +31,34 @@ from pydantic import Field as _PydanticField
 from lc_agent.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _convert_text_file_blocks(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert text_file blocks to native text blocks for LangChain consumption."""
+    converted = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text_file":
+            name = block.get("name", "")
+            text_content = block.get("textContent", "")
+            lang = block.get("lang", "")
+            converted.append(
+                {
+                    "type": "text",
+                    "text": f"📎 `{name}`:\n```{lang}\n{text_content}\n```",
+                }
+            )
+        else:
+            converted.append(block)
+    return converted
+
+
+def _convert_history_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Convert text_file blocks in a history message's content."""
+    content = item.get("content")
+    if isinstance(content, list):
+        return {**item, "content": _convert_text_file_blocks(content)}
+    return item
+
 
 TODO_FINAL_ANSWER_GUARD = """## Final Answer Guard for `write_todos`
 
@@ -251,7 +278,7 @@ class AgentEngine:
             AgentPreset(
                 id="chat",
                 name="chat",
-                display_name="普通对话",
+                display_name="Chat",
                 system_prompt="You are a helpful assistant. Respond in the user's language.",
                 default_model=default_model,
                 allowed_tool_groups=[],
@@ -263,7 +290,7 @@ class AgentEngine:
             AgentPreset(
                 id="empty",
                 name="empty",
-                display_name="空模板",
+                display_name="Empty",
                 system_prompt=agent_conf.get("system_prompt", "You are a helpful assistant."),
                 default_model=default_model,
                 allowed_tool_groups=None,
@@ -275,7 +302,7 @@ class AgentEngine:
             AgentPreset(
                 id="power",
                 name="power",
-                display_name="全功能",
+                display_name="Power",
                 system_prompt=agent_conf.get("system_prompt", "You are a helpful assistant."),
                 default_model=default_model,
                 allowed_tool_groups=None,
@@ -899,7 +926,7 @@ class AgentEngine:
 
     async def chat_stream(
         self,
-        message: str,
+        message: list[dict[str, Any]],
         thread_id: str,
         preset_id: str = "chat",
         model_id: str = "",
@@ -907,11 +934,16 @@ class AgentEngine:
         llm_params: dict | None = None,
         user_id: str = "anonymous",
     ) -> AsyncIterator[dict]:
-        """Stream chat responses as events."""
+        """Stream chat responses as events.
+
+        message: LangChain content blocks list, e.g. [{"type":"text","text":"..."}, {"type":"image_url","image_url":{"url":"data:..."}}]
+        """
         agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
-        input_messages = list(history or [])
+        message = _convert_text_file_blocks(message)
+        history = [_convert_history_item(item) for item in (history or [])]
+        input_messages = list(history)
         input_messages.append({"role": "user", "content": message})
         stream_kwargs: dict[str, Any] = {"config": config, "version": "v2"}
         if self._should_use_memory_context(preset_id):

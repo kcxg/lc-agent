@@ -41,7 +41,11 @@ function copyAnswer() {
   doCopy('answer', extractAnswer(props.message))
 }
 function copyUser() {
-  doCopy('all', props.message.content)
+  const content = props.message.content
+  const text = typeof content === 'string'
+    ? content
+    : content.find(b => b.type === 'text')?.text || ''
+  doCopy('all', text)
 }
 </script>
 

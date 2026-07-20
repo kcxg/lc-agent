@@ -1,6 +1,7 @@
 import type { HttpTrace, LlmRoundUsage } from '@/stores/chat'
 import { parseSegments as parseContentSegments } from './parse-segments'
 import type { ContentSegment } from './parse-segments'
+import type { ContentBlock } from '@/utils/fileUpload'
 
 export interface CopyOptions {
   includeThinking?: boolean
@@ -20,10 +21,15 @@ interface ToolCallLike {
 
 interface MessageLike {
   role: 'user' | 'assistant' | 'tool'
-  content: string
+  content: string | ContentBlock[]
   toolCalls?: ToolCallLike[]
   httpTraces?: HttpTrace[]
   usage?: { rounds: LlmRoundUsage[] }
+}
+
+function contentToString(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content
+  return content.find(b => b.type === 'text')?.text || ''
 }
 
 function toolCallToMarkdown(tc: ToolCallLike): string {
@@ -98,7 +104,7 @@ export function singleMessageToMarkdown(
   const opts = { includeThinking: true, includeToolCalls: true, includeHttpTraces: true, ...options }
 
   if (msg.role === 'user') {
-    return `## User\n\n${msg.content.trim()}`
+    return `## User\n\n${contentToString(msg.content).trim()}`
   }
 
   const modelSuffix = opts.modelName ? ` (${opts.modelName})` : ''
@@ -147,7 +153,11 @@ export function messagesToMarkdown(
 }
 
 export function extractThinking(msg: MessageLike): string {
+<<<<<<< HEAD
   return parseContentSegments(msg.content)
+=======
+  return parseSegments(contentToString(msg.content))
+>>>>>>> main
     .filter(s => s.type === 'thinking')
     .map(s => s.text || '')
     .join('\n\n')
@@ -166,7 +176,11 @@ export function extractToolCalls(msg: MessageLike): string {
 }
 
 export function extractAnswer(msg: MessageLike): string {
+<<<<<<< HEAD
   return parseContentSegments(msg.content)
+=======
+  return parseSegments(contentToString(msg.content))
+>>>>>>> main
     .filter(s => s.type === 'text')
     .map(s => s.text || '')
     .join('\n\n')

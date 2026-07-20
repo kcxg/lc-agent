@@ -243,12 +243,7 @@ nul
 .tmp_pytest/
 .tmp_pytest_run/
 .tmp/bfzs-runlogs
-
-# Git worktrees
-.worktrees/
-
-# Local agent memory/state
-.serena/memories/
+.tmp/*
 
 # Local tool state
 .codegraph/

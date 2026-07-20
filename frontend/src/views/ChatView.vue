@@ -150,12 +150,27 @@
               />
             </template>
             <template v-else>
+              <div v-if="item.role === 'user' && item.contentBlocks" class="user-content-blocks">
+                <template v-for="(block, i) in item.contentBlocks" :key="i">
+                  <span v-if="block.type === 'text'" class="user-text-block">{{ block.text }}</span>
+                  <img
+                    v-else-if="block.type === 'image_url' && block.image_url"
+                    :src="block.image_url.url"
+                    class="user-image-block"
+                    @click="previewImage(block.image_url.url)"
+                  />
+                  <div v-else-if="block.type === 'text_file'" class="user-file-block">
+                    <span class="file-icon">📄</span>
+                    <span class="file-name" :title="block.name">{{ block.name }}</span>
+                  </div>
+                </template>
+              </div>
+              <span v-else-if="item.role === 'user'" class="user-plain-text">{{ item.content }}</span>
               <div
-                v-if="item.isMarkdown"
+                v-else
                 class="markdown-body"
                 v-html="renderMarkdown(stripThinkingMarkers(item.content || ''))"
               />
-              <span v-else class="user-plain-text">{{ item.content }}</span>
             </template>
             <div
               v-if="!item.isSystem && shouldShowReasoningNotice(item)"
@@ -203,6 +218,7 @@
       v-else
       :is-streaming="isStreaming"
       :edit-content="editingContent"
+      :edit-attachments="editingAttachments"
       :is-editing="Boolean(editingMessageId)"
       @send="handleSend"
       @stop="handleStop"
@@ -221,6 +237,12 @@
       :code="codeModalSource"
       :language="codeModalLanguage"
       @close="codeModalVisible = false"
+    />
+
+    <el-image-viewer
+      v-if="imageViewerVisible"
+      :url-list="[imageViewerUrl]"
+      @close="imageViewerVisible = false"
     />
   </div>
 </template>
@@ -242,6 +264,7 @@ import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
+import type { ContentBlock, Attachment } from '@/utils/fileUpload'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
 import { renderMarkdown } from '@/utils/markdown'
@@ -267,6 +290,8 @@ interface ContentSegment {
 type MessageBubbleItem = BubbleListItemProps & {
   role: 'user' | 'ai'
   messageId: string
+  content: string
+  contentBlocks?: ContentBlock[]
   isMarkdown?: boolean
   isSystem?: boolean
   toolCalls?: ToolCall[]
@@ -309,11 +334,14 @@ const toolsStore = useToolsStore()
 const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder } = storeToRefs(chatStore)
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
+const editingAttachments = ref<Attachment[]>([])
 const messagesContainerRef = ref<HTMLElement | null>(null)
 const showLoadOlderMessages = ref(false)
 const codeModalVisible = ref(false)
 const codeModalSource = ref('')
 const codeModalLanguage = ref('')
+const imageViewerVisible = ref(false)
+const imageViewerUrl = ref('')
 
 // Sub-session live mode: when navigating into a sub-session while streaming,
 // we stay connected to the main SSE and render from SubAgentEntry in the store.
@@ -432,8 +460,11 @@ const bubbleList = computed((): ChatBubbleItem[] => {
   const items = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
     .map((msg, idx, arr): MessageBubbleItem => {
-      const segs = msg.role === 'assistant' && hasStructuredSegments(msg.content || '', msg.toolCalls)
-        ? parseSegments(msg.content || '', msg.toolCalls)
+      const msgContent = typeof msg.content === 'string'
+        ? msg.content
+        : msg.content.find(b => b.type === 'text')?.text || ''
+      const segs = msg.role === 'assistant' && hasStructuredSegments(msgContent, msg.toolCalls)
+        ? parseSegments(msgContent, msg.toolCalls)
         : undefined
       const isStreamingMessage =
         msg.role === 'assistant'
@@ -444,7 +475,8 @@ const bubbleList = computed((): ChatBubbleItem[] => {
         messageId: msg.id,
         role: msg.role === 'assistant' ? 'ai' : 'user',
         placement: msg.role === 'user' ? 'end' : 'start',
-        content: msg.content || '',
+        content: msgContent,
+        contentBlocks: msg.role === 'user' && Array.isArray(msg.content) ? msg.content : undefined,
         shape: 'corner' as const,
         variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
         isMarkdown: msg.role !== 'user' && !msg.isSystem,
@@ -460,7 +492,7 @@ const bubbleList = computed((): ChatBubbleItem[] => {
         isStreamingMessage,
         loading:
           isStreamingMessage
-          && !msg.content,
+          && !msgContent,
         avatarSize: '28px',
         avatarGap: '8px',
       }
@@ -568,12 +600,47 @@ function canEditMessage(item: ChatBubbleItem) {
 function startEditMessage(item: ChatBubbleItem) {
   if (!canEditMessage(item)) return
   editingMessageId.value = item.messageId
-  editingContent.value = item.content || ''
+  const blocks = 'contentBlocks' in item ? item.contentBlocks : undefined
+  if (blocks && blocks.length > 0) {
+    const textParts: string[] = []
+    const restoredAtts: Attachment[] = []
+    let attIdx = 0
+    for (const block of blocks) {
+      if (block.type === 'text' && block.text) {
+        textParts.push(block.text)
+      } else if (block.type === 'text_file') {
+        restoredAtts.push({
+          id: `restore-${attIdx++}`,
+          type: 'text_file',
+          name: block.name || `file-${attIdx}.txt`,
+          textContent: block.textContent || '',
+        })
+      } else if (block.type === 'image_url' && block.image_url) {
+        restoredAtts.push({
+          id: `restore-${attIdx++}`,
+          type: 'image',
+          name: `image-${attIdx}.png`,
+          dataUrl: block.image_url.url,
+        })
+      }
+    }
+    editingContent.value = textParts.join('\n')
+    editingAttachments.value = restoredAtts
+  } else {
+    editingContent.value = item.content || ''
+    editingAttachments.value = []
+  }
 }
 
 function cancelEdit() {
   editingMessageId.value = null
   editingContent.value = ''
+  editingAttachments.value = []
+}
+
+function previewImage(url: string) {
+  imageViewerUrl.value = url
+  imageViewerVisible.value = true
 }
 
 function hasStructuredSegments(content: string, toolCalls?: ToolCall[]): boolean {
@@ -621,11 +688,16 @@ function getReplayHistory(beforeMessageId: string): ReplayMessage[] {
     .filter((msg): msg is typeof msg & { role: 'user' | 'assistant' } =>
       msg.role === 'user' || msg.role === 'assistant',
     )
-    .map(msg => ({
-      role: msg.role,
-      content: stripUiMarkers(msg.content || ''),
-    }))
-    .filter(msg => msg.content.trim())
+    .map(msg => {
+      if (msg.role === 'user' && Array.isArray(msg.content)) {
+        return { role: msg.role, content: msg.content }
+      }
+      const text = typeof msg.content === 'string' ? msg.content : ''
+      return { role: msg.role, content: stripUiMarkers(text) }
+    })
+    .filter(msg =>
+      Array.isArray(msg.content) ? msg.content.length > 0 : msg.content.trim().length > 0,
+    )
 }
 
 function parseSegments(content: string, toolCalls?: ToolCall[]): ContentSegment[] {
@@ -684,7 +756,7 @@ function parseSegments(content: string, toolCalls?: ToolCall[]): ContentSegment[
   return segments
 }
 
-function handleSend(content: string) {
+function handleSend(content: ContentBlock[]) {
   const editMessageId = editingMessageId.value
   const history = editMessageId ? getReplayHistory(editMessageId) : undefined
   const modelOverride = agentsStore.isCodeAgent ? '' : toolsStore.currentModel
@@ -726,13 +798,12 @@ function showErrorNotification(error: ErrorInfo) {
   const tech = error.techDetail ? escapeHtml(error.techDetail) : ''
 
   lastNotificationId = ElMessage({
-    type: 'error',
     dangerouslyUseHTMLString: true,
     showClose: true,
     duration: 0,
     grouping: true,
-    message: `<div style="line-height:1.5;max-width:420px">
-      <strong style="font-size:15px">${t}</strong>
+    message: `<div style="line-height:1.5;max-width:420px;border-left:3px solid var(--el-color-danger);padding:4px 8px">
+      <strong style="font-size:15px;color:var(--el-color-danger)">${t}</strong>
       <div style="margin:6px 0 10px;font-size:13px;color:var(--el-text-color-regular)">${d}</div>
       ${suggestions ? `<div style="font-size:12px;color:var(--el-text-color-secondary)">
         <strong>建议：</strong>
@@ -1236,6 +1307,50 @@ onBeforeUnmount(() => {
 .user-plain-text {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.user-content-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.user-text-block {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.user-image-block {
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 6px;
+  cursor: zoom-in;
+  border: 1px solid var(--el-border-color);
+}
+
+.user-file-block {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+  font-size: 13px;
+  max-width: 100%;
+}
+
+.user-file-block .file-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.user-file-block .file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--el-text-color-primary);
 }
 
 .tool-call-inline {
