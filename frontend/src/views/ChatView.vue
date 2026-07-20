@@ -802,15 +802,15 @@ function showErrorNotification(error: ErrorInfo) {
     showClose: true,
     duration: 0,
     grouping: true,
-    message: `<div style="line-height:1.5;max-width:420px;border-left:3px solid var(--el-color-danger);padding:4px 8px">
+    message: `<div style="line-height:1.5;max-width:560px;border-left:3px solid var(--el-color-danger);padding:4px 8px">
       <strong style="font-size:15px;color:var(--el-color-danger)">${t}</strong>
-      <div style="margin:6px 0 10px;font-size:13px;color:var(--el-text-color-regular)">${d}</div>
+      <div style="margin:6px 0 10px;font-size:13px;color:var(--el-text-color-regular);word-break:break-word">${d}</div>
       ${suggestions ? `<div style="font-size:12px;color:var(--el-text-color-secondary)">
         <strong>建议：</strong>
         <ul style="margin:4px 0 0;padding-left:18px;line-height:1.6">${suggestions}</ul></div>` : ''}
       ${tech ? `<details style="margin-top:10px;font-size:11px;color:var(--el-text-color-placeholder)">
         <summary style="cursor:pointer">技术详情</summary>
-        <pre style="margin:6px 0 0;padding:8px;background:var(--el-fill-color-light);border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;max-height:150px;overflow-y:auto">${tech}</pre>
+        <pre style="margin:6px 0 0;padding:8px;background:var(--el-fill-color-light);border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto">${tech}</pre>
       </details>` : ''}
     </div>`,
     onClose: () => { lastNotificationId = null },
