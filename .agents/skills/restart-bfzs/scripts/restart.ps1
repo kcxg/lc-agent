@@ -38,8 +38,11 @@ function Get-PortProcessIds {
         $tcpConnections = Get-NetTCPConnection -LocalPort $TargetPort -ErrorAction SilentlyContinue
         foreach ($conn in $tcpConnections) {
             # TIME_WAIT 状态的连接进程已死，端口未真正释放，跳过
-            if ($conn.State -ne 'TimeWait') {
-                $ids += $conn.OwningProcess
+            if ($conn.State -eq 'TimeWait') { continue }
+            $owningPid = $conn.OwningProcess
+            # 进程已死但 socket 还未从内核释放（Force-Kill 后短暂残留），跳过
+            if ($owningPid -ne 0 -and (Get-Process -Id $owningPid -ErrorAction SilentlyContinue)) {
+                $ids += $owningPid
             }
         }
     } catch {
@@ -80,9 +83,11 @@ if ($pids) {
     if ($stubborn) {
         $stubborn | ForEach-Object {
             Write-Host "  Force-killing PID $_" -ForegroundColor Yellow
+            # Use taskkill /T to also terminate child processes (e.g. uvicorn workers)
+            & taskkill /F /T /PID $_ 2>$null | Out-Null
             Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
         }
-        Start-Sleep 3
+        Start-Sleep 6
     }
 
     $remaining = Get-PortProcessIds -TargetPort $Port

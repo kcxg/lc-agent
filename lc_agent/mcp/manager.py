@@ -36,6 +36,7 @@ class McpManager:
         self._servers: dict[str, McpServerStatus] = {}
         self._sessions: dict[str, Any] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._refresh_locks: dict[str, asyncio.Lock] = {}
         self._server_contexts: dict[str, tuple[Any, Any]] = {}
 
         for name, conf in config.items():
@@ -73,6 +74,8 @@ class McpManager:
         if server is None:
             return
         server.status = "error"
+        server.tools = []
+        server.tool_schemas = []
         server.error = error
         self._notify_state_change()
 
@@ -101,31 +104,82 @@ class McpManager:
         if server is None or conf is None or not server.enabled:
             return False
 
-        await self._cleanup_server(name)
-        await self._connect_server(name, conf)
+        await self.refresh_server(name)
         return name in self._sessions and self._servers[name].status == "connected"
 
+    async def refresh_server(self, name: str) -> McpServerStatus:
+        """Reconnect one configured server and refresh its tool schemas."""
+        server = self._servers.get(name)
+        conf = self._config.get(name)
+        if server is None or conf is None:
+            raise KeyError(f"MCP server '{name}' not found")
+        if not server.enabled:
+            server.status = "disabled"
+            self._notify_state_change()
+            return server
+
+        refresh_lock = self._refresh_locks.setdefault(name, asyncio.Lock())
+        async with refresh_lock:
+            # Keep the last complete schema available until a new tools/list response succeeds.
+            # This prevents an agent created during refresh from losing its MCP tools.
+            await self._cleanup_server(name)
+            await self._connect_server(name, conf, notify_connecting=False)
+            return server
+
+    async def refresh_all(self) -> list[McpServerStatus]:
+        """Refresh every enabled MCP server in parallel."""
+        tasks = [
+            self.refresh_server(name)
+            for name, server in self._servers.items()
+            if server.enabled
+        ]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        return self.servers
+
     async def connect_all(self):
-        """Connect to all configured MCP servers (persistent)."""
+        """Connect to all configured MCP servers in parallel."""
+        tasks = []
         for name, conf in self._config.items():
             if not conf.get("enabled", True):
                 self._servers[name].status = "disabled"
                 continue
-            await self._connect_server(name, conf)
+            tasks.append(self._connect_server(name, conf))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _connect_server(self, name: str, conf: dict):
+    async def _connect_server(self, name: str, conf: dict, *, notify_connecting: bool = True):
         """Establish a persistent connection to a single MCP server."""
         server_type = _resolve_server_type(conf)
-        self._servers[name].status = "connecting"
+        if notify_connecting:
+            self._servers[name].status = "connecting"
+            self._notify_state_change()
+
+        # HTTP/SSE servers respond quickly; stdio (npx) may need to download packages on first run.
+        if server_type in ("http", "sse"):
+            default_timeout = 15
+        else:
+            default_timeout = 90
+        connect_timeout = conf.get("connect_timeout", default_timeout)
 
         try:
             if server_type == "sse":
-                await self._connect_sse_persistent(name, conf)
+                await asyncio.wait_for(
+                    self._connect_sse_persistent(name, conf), timeout=connect_timeout
+                )
             elif server_type == "http":
-                await self._connect_http_persistent(name, conf)
+                await asyncio.wait_for(
+                    self._connect_http_persistent(name, conf), timeout=connect_timeout
+                )
             else:
-                await self._connect_stdio_persistent(name, conf)
+                await asyncio.wait_for(
+                    self._connect_stdio_persistent(name, conf), timeout=connect_timeout
+                )
+        except asyncio.TimeoutError:
+            await self._cleanup_server(name)
+            self._set_server_error(name, f"Connection timed out after {connect_timeout}s")
         except Exception as e:
+            await self._cleanup_server(name)
             self._set_server_error(name, str(e))
 
     async def _connect_stdio_persistent(self, name: str, conf: dict):

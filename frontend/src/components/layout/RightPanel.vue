@@ -193,6 +193,32 @@
                   @change="toolsStore.toggleMcp(server.name)"
                 />
                 <span class="mcp-name">{{ server.name }}</span>
+                <button
+                  class="mcp-refresh-btn"
+                  type="button"
+                  :disabled="!server.allowed || !server.enabled || toolsStore.isMcpRefreshing(server.name)"
+                  :title="`刷新 ${server.name}`"
+                  :aria-label="`刷新 ${server.name}`"
+                  @click="toolsStore.refreshMcpServer(server.name)"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    :class="{ spinning: toolsStore.isMcpRefreshing(server.name) }"
+                  >
+                    <path d="M21 2v6h-6" />
+                    <path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" />
+                    <path d="M3 22v-6h6" />
+                    <path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
+                  </svg>
+                </button>
                 <button class="detail-btn" type="button" @click="openDetail('mcp', server.name, server)">
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10" />
@@ -730,6 +756,31 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 .detail-btn:active {
   transform: scale(0.95);
   background: color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+}
+
+.mcp-refresh-btn {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--el-text-color-secondary);
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mcp-refresh-btn:hover:not(:disabled) {
+  color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
+}
+
+.mcp-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .skill-name {

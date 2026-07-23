@@ -36,6 +36,8 @@ export const api = {
   getModels: () => fetchApi<{ id: string; provider: string; base_url: string; context_limit: number }[]>('/models'),
 
   getMcpServers: () => fetchApi<any[]>('/mcp'),
+  refreshMcpServers: () => fetchApi<any[]>('/mcp/refresh', { method: 'POST' }),
+  refreshMcpServer: (name: string) => fetchApi<any>(`/mcp/${name}/refresh`, { method: 'POST' }),
   toggleMcpServer: (name: string) => fetchApi<{ name: string; enabled: boolean }>(`/mcp/${name}/toggle`, { method: 'POST' }),
   getSkills: () => fetchApi<any[]>('/skills'),
   getSkillDetail: (name: string) => fetchApi<any>(`/skills/${name}`),

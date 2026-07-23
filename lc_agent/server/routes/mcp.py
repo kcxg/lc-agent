@@ -6,6 +6,20 @@ from lc_agent.server.auth_middleware import get_current_user
 router = APIRouter(tags=["mcp"])
 
 
+def _serialize_server(server):
+    return {
+        "name": server.name,
+        "type": server.type,
+        "command": server.command,
+        "url": server.url,
+        "enabled": server.enabled,
+        "status": server.status,
+        "tools": server.tools,
+        "tool_schemas": server.tool_schemas,
+        "error": server.error,
+    }
+
+
 @router.get("/mcp")
 def list_mcp_servers(
     request: Request,
@@ -15,20 +29,37 @@ def list_mcp_servers(
     manager = getattr(request.app.state, "mcp_manager", None)
     if manager is None:
         return []
-    return [
-        {
-            "name": s.name,
-            "type": s.type,
-            "command": s.command,
-            "url": s.url,
-            "enabled": s.enabled,
-            "status": s.status,
-            "tools": s.tools,
-            "tool_schemas": s.tool_schemas if hasattr(s, 'tool_schemas') else [],
-            "error": s.error,
-        }
-        for s in manager.servers
-    ]
+    return [_serialize_server(server) for server in manager.servers]
+
+
+@router.post("/mcp/refresh")
+async def refresh_all_mcp_servers(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    """Reconnect every enabled MCP server and reload its tool schemas."""
+    manager = getattr(request.app.state, "mcp_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=404, detail="MCP manager not found")
+    return [_serialize_server(server) for server in await manager.refresh_all()]
+
+
+@router.post("/mcp/{name}/refresh")
+async def refresh_mcp_server(
+    name: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    """Reconnect one enabled MCP server and reload its tool schemas."""
+    manager = getattr(request.app.state, "mcp_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=404, detail="MCP manager not found")
+    server = manager.get_server(name)
+    if server is None:
+        raise HTTPException(status_code=404, detail=f"MCP server '{name}' not found")
+    if not server.enabled:
+        raise HTTPException(status_code=409, detail=f"MCP server '{name}' is disabled")
+    return _serialize_server(await manager.refresh_server(name))
 
 
 @router.post("/mcp/{name}/toggle")
