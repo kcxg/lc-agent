@@ -58,6 +58,7 @@ export const useToolsStore = defineStore('tools', () => {
   const currentModel = ref('')
   const llmParams = ref<Record<string, any> | null>(null)
   const mcpRefreshing = ref(false)
+  const refreshingMcpServerNames = ref<string[]>([])
 
   const localOverrides = reactive<Record<string, boolean>>({})
 
@@ -146,11 +147,29 @@ export const useToolsStore = defineStore('tools', () => {
   async function refreshMcpServers() {
     mcpRefreshing.value = true
     try {
-      mcpServers.value = await api.getMcpServers()
+      mcpServers.value = await api.refreshMcpServers()
     } catch (e) {
       console.error('[ToolsStore] Failed to refresh MCP servers:', e)
     } finally {
       mcpRefreshing.value = false
+    }
+  }
+
+  function isMcpRefreshing(serverName: string): boolean {
+    return mcpRefreshing.value || refreshingMcpServerNames.value.includes(serverName)
+  }
+
+  async function refreshMcpServer(serverName: string) {
+    if (isMcpRefreshing(serverName)) return
+    refreshingMcpServerNames.value = [...refreshingMcpServerNames.value, serverName]
+    try {
+      const refreshed = await api.refreshMcpServer(serverName)
+      const index = mcpServers.value.findIndex(server => server.name === serverName)
+      if (index >= 0) mcpServers.value[index] = refreshed
+    } catch (e) {
+      console.error(`[ToolsStore] Failed to refresh MCP server '${serverName}':`, e)
+    } finally {
+      refreshingMcpServerNames.value = refreshingMcpServerNames.value.filter(name => name !== serverName)
     }
   }
 
@@ -254,7 +273,7 @@ export const useToolsStore = defineStore('tools', () => {
   return {
     groups, models, mcpServers, skills, currentModel, llmParams, mcpRefreshing,
     filteredGroups, filteredMcp, filteredSkills,
-    init, refreshMcpServers, refreshRuntimeToggles, toggleGroup, toggleMcp, toggleSkill,
+    init, refreshMcpServers, refreshMcpServer, isMcpRefreshing, refreshRuntimeToggles, toggleGroup, toggleMcp, toggleSkill,
     setModel, setLlmParam, resetLlmParams, syncModelWithAgentDefault,
   }
 })

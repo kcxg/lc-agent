@@ -6,7 +6,7 @@
     </div>
     <div
       class="textarea-shell"
-      :class="{ 'is-disabled': isInputDisabled }"
+      :class="{ 'is-disabled': isStreamingState }"
       @drop="handleDrop"
       @dragover="handleDragover"
     >
@@ -41,7 +41,6 @@
         rows="1"
         placeholder="Send a message... (可粘贴/拖拽图片或文本文件)"
         enterkeyhint="enter"
-        :disabled="isInputDisabled"
         @input="resizeTextarea"
         @keydown="handleKeydown"
         @paste="handlePaste"
@@ -53,7 +52,7 @@
           class="input-action-btn attach-btn"
           aria-label="附加文件"
           title="附加图片或文本文件"
-          :disabled="isInputDisabled"
+          :disabled="isStreamingState"
           @click="triggerFileInput"
         >
           <span class="attach-icon">📎</span>
@@ -135,9 +134,8 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const messageText = ref('')
 const attachments = ref<Attachment[]>([])
 const isStreamingState = computed(() => props.isStreaming ?? isStreaming.value)
-const isInputDisabled = computed(() => isStreamingState.value)
 const canSend = computed(() =>
-  (Boolean(messageText.value.trim()) || attachments.value.length > 0) && !isInputDisabled.value,
+  (Boolean(messageText.value.trim()) || attachments.value.length > 0) && !isStreamingState.value,
 )
 
 watch(() => [props.editContent, props.editAttachments] as const, async ([content, atts]) => {
@@ -153,7 +151,7 @@ watch(() => [props.editContent, props.editAttachments] as const, async ([content
 onMounted(async () => {
   await nextTick()
   resizeTextarea()
-  if (!isInputDisabled.value) {
+  if (!isStreamingState.value) {
     focusTextarea('end')
   }
 })
@@ -242,7 +240,7 @@ function removeAttachment(id: string) {
 }
 
 function handleSubmit() {
-  if (isInputDisabled.value) return
+  if (isStreamingState.value) return
   const blocks = buildContentBlocks(messageText.value, attachments.value)
   if (blocks.length === 0) return
   emit('send', blocks)
@@ -291,7 +289,7 @@ function handleCancelEdit() {
 }
 
 .textarea-shell.is-disabled {
-  opacity: 0.78;
+  border-color: var(--el-border-color-lighter);
 }
 
 .chat-textarea {
@@ -314,10 +312,6 @@ function handleCancelEdit() {
 
 .chat-textarea::placeholder {
   color: var(--el-text-color-placeholder);
-}
-
-.chat-textarea:disabled {
-  cursor: not-allowed;
 }
 
 .input-actions {

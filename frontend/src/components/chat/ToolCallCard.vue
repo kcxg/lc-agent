@@ -1,5 +1,5 @@
 <template>
-  <div class="tool-call-card" :class="[toolCall.status, { 'is-collapsed': isCollapsed }]">
+  <div v-if="!isDismissed" class="tool-call-card" :class="[toolCall.status, { 'is-collapsed': isCollapsed }]">
     <div class="tool-header" @click.stop="toggleCollapse">
       <span class="collapse-icon">{{ isCollapsed ? '▸' : '▾' }}</span>
       <el-icon v-if="toolCall.status === 'running'" class="spinning">
@@ -7,6 +7,9 @@
       </el-icon>
       <el-icon v-else-if="toolCall.status === 'done'" style="color: var(--el-color-success)">
         <Check />
+      </el-icon>
+      <el-icon v-else-if="toolCall.status === 'error'" class="error-icon">
+        <CircleCloseFilled />
       </el-icon>
       <span class="tool-kind">
         <el-icon><Tools /></el-icon>
@@ -18,10 +21,17 @@
         <span v-if="toolCall.duration" class="meta-item">⏱ {{ formatDuration(toolCall.duration) }}</span>
         <span v-if="toolCall.resultLength" class="meta-item">📦 {{ formatSize(toolCall.resultLength) }}</span>
       </span>
+      <button
+        v-if="toolCall.status === 'error'"
+        class="dismiss-btn"
+        title="关闭此错误"
+        aria-label="关闭此错误"
+        @click.stop="isDismissed = true"
+      >✕</button>
     </div>
     <template v-if="!isCollapsed">
     <div v-if="toolCall.args && Object.keys(toolCall.args).length > 0" class="tool-args">
-      <div v-for="arg in formatArgs(toolCall.args)" :key="arg.key" class="arg-row">
+      <div v-for="arg in formatArgs(toolCall.name, toolCall.args)" :key="arg.key" class="arg-row">
         <span class="arg-key">{{ arg.key }}:</span>
         <span class="arg-value">{{ arg.value }}</span>
       </div>
@@ -69,13 +79,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { Loading, Check, Tools } from '@element-plus/icons-vue'
+import { Loading, Check, Tools, CircleCloseFilled } from '@element-plus/icons-vue'
 import type { ToolCall } from '@/stores/chat'
 
 const props = defineProps<{ toolCall: ToolCall; collapsed?: boolean }>()
 const showModal = ref(false)
 const isCollapsed = ref(props.collapsed ?? false)
 const userToggled = ref(false)
+const isDismissed = ref(false)
 const searchQuery = ref('')
 const activeMatchIndex = ref(0)
 const modalBodyRef = ref<HTMLElement | null>(null)
@@ -198,18 +209,22 @@ function formatSize(len: number): string {
   return `${(len / 1024).toFixed(1)}K chars`
 }
 
-function formatArgs(args: Record<string, any>): { key: string; value: string }[] {
-  return Object.entries(args).map(([k, v]) => {
-    let val: string
-    if (Array.isArray(v)) {
-      val = v.map((item, i) => `${String.fromCharCode(65 + i)}. ${item}`).join('\n')
-    } else if (typeof v === 'string') {
-      val = v
+function formatArgs(name: string, args: Record<string, unknown>): { key: string; value: string }[] {
+  return Object.entries(args).map(([key, value]) => {
+    let formatted: string
+    if (name.endsWith('ask_user') && key === 'options' && Array.isArray(value)) {
+      formatted = value.map((item, index) => `${String.fromCharCode(65 + index)}. ${String(item)}`).join('\n')
+    } else if (typeof value === 'string') {
+      formatted = value
     } else {
-      val = JSON.stringify(v)
+      try {
+        formatted = JSON.stringify(value) ?? String(value)
+      } catch {
+        formatted = String(value)
+      }
     }
-    if (val.length > 200) val = val.slice(0, 200) + '...'
-    return { key: k, value: val }
+    if (formatted.length > 200) formatted = `${formatted.slice(0, 200)}...`
+    return { key, value: formatted }
   })
 }
 
@@ -267,6 +282,10 @@ const statusLabel = computed(() => {
 
 .tool-header:hover {
   opacity: 0.85;
+}
+
+.tool-header:hover .dismiss-btn {
+  opacity: 1;
 }
 
 .collapse-icon {
@@ -583,6 +602,35 @@ const statusLabel = computed(() => {
 .tool-modal-body :deep(.tool-search-hit.is-active),
 .tool-modal-body.rendered :deep(.tool-search-hit.is-active) {
   background: rgba(245, 158, 11, 0.78);
+}
+
+.error-icon {
+  color: var(--el-color-danger);
+  flex-shrink: 0;
+}
+
+.dismiss-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.dismiss-btn:hover {
+  background: var(--el-color-danger-light-8);
+  color: var(--el-color-danger);
 }
 
 .spinning {

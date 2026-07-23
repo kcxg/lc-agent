@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from lc_agent.mcp.manager import McpManager, McpServerStatus
@@ -78,6 +80,89 @@ async def test_mcp_manager_registers_tools_after_connect():
     assert tools == []
 
 
+@pytest.mark.asyncio
+async def test_refresh_server_reconnects_and_replaces_tool_schemas(monkeypatch):
+    manager = McpManager({"remote": {"type": "http", "url": "http://example.test/mcp"}})
+    server = manager.get_server("remote")
+    assert server is not None
+    server.status = "connected"
+    server.tools = ["old_tool"]
+    server.tool_schemas = [{"name": "old_tool", "description": "old", "input_schema": {}}]
+    manager._sessions["remote"] = object()
+    calls = []
+
+    async def fake_cleanup(name):
+        calls.append(("cleanup", name))
+        manager._sessions.pop(name, None)
+
+    async def fake_connect(name, conf, **kwargs):
+        calls.append(("connect", name, conf, server.tools, server.tool_schemas))
+        manager._sessions[name] = object()
+        server.status = "connected"
+        server.tools = ["new_tool"]
+        server.tool_schemas = [{"name": "new_tool", "description": "new", "input_schema": {"q": "string"}}]
+
+    monkeypatch.setattr(manager, "_cleanup_server", fake_cleanup)
+    monkeypatch.setattr(manager, "_connect_server", fake_connect)
+
+    refreshed = await manager.refresh_server("remote")
+
+    assert refreshed is server
+    assert calls == [
+        ("cleanup", "remote"),
+        (
+            "connect",
+            "remote",
+            {"type": "http", "url": "http://example.test/mcp"},
+            ["old_tool"],
+            [{"name": "old_tool", "description": "old", "input_schema": {}}],
+        ),
+    ]
+    assert server.tools == ["new_tool"]
+    assert server.tool_schemas[0]["description"] == "new"
+
+
+@pytest.mark.asyncio
+async def test_refresh_server_keeps_previous_schemas_until_reconnected(monkeypatch):
+    state_changes = []
+    manager = McpManager(
+        {"remote": {"type": "http", "url": "http://example.test/mcp"}},
+        on_state_change=lambda: state_changes.append("changed"),
+    )
+    server = manager.get_server("remote")
+    assert server is not None
+    server.status = "connected"
+    server.tools = ["old_tool"]
+    server.tool_schemas = [{"name": "old_tool", "description": "old", "input_schema": {}}]
+    reconnect_started = asyncio.Event()
+    finish_reconnect = asyncio.Event()
+
+    async def fake_cleanup(name):
+        manager._sessions.pop(name, None)
+
+    async def fake_connect(name, conf, **kwargs):
+        assert kwargs == {"notify_connecting": False}
+        reconnect_started.set()
+        await finish_reconnect.wait()
+        manager._sessions[name] = object()
+        manager._extract_tools(name, type("Result", (), {"tools": []})())
+
+    monkeypatch.setattr(manager, "_cleanup_server", fake_cleanup)
+    monkeypatch.setattr(manager, "_connect_server", fake_connect)
+
+    refresh_task = asyncio.create_task(manager.refresh_server("remote"))
+    await reconnect_started.wait()
+
+    assert server.status == "connected"
+    assert server.tools == ["old_tool"]
+    assert server.tool_schemas[0]["description"] == "old"
+    assert state_changes == []
+
+    finish_reconnect.set()
+    await refresh_task
+    assert state_changes == ["changed"]
+
+
 class _TextContent:
     def __init__(self, text: str):
         self.text = text
@@ -111,7 +196,7 @@ async def test_call_tool_reconnects_once_and_retries_after_session_failure(monke
     replacement_session = _SuccessfulSession()
     reconnects = []
 
-    async def fake_connect_server(name, conf):
+    async def fake_connect_server(name, conf, **kwargs):
         reconnects.append((name, conf))
         manager._sessions[name] = replacement_session
         manager._servers[name].status = "connected"
@@ -134,7 +219,7 @@ async def test_call_tool_reports_reconnect_failure_and_clears_stale_session(monk
     manager._servers["http_test"].status = "connected"
     manager._sessions["http_test"] = _FailingSession()
 
-    async def fake_connect_server(name, conf):
+    async def fake_connect_server(name, conf, **kwargs):
         manager._servers[name].status = "error"
         manager._servers[name].error = "server still down"
 
@@ -154,7 +239,7 @@ async def test_call_tool_reports_reconnect_failure_when_no_session_exists(monkey
     manager._servers["http_test"].status = "error"
     manager._servers["http_test"].error = "previous failure"
 
-    async def fake_connect_server(name, conf):
+    async def fake_connect_server(name, conf, **kwargs):
         manager._servers[name].status = "error"
         manager._servers[name].error = "server still down"
 
@@ -176,7 +261,7 @@ async def test_call_tool_does_not_reconnect_disabled_server(monkeypatch):
     manager._sessions["http_test"] = _FailingSession()
     reconnects = []
 
-    async def fake_connect_server(name, conf):
+    async def fake_connect_server(name, conf, **kwargs):
         reconnects.append((name, conf))
 
     monkeypatch.setattr(manager, "_connect_server", fake_connect_server)

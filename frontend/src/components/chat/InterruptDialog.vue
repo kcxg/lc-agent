@@ -82,6 +82,11 @@ interface AskUserPayload {
   allow_free_input?: boolean
 }
 
+interface AskUserInterrupt {
+  id?: string
+  value: AskUserPayload
+}
+
 const props = defineProps<{ interrupt: InterruptInfo | null }>()
 const emit = defineEmits<{
   decide: [decision: { type: string; message?: string }]
@@ -100,17 +105,15 @@ const selectedOptions = ref<string[]>([])
 const showDetails = ref(false)
 
 const allActions = computed(() => props.interrupt?.actionRequests ?? [])
-const askPayload = computed<AskUserPayload | null>(() => {
-  if (!props.interrupt) return null
-  const data = props.interrupt.data
-  if (data && data.length > 0) {
-    const value = data[0]?.value
-    if (value && typeof value === 'object' && value.type === 'ask_user') {
-      return value as AskUserPayload
-    }
+const askUserInterrupt = computed<AskUserInterrupt | null>(() => {
+  const item = props.interrupt?.data?.[0]
+  if (item?.value && typeof item.value === 'object' && item.value.type === 'ask_user') {
+    return item as AskUserInterrupt
   }
   return null
 })
+
+const askPayload = computed<AskUserPayload | null>(() => askUserInterrupt.value?.value ?? null)
 
 const isAskUser = computed(() => askPayload.value !== null)
 
@@ -179,7 +182,12 @@ function submitAskUser() {
   }
   const answer = parts.join('; ')
   if (!answer) return
-  emit('resume', answer)
+  const interruptId = askUserInterrupt.value?.id
+  if (!interruptId) {
+    console.warn('[InterruptDialog] Missing LangGraph interrupt id')
+    return
+  }
+  emit('resume', { [interruptId]: answer })
 }
 
 function allowPermanently() {

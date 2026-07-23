@@ -1,6 +1,6 @@
 [project]
 name = "lc-agent-app"
-version = "0.3"
+version = "0.4"
 description = "LangChain Agent framework with built-in Web UI"
 requires-python = ">=3.12"
 license = "MIT"
@@ -56,3 +56,7 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+
+
+[tool.hatch.build]
+packages = ["lc_agent"]

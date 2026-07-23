@@ -190,7 +190,7 @@ def convert_stream_event(
             # Regular main-agent tool call
             results.append(("tool_call", {
                 "name": tool_name,
-                "run_id": event.get("run_id", ""),
+                "tool_call_id": _extract_tools_task_id(checkpoint_ns) or event.get("run_id", ""),
                 "args": tool_input,
             }))
 
@@ -232,6 +232,7 @@ def convert_stream_event(
             # Regular main-agent tool finished
             results.append(("tool_result", {
                 "name": tool_name,
+                "tool_call_id": _extract_tools_task_id(checkpoint_ns) or event.get("run_id", ""),
                 "result": result_str,
             }))
 
@@ -322,17 +323,19 @@ def accumulate_display_state(
                 content_parts.append("<!--THINK_END-->")
                 in_thinking = False
             tool_idx = len(tool_calls)
+            tool_call_id = _extract_tools_task_id(checkpoint_ns) or event.get("run_id", "")
             tool_input = event.get("data", {}).get("input", {})
             if not isinstance(tool_input, (dict, list, str, int, float, bool, type(None))):
                 tool_input = str(tool_input)
-            tool_calls.append({
-                "name": tool_name,
-                "runId": event.get("run_id", ""),
-                "args": tool_input,
-                "status": "running",
-                "startTime": int(time.time() * 1000),
-            })
-            content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
+            if not any(tc.get("runId") == tool_call_id for tc in tool_calls):
+                tool_calls.append({
+                    "name": tool_name,
+                    "runId": tool_call_id,
+                    "args": tool_input,
+                    "status": "running",
+                    "startTime": int(time.time() * 1000),
+                })
+                content_parts.append(f"\n<!--TOOL:{tool_idx}-->\n")
         # else: sub-agent's internal tool call (is_in_subagent=True, not a subagent tool) — skip
 
     elif kind == "on_tool_end":
@@ -365,18 +368,10 @@ def accumulate_display_state(
                 result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
             else:
                 result_str = str(raw_output)
-            run_id = event.get("run_id", "")
-            name = event.get("name", "")
-            tool_call = None
-            if run_id:
-                tool_call = next(
-                    (tc for tc in tool_calls if tc.get("runId") == run_id), None,
-                )
-            if tool_call is None:
-                tool_call = next(
-                    (tc for tc in tool_calls if tc.get("name") == name and tc.get("status") == "running"),
-                    None,
-                )
+            tool_call_id = _extract_tools_task_id(checkpoint_ns) or event.get("run_id", "")
+            tool_call = next(
+                (tc for tc in tool_calls if tc.get("runId") == tool_call_id), None,
+            )
             if tool_call:
                 start_time = tool_call.get("startTime")
                 tool_call["result"] = result_str

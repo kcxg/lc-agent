@@ -202,10 +202,10 @@ def test_regular_tool_with_single_segment_namespace_emits_normal_tool_events():
         "data": {"output": "2"},
     }
     assert convert_stream_event(start_event, subagent_tool_names={"research_expert"}) == [
-        ("tool_call", {"name": "calculator", "run_id": "run-tool-123", "args": {"expression": "1 + 1"}})
+        ("tool_call", {"name": "calculator", "tool_call_id": "regular-task-123", "args": {"expression": "1 + 1"}})
     ]
     assert convert_stream_event(end_event, subagent_tool_names={"research_expert"}) == [
-        ("tool_result", {"name": "calculator", "result": "2"})
+        ("tool_result", {"name": "calculator", "tool_call_id": "regular-task-123", "result": "2"})
     ]
 
 

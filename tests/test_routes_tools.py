@@ -128,3 +128,32 @@ async def test_toggle_mcp_server_increments_mcp_generation(app_with_tools):
         assert data["enabled"] is False
 
     assert engine._mcp_generation == gen_before + 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_single_mcp_server_returns_reloaded_schemas(app_with_tools, monkeypatch):
+    """The single-server endpoint must return the newly loaded MCP tool schema."""
+    app, headers = app_with_tools
+    from lc_agent.mcp.manager import McpManager
+
+    mcp_manager = McpManager({"fake_server": {"command": "echo", "enabled": True}})
+
+    async def fake_refresh(name):
+        server = mcp_manager.get_server(name)
+        assert server is not None
+        server.status = "connected"
+        server.tools = ["new_tool"]
+        server.tool_schemas = [{"name": "new_tool", "description": "new description", "input_schema": {}}]
+        return server
+
+    monkeypatch.setattr(mcp_manager, "refresh_server", fake_refresh)
+    app.fastapi_app.state.mcp_manager = mcp_manager
+
+    transport = ASGITransport(app=app.fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/mcp/fake_server/refresh", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["tool_schemas"] == [
+        {"name": "new_tool", "description": "new description", "input_schema": {}}
+    ]

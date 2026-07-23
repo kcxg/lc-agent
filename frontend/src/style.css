@@ -50,3 +50,13 @@ summary::-webkit-details-marker {
   background: var(--el-border-color-lighter);
   border-radius: 3px;
 }
+
+.el-message .el-message__closeBtn {
+  color: var(--el-color-danger);
+  order: -1;
+}
+
+.el-message .el-message__closeBtn:hover {
+  color: var(--el-color-danger);
+  opacity: 0.8;
+}

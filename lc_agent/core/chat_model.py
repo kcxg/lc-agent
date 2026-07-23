@@ -31,33 +31,11 @@ class ChatOpenAIReasoning(ChatOpenAI):
 
     Also detects ``<think>...</think>`` tags in the content stream and moves
     the enclosed text to ``additional_kwargs["reasoning_content"]``.
-
-    Fixes the max_tokens / max_completion_tokens rename that ChatOpenAI applies
-    for the OpenAI API — non-OpenAI providers still expect ``max_tokens``.
     """
 
     _think_mode: ClassVar[contextvars.ContextVar[bool]] = contextvars.ContextVar(
         "ChatOpenAIReasoning__think_mode", default=False,
     )
-
-    @property
-    def _default_params(self) -> dict[str, Any]:
-        params = super()._default_params
-        if "max_completion_tokens" in params:
-            params["max_tokens"] = params.pop("max_completion_tokens")
-        return params
-
-    def _get_request_payload(
-        self,
-        input_: Any,
-        *,
-        stop: list[str] | None = None,
-        **kwargs: Any,
-    ) -> dict:
-        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        if "max_completion_tokens" in payload:
-            payload["max_tokens"] = payload.pop("max_completion_tokens")
-        return payload
 
     def _convert_chunk_to_generation_chunk(
         self,
