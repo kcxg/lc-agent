@@ -2,6 +2,7 @@
 name = "lc-agent-app"
 version = "0.4"
 description = "LangChain Agent framework with built-in Web UI"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
@@ -52,9 +53,9 @@ include = ["lc_agent/**", "README.md", "pyproject.toml", "LICENSE"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
-[tool.ruff]
-target-version = "py312"
-line-length = 120
+# [tool.ruff]
+# target-version = "py312"
+# line-length = 120
 
 
 [tool.hatch.build]

@@ -8,13 +8,17 @@ delta for chain-of-thought / thinking content. This subclass captures it into
 For models that embed reasoning inside ``<think>...</think>`` tags within the
 regular content stream (e.g. MiniMax-M3), those tags are detected, stripped,
 and the enclosed text is likewise moved to ``reasoning_content``.
+
+It also re-injects ``reasoning_content`` into outbound request payloads so
+providers that require it (DeepSeek V4 thinking mode) do not reject follow-up
+messages with HTTP 400.
 """
 
 
 import contextvars
 from typing import Any, ClassVar
 
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_openai import ChatOpenAI
 
@@ -36,6 +40,36 @@ class ChatOpenAIReasoning(ChatOpenAI):
     _think_mode: ClassVar[contextvars.ContextVar[bool]] = contextvars.ContextVar(
         "ChatOpenAIReasoning__think_mode", default=False,
     )
+
+    def _get_request_payload(
+        self,
+        input_: Any,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict:
+        messages = self._convert_input(input_).to_messages()
+
+        reasoning_by_assistant_idx: list[str | None] = []
+        for msg in messages:
+            if isinstance(msg, AIMessage):
+                reasoning_by_assistant_idx.append(
+                    msg.additional_kwargs.get("reasoning_content")
+                )
+
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+
+        if any(reasoning_by_assistant_idx) and "messages" in payload:
+            ai_counter = 0
+            for msg_dict in payload["messages"]:
+                if msg_dict.get("role") == "assistant":
+                    if (
+                        ai_counter < len(reasoning_by_assistant_idx)
+                        and reasoning_by_assistant_idx[ai_counter]
+                    ):
+                        msg_dict["reasoning_content"] = reasoning_by_assistant_idx[ai_counter]
+                    ai_counter += 1
+        return payload
 
     def _convert_chunk_to_generation_chunk(
         self,
