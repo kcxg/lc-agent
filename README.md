@@ -314,8 +314,8 @@ npm run test:code-agent
 可以，你可以搭配serena mcp全套来编程。但是这个因为是第三方mcp，对于edit文件 和 执行命令，lc-agent的前端界面没有精细化适配，例如文件变更diff、执行命令的流式打字机效果等，对serena没支持。
 
 方案B：
-开启lc-agent 内置赠送的工具组， 用户开启`file_read` `file_write` `command` 三个工具组，足以编程了。另外你还可以搭配 nbrag 或者codegraph mcp，使代码语义和符号检索更强大。
-lc-agent前端对编程改动和代码执行的渲染，达到了 traework codex-gui 的体验效果。
+开启lc-agent 内置赠送的工具组， 用户开启`file_read` `file_write` `command` 三个工具组，大约20个工具，足以编程了。另外你还可以搭配 nbrag 或者codegraph mcp，使代码语义和符号检索更强大。
+lc-agent前端对代码改动和代码执行的渲染，达到了 traework codex-gui 的体验效果。
 
 
 lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以作为 通用agent来使用，ai coding只是能力之一。
