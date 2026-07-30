@@ -285,6 +285,9 @@ npm run test:code-agent
 所以你可以配置mcp，市面上能联网的mcp有很多
 
 例如配置 Open Web Search MCP，你在docker里面启动mcp服务，然后配置到config.jsonc里面的mcp_servers，agent可以勾选启用这个mcp，这样`agent`就能联网查询新闻了，而且可以启用web-search这个skill，引导ai何时联网，怎么高效使用这个mcp的各个工具。
+
+除了 `openwebsearch` mcp另外推荐一个更好更稳定更适合agent联网的mcp，`anysearch`，每天免费1000次，我在联网搜索某些技术文档时候，实测比deepseek 豆包官网的联网搜索更强。
+
 ```jsonc
 {
     ...其他配置...
@@ -302,6 +305,21 @@ npm run test:code-agent
   }
 }
 ```
+
+## lc-agent 能不能作为aicoding 工具来使用？
+
+答：完全可以，而且编程效果和体验都很好。
+
+方案A:
+可以，你可以搭配serena mcp全套来编程。但是这个因为是第三方mcp，对于edit文件 和 执行命令，lc-agent的前端界面没有精细化适配，例如文件变更diff、执行命令的流式打字机效果等，对serena没支持。
+
+方案B：
+开启lc-agent 内置赠送的工具组， 用户开启`file_read` `file_write` `command` 三个工具组，足以编程了。另外你还可以搭配 nbrag 或者codegraph mcp，使代码语义和符号检索更强大。
+lc-agent前端对编程改动和代码执行的渲染，达到了 traework codex-gui 的体验效果。
+
+
+lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以作为 通用agent来使用，ai coding只是能力之一。
+
 
 ## License
 
