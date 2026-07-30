@@ -1,14 +1,14 @@
 # lc-agent
 
-> Visual Agent Runtime Control Plane built on LangChain / LangGraph.
+> Open-source AI Agent workbench & framework built on LangChain / LangGraph — visual, hot-swappable, fully extensible.
 >
-> 一个可视化、可热切换、可人在环路管控的 Agent 运行时控制平面。
+> 基于 LangChain / LangGraph 的 AI Agent 可视化工作台 & Python 框架，运行时热切换模型/工具/MCP/技能，无需重启。
 
 [![PyPI package](https://img.shields.io/badge/pypi-lc--agent--app-blue)](https://pypi.org/project/lc-agent-app/)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-`lc-agent` 既是可以直接使用的 Agent 工作台，也是可以被业务项目导入的 Python 框架。
+`lc-agent` 既是可以直接使用的 Agent 工作台，也是可以被用户被作为导入的 Python 框架，降低从0开发agent全套的繁琐。
 
 它把 **模型、思考参数、Tools、MCP、Skills、子 Agent、长期记忆、知识库入口、Human-in-the-top 控制** 放进一个统一的 Web UI 里，并支持运行时热切换配置，无需重启代码。
 
