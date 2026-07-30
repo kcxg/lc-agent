@@ -78,3 +78,103 @@ def toggle_tool_group(
         enabled = False
     engine._mcp_generation += 1
     return {"id": group_id, "enabled": enabled}
+
+
+@router.post("/tools/process/{pid}/kill")
+def kill_background_process(
+    pid: int,
+    user: User = Depends(get_current_user),
+):
+    """Kill a background process started by start_background_process tool."""
+    import os
+    import platform
+    import subprocess
+    from lc_agent.tools.system_tools.command_tools import _processes
+
+    entry = _processes.get(pid)
+    if entry is None:
+        return {"success": False, "error": f"Process {pid} is not tracked"}
+
+    if entry.proc.poll() is not None:
+        _processes.pop(pid, None)
+        return {"success": True, "message": f"Process {pid} already exited (code={entry.proc.returncode})"}
+
+    try:
+        if platform.system() == "Windows":
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F", "/T"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return {"success": False, "error": result.stderr.strip() or "taskkill failed"}
+        else:
+            import signal
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    except PermissionError:
+        return {"success": False, "error": "Permission denied"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    entry.append_stdout("\n[Process terminated by user]\n")
+
+    try:
+        entry.proc.wait(timeout=5)
+    except Exception:
+        pass
+    _processes.pop(pid, None)
+    return {"success": True, "message": f"Process {pid} terminated"}
+
+
+@router.get("/tools/process/{pid}/output")
+def get_process_output(
+    pid: int,
+    offset: int = 0,
+    user: User = Depends(get_current_user),
+):
+    """Get incremental output from a background process.
+
+    Returns new output lines since `offset`, plus current process status.
+    Frontend can poll this endpoint to keep the tool card updated.
+    """
+    from lc_agent.tools.system_tools.command_tools import _processes
+
+    entry = _processes.get(pid)
+    if entry is None:
+        return {"pid": pid, "status": "not_found", "output": "", "offset": offset}
+
+    is_running = entry.proc.poll() is None
+    text, new_offset = entry.get_output(offset)
+
+    status = "running" if is_running else f"exited:{entry.proc.returncode}"
+
+    return {
+        "pid": pid,
+        "status": status,
+        "output": text,
+        "offset": new_offset,
+    }
+
+
+@router.get("/tools/processes")
+def list_tracked_processes(
+    user: User = Depends(get_current_user),
+):
+    """List all background processes started by start_background_process."""
+    import time as _time
+    from lc_agent.tools.system_tools.command_tools import _processes, _reap_exited_processes
+
+    _reap_exited_processes()
+
+    items = []
+    for pid, entry in _processes.items():
+        is_running = entry.proc.poll() is None
+        items.append({
+            "pid": pid,
+            "command": entry.command,
+            "status": "running" if is_running else f"exited:{entry.proc.returncode}",
+            "elapsed_s": round(_time.time() - entry.start_time),
+        })
+    return {"processes": items}

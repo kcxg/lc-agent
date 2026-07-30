@@ -1,6 +1,11 @@
 <template>
   <aside class="right-panel">
     <div class="right-panel-fixed">
+      <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
+        <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '设置' }}</span>
+        <span class="collapse-arrow">{{ fixedCollapsed ? '▸' : '▾' }}</span>
+      </div>
+      <template v-if="!fixedCollapsed">
       <template v-if="!agentsStore.isCodeAgent">
         <div class="panel-section">
           <h4>模型</h4>
@@ -138,6 +143,7 @@
       <div v-if="chatStore.todos.length > 0" class="panel-section">
         <TodoList :todos="chatStore.todos" />
       </div>
+      </template>
     </div>
 
     <div class="right-panel-scroll">
@@ -150,6 +156,59 @@
       </div>
 
       <template v-if="!agentsStore.isChatAgent && !agentsStore.isCodeAgent">
+        <div class="panel-section processes-section">
+          <div class="section-header">
+            <h4>Agent 启动的后台进程</h4>
+            <span class="process-count" v-if="bgProcesses.length">{{ bgProcesses.length }}</span>
+            <button class="refresh-btn" type="button" :disabled="processFetching" @click="fetchProcesses">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ spinning: processFetching }">
+                <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
+              </svg>
+              刷新
+            </button>
+          </div>
+          <div v-if="bgProcesses.length === 0" class="empty-hint">无 Agent 启动的后台进程</div>
+          <div v-for="proc in bgProcesses" :key="proc.pid" class="process-item" :class="{ exited: !proc.status.startsWith('running') }" @click="openProcessDetail(proc)">
+            <div class="process-row">
+              <span class="process-pid">{{ proc.pid }}</span>
+              <span class="process-status-dot" :class="proc.status.startsWith('running') ? 'alive' : 'dead'"></span>
+              <span class="process-elapsed">{{ formatElapsed(proc.elapsed_s) }}</span>
+              <button
+                v-if="proc.status.startsWith('running')"
+                class="process-kill-btn"
+                @click.stop="killTrackedProcess(proc.pid)"
+                :disabled="killingPids[proc.pid]"
+              >终止</button>
+            </div>
+            <div class="process-cmd">{{ proc.command }}</div>
+          </div>
+        </div>
+
+        <teleport to="body">
+          <div v-if="processModalVisible" class="process-modal-backdrop" @click="processModalVisible = false">
+            <div class="process-modal" @click.stop>
+              <div class="process-modal-header">
+                <span class="process-modal-title">PID {{ processModalData.pid }}</span>
+                <div class="process-modal-actions">
+                  <button v-if="processModalData.status === 'running'" class="process-kill-btn" @click="killFromModal">终止</button>
+                  <button class="process-modal-refresh" @click="refreshProcessModal">刷新</button>
+                  <button class="process-modal-close" @click="processModalVisible = false">✕</button>
+                </div>
+              </div>
+              <div class="process-modal-cmd">
+                <pre>{{ processModalData.command }}</pre>
+              </div>
+              <div class="process-modal-meta">
+                <span>状态: {{ processModalData.status }}</span>
+                <span>运行: {{ formatElapsed(processModalData.elapsed_s) }}</span>
+              </div>
+              <div class="process-modal-output">
+                <div class="process-modal-output-content" v-html="renderedModalOutput"></div>
+              </div>
+            </div>
+          </div>
+        </teleport>
+
         <div class="panel-section">
           <h4>工具</h4>
           <ToolGroupPanel
@@ -300,19 +359,23 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useToolsStore } from '@/stores/tools'
-import { api } from '@/api/http'
+import { api, fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '@/composables/useMarkdownTheme'
+import { AnsiUp } from 'ansi_up'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
 import DetailModal from '@/components/panels/DetailModal.vue'
 import TodoList from '@/components/panels/TodoList.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 
+const ansiUp = new AnsiUp()
+
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
+const fixedCollapsed = ref(false)
 
 const presetLlmParams = computed(() => agentsStore.currentAgent?.llm_params ?? null)
 
@@ -345,6 +408,81 @@ onMounted(async () => {
     summEnabled.value = conf.enabled
     summModel.value = conf.default_model || ''
   } catch { /* ignore */ }
+  fetchProcesses()
+})
+
+interface TrackedProcess {
+  pid: number
+  command: string
+  status: string
+  elapsed_s: number
+}
+
+const bgProcesses = ref<TrackedProcess[]>([])
+const killingPids = ref<Record<number, boolean>>({})
+const processFetching = ref(false)
+
+async function fetchProcesses() {
+  processFetching.value = true
+  try {
+    const data = await fetchApi<{ processes: TrackedProcess[] }>('/tools/processes')
+    bgProcesses.value = data.processes
+  } catch { /* ignore */ }
+  processFetching.value = false
+}
+
+async function killTrackedProcess(pid: number) {
+  killingPids.value = { ...killingPids.value, [pid]: true }
+  try {
+    await fetchApi(`/tools/process/${pid}/kill`, { method: 'POST' })
+    await fetchProcesses()
+  } catch { /* ignore */ }
+  const { [pid]: _, ...rest } = killingPids.value
+  killingPids.value = rest
+}
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m${seconds % 60}s`
+  return `${Math.floor(seconds / 3600)}h${Math.floor((seconds % 3600) / 60)}m`
+}
+
+const processModalVisible = ref(false)
+const processModalData = ref<TrackedProcess>({ pid: 0, command: '', status: '', elapsed_s: 0 })
+const processModalOutput = ref('')
+
+async function openProcessDetail(proc: TrackedProcess) {
+  processModalData.value = proc
+  processModalOutput.value = '加载中...'
+  processModalVisible.value = true
+  await refreshProcessModal()
+}
+
+async function refreshProcessModal() {
+  const pid = processModalData.value.pid
+  try {
+    const data = await fetchApi<{ pid: number; status: string; output: string; offset: number }>(
+      `/tools/process/${pid}/output?offset=0`
+    )
+    processModalOutput.value = data.output || '(无输出)'
+    processModalData.value.status = data.status
+  } catch {
+    processModalOutput.value = '(获取输出失败)'
+  }
+}
+
+async function killFromModal() {
+  const pid = processModalData.value.pid
+  await killTrackedProcess(pid)
+  await refreshProcessModal()
+}
+
+const renderedModalOutput = computed(() => {
+  const raw = processModalOutput.value
+  if (!raw) return ''
+  return ansiUp.ansi_to_html(raw)
+    .replace(/\n/g, '<br>')
+    .replace(/ {2}/g, '&nbsp;&nbsp;')
 })
 
 async function updateSummarization(data: { enabled?: boolean; default_model?: string }) {
@@ -397,6 +535,35 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 .right-panel-fixed {
   flex-shrink: 0;
   padding: 16px 16px 0;
+}
+
+.panel-collapse-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  margin-bottom: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.panel-collapse-bar:hover {
+  background: var(--el-fill-color);
+}
+
+.collapse-label {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.collapse-arrow {
+  font-size: 10px;
+  color: var(--el-text-color-placeholder);
 }
 
 .right-panel-scroll {
@@ -655,6 +822,103 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   font-size: 12px;
 }
 
+.processes-section .process-count {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--el-color-primary-light-8);
+  color: var(--el-color-primary);
+  font-weight: 700;
+}
+
+.process-item {
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.process-item.exited {
+  opacity: 0.5;
+}
+
+.process-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.process-pid {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.process-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.process-status-dot.alive {
+  background: var(--el-color-success);
+  box-shadow: 0 0 4px var(--el-color-success);
+}
+
+.process-status-dot.dead {
+  background: var(--el-text-color-placeholder);
+}
+
+.process-elapsed {
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
+  margin-left: auto;
+}
+
+.process-kill-btn {
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid var(--el-color-danger-light-5);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--el-color-danger);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.process-kill-btn:hover {
+  background: var(--el-color-danger-light-9);
+}
+
+.process-kill-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.process-cmd {
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
+  margin-top: 2px;
+  font-family: 'JetBrains Mono', monospace;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.process-item {
+  cursor: pointer;
+}
+
+.process-item:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+
 .status-section code {
   font-size: 11px;
   color: var(--el-text-color-secondary);
@@ -802,5 +1066,132 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+</style>
+
+<style>
+.process-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--el-bg-color-page) 70%, transparent);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+.process-modal {
+  width: min(1300px, calc(100vw - 40px));
+  max-height: min(92vh, 960px);
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+}
+
+.process-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--el-border-color);
+  gap: 12px;
+}
+
+.process-modal-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.process-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.process-modal-refresh {
+  padding: 4px 10px;
+  font-size: 11px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+}
+
+.process-modal-refresh:hover {
+  border-color: var(--el-color-primary-light-5);
+  color: var(--el-color-primary);
+}
+
+.process-modal-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.process-modal-close:hover {
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
+}
+
+.process-modal-cmd {
+  padding: 8px 16px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  max-height: 24vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.process-modal-cmd pre {
+  margin: 0;
+  font-size: 14px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: #79c0ff;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.7;
+}
+
+.process-modal-meta {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.process-modal-output {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px;
+  background: #0d1117;
+}
+
+.process-modal-output-content {
+  font-size: 15px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: #c9d1d9;
+  word-break: break-word;
+  line-height: 1.8;
 }
 </style>

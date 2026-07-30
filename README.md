@@ -64,6 +64,12 @@
 
 ![移动端界面](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/phone01.png)
 
+![ai coding 执行用户代码，流式打字机效果](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/ai_coding_run.png)
+
+![ai coding 编辑用户代码，类似cursor codex的代码变动 diff 红绿渲染](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/aicoding_edit.png)
+
+![子 agent 架构图](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/subagent.png)
+
 ## 快速开始
 
 ### 安装

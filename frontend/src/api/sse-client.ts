@@ -39,6 +39,8 @@ export interface SseMessage {
   is_resume?: boolean
   is_subagent?: boolean
   is_error?: boolean
+  pid?: number
+  command?: string
   // error fields
   error_code?: string
   detail?: string

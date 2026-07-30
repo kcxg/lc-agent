@@ -100,11 +100,33 @@ export interface ChatMessage {
   httpTracesCount?: number
 }
 
+export interface FileDiffData {
+  file: string
+  start_line: number
+  context_before: string[]
+  removed: string[]
+  added: string[]
+  context_after: string[]
+}
+
+export interface FilePreviewData {
+  file: string
+  mode: string
+  preview_lines: string[]
+  total_lines: number
+  start_line?: number
+}
+
 export interface ToolCall {
   name: string
   runId?: string
   args?: Record<string, any>
   result?: string
+  streamingOutput?: string
+  pid?: number
+  bgProcessRunning?: boolean
+  fileDiff?: FileDiffData
+  filePreview?: FilePreviewData
   status: 'pending' | 'running' | 'done' | 'error' | 'cancelled' | 'interrupted'
   startTime?: number
   duration?: number
@@ -696,7 +718,7 @@ export const useChatStore = defineStore('chat', () => {
         }
         if (!last.toolCalls) last.toolCalls = []
 
-        const toolCallId = msg.tool_call_id
+        const toolCallId = msg.tool_call_id || msg.run_id
         if (!toolCallId) {
           console.warn('[Chat] Ignored tool_call without tool_call_id', msg)
           return
@@ -738,9 +760,78 @@ export const useChatStore = defineStore('chat', () => {
         const tc = last.toolCalls.find(t => t.runId === toolCallId)
         if (tc) {
           tc.result = msg.result
-          tc.status = 'done'
+          tc.status = (msg.status === 'error' || msg.is_error) ? 'error' : 'done'
           tc.duration = tc.startTime ? Date.now() - tc.startTime : undefined
           tc.resultLength = msg.result?.length || 0
+          const isBgRunning = tc.name === 'command__start_background_process'
+            && tc.pid
+            && msg.result?.includes('Status: running')
+          if (isBgRunning) {
+            tc.bgProcessRunning = true
+          } else {
+            delete tc.streamingOutput
+          }
+        }
+      }
+    })
+
+    client.on('tool_output_chunk', (msg: SseMessage) => {
+      const last = state.messages.value[state.messages.value.length - 1]
+      if (last?.toolCalls) {
+        const toolCallId = msg.tool_call_id
+        if (!toolCallId) return
+        const tc = last.toolCalls.find(t => t.runId === toolCallId)
+        if (tc && tc.status === 'running') {
+          tc.streamingOutput = (tc.streamingOutput || '') + (msg.content || '')
+        }
+      }
+    })
+
+    client.on('tool_process_info', (msg: SseMessage) => {
+      const last = state.messages.value[state.messages.value.length - 1]
+      if (last?.toolCalls) {
+        const toolCallId = msg.tool_call_id
+        if (!toolCallId) return
+        const tc = last.toolCalls.find(t => t.runId === toolCallId)
+        if (tc) {
+          tc.pid = msg.pid
+        }
+      }
+    })
+
+    client.on('tool_file_diff', (msg: SseMessage) => {
+      const last = state.messages.value[state.messages.value.length - 1]
+      if (last?.toolCalls) {
+        const toolCallId = msg.tool_call_id
+        if (!toolCallId) return
+        const tc = last.toolCalls.find(t => t.runId === toolCallId)
+        if (tc) {
+          tc.fileDiff = {
+            file: (msg as any).file || '',
+            start_line: (msg as any).start_line || 1,
+            context_before: (msg as any).context_before || [],
+            removed: (msg as any).removed || [],
+            added: (msg as any).added || [],
+            context_after: (msg as any).context_after || [],
+          }
+        }
+      }
+    })
+
+    client.on('tool_file_preview', (msg: SseMessage) => {
+      const last = state.messages.value[state.messages.value.length - 1]
+      if (last?.toolCalls) {
+        const toolCallId = msg.tool_call_id
+        if (!toolCallId) return
+        const tc = last.toolCalls.find(t => t.runId === toolCallId)
+        if (tc) {
+          tc.filePreview = {
+            file: (msg as any).file || '',
+            mode: (msg as any).mode || 'rewrite',
+            preview_lines: (msg as any).preview_lines || [],
+            total_lines: (msg as any).total_lines || 0,
+            start_line: (msg as any).start_line || 1,
+          }
         }
       }
     })

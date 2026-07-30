@@ -5,6 +5,9 @@ description: >-
   编写、修改、运行这两个项目代码时必须遵循此 Skill。
 ---
 
+# 禁止行为
+不要在代码里面写 `from __future__ import annotations` 
+
 # lc-agent 开发指南
 
 ## 1. 项目关系

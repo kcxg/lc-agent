@@ -167,6 +167,7 @@ def convert_stream_event(
                 query = str(tool_input)
             results.append(("tool_call", {
                 "name": display_name,
+                "tool_call_id": sa_tc_id,
                 "run_id": sa_tc_id,
                 "args": display_args,
                 "is_subagent": True,
@@ -234,6 +235,82 @@ def convert_stream_event(
                 "name": tool_name,
                 "tool_call_id": _extract_tools_task_id(checkpoint_ns) or event.get("run_id", ""),
                 "result": result_str,
+            }))
+
+    elif kind == "on_tool_error":
+        tool_name = event.get("name", "")
+        tool_call_id = (
+            _extract_tools_task_id(checkpoint_ns)
+            or event.get("data", {}).get("tool_call_id")
+            or event.get("run_id", "")
+        )
+        tool_input = event.get("data", {}).get("input", {})
+        error = event.get("data", {}).get("error", "")
+        error_str = str(error) if error else "Tool execution error"
+        if _is_subagent_tool_end(tool_name, tool_input, subagent_tool_names, active_subagent_tool_call_ids, tool_call_id):
+            sa_tc_id_err = (
+                _extract_tools_task_id(checkpoint_ns)
+                or event.get("run_id", "")
+            )
+            results.append(("subagent_done", {
+                "tool_call_id": sa_tc_id_err,
+                "result_preview": error_str[:150],
+                "status": "error",
+                "is_error": True,
+            }))
+        elif is_in_subagent:
+            results.append(("subagent_tool_result", {
+                "tool_call_id": sa_tool_call_id,
+                "name": tool_name,
+                "result": error_str,
+                "status": "error",
+                "is_error": True,
+            }))
+        else:
+            results.append(("tool_result", {
+                "name": tool_name,
+                "tool_call_id": tool_call_id,
+                "result": error_str,
+                "status": "error",
+                "is_error": True,
+            }))
+
+    elif kind == "on_custom_event":
+        custom_name = event.get("name", "")
+        data = event.get("data", {})
+        tool_call_id = _extract_tools_task_id(checkpoint_ns) or event.get("run_id", "")
+
+        if custom_name == "command_output":
+            content = data.get("content", "")
+            if content:
+                results.append(("tool_output_chunk", {
+                    "tool_call_id": tool_call_id,
+                    "content": content,
+                }))
+        elif custom_name == "command_process_info":
+            results.append(("tool_process_info", {
+                "tool_call_id": tool_call_id,
+                "pid": data.get("pid"),
+                "command": data.get("command", ""),
+            }))
+        elif custom_name == "file_edit_diff":
+            results.append(("tool_file_diff", {
+                "tool_call_id": tool_call_id,
+                "file": data.get("file", ""),
+                "start_line": data.get("start_line", 1),
+                "context_before": data.get("context_before", []),
+                "removed": data.get("removed", []),
+                "added": data.get("added", []),
+                "context_after": data.get("context_after", []),
+            }))
+        elif custom_name == "file_write_preview":
+            results.append(("tool_file_preview", {
+                "tool_call_id": tool_call_id,
+                "file": data.get("file", ""),
+                "mode": data.get("mode", "rewrite"),
+                "preview_lines": data.get("preview_lines", []),
+                "total_lines": data.get("total_lines", 0),
+                "start_line": data.get("start_line", 1),
             }))
 
     return results
@@ -379,6 +456,40 @@ def accumulate_display_state(
                 tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
                 tool_call["resultLength"] = len(result_str)
         # else: sub-agent's internal tool result (is_in_subagent=True, not a subagent tool) — skip
+
+    elif kind == "on_tool_error":
+        tool_name = event.get("name", "")
+        tool_input = event.get("data", {}).get("input", {})
+        tool_call_id = (
+            _extract_tools_task_id(checkpoint_ns)
+            or event.get("data", {}).get("tool_call_id")
+            or event.get("run_id", "")
+        )
+        error = event.get("data", {}).get("error", "")
+        error_str = str(error) if error else "Tool execution error"
+        if _is_subagent_tool_end(tool_name, tool_input, subagent_tool_names, active_subagent_tool_call_ids, tool_call_id):
+            sa_tc_id = (
+                _extract_tools_task_id(checkpoint_ns)
+                or event.get("run_id", "")
+            )
+            for tc in tool_calls:
+                if tc.get("runId") == sa_tc_id and tc.get("is_subagent"):
+                    start_time = tc.get("startTime")
+                    tc["status"] = "error"
+                    tc["result"] = error_str
+                    tc["duration"] = int(time.time() * 1000) - start_time if start_time else None
+                    tc["resultLength"] = len(error_str)
+                    break
+        elif not is_in_subagent:
+            tool_call = next(
+                (tc for tc in tool_calls if tc.get("runId") == tool_call_id), None,
+            )
+            if tool_call:
+                start_time = tool_call.get("startTime")
+                tool_call["result"] = error_str
+                tool_call["status"] = "error"
+                tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
+                tool_call["resultLength"] = len(error_str)
 
     return in_thinking
 

@@ -10,12 +10,13 @@
 
     <div class="allowlist">
       <el-tag
-        v-for="tool in allowlist"
+        v-for="tool in allowlist.slice(0, 30)"
         :key="tool"
         class="tool-tag"
       >
         {{ tool }}
       </el-tag>
+      <el-tag v-if="allowlist.length > 30" type="info" class="tool-tag">+{{ allowlist.length - 30 }} 更多</el-tag>
       <el-tag v-if="allowlist.length === 0" type="info">（空 — 所有工具需要审批）</el-tag>
     </div>
 
