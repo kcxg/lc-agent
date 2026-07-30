@@ -16,15 +16,15 @@
 
 ## 为什么是 lc-agent
 
-很多 Agent 项目只解决其中一部分问题：有的只做聊天 UI，有的只做 MCP，有的只做工具调用，有的只做 LangGraph 编排。
+大部分 LangChain / LangGraph 项目需要写大量胶水代码来把模型调用、Tools、MCP、子 Agent 串起来。切换模型或调整工具集往往意味着改代码、重启服务。
 
-`lc-agent` 的定位不是普通聊天网页，而是 **Agent Runtime Control Plane**：
+`lc-agent` 把这些能力整合进一个开箱即用的 Web 工作台：
 
-- **运行时热切换**：模型、思考等级、工具组、MCP、Skills、Agent 默认态都可以在前端切换，无需重启服务
-- **统一能力编排**：把 Tools、MCP、Skills、子 Agent、代码型 Graph 接入同一个执行入口
-- **Human-in-the-top**：人站在最高控制层，可以审批、接管、切换配置、限制工具权限
-- **可观测执行过程**：thinking、tool call、HTTP trace、token usage、子 Agent 执行过程都能看到
-- **框架与产品一体**：既能开箱当工作台用，也能 `import lc_agent` 嵌入自己的业务项目
+- **运行时热切换**：模型、思考等级、工具组、MCP、Skills、Agent 预设都可以在前端切换，无需重启服务
+- **统一能力编排**：Tools、MCP、Skills、子 Agent、代码型 Graph 接入同一个执行入口
+- **透明可观测**：thinking、tool call、diff 预览、HTTP trace、token usage、子 Agent 执行过程全部可视化
+- **权限与审批**：工具白名单、敏感操作人工确认，人始终拥有最高控制权
+- **框架与产品一体**：既能直接当工作台用，也能 `import lc_agent` 嵌入业务项目
 
 ## 核心能力
 
@@ -231,6 +231,12 @@ lc-agent 已经支持登录认证、用户隔离、管理员能力。
 - 用户自己可控的服务器或工作机
 
 如果你给 Agent 接了文件系统、命令执行或自定义 MCP，它运行的仍然是**部署机器的权限边界**。
+
+当然你也可以部署到云端。如果仅用于聊天和信息检索，包括联网和rag知识库检索（不开启文件/命令工具组），lc-agent 完全可以多人共用一个实例。
+
+但若开启了 `file_write`、`command` 等工具组，请确保**单人独占**——它们直接操作部署机器的文件系统，多人同时操作会相互冲突。这和 Claude Code / Cursor / Codex 的道理一样：涉及本机文件读写的工具需要每人各自一份环境。
+
+多用户 + 文件操作的隔离（如虚拟容器沙箱）技术上可行，但成本极高，例如kimi minimax官网的agent功能单次agent任务收费极其高昂，这种共用一个web服务但是通过虚拟容器隔离不同用户agent操作的技术不在 lc-agent 当前的考虑范围内。
 
 ## 开发
 
