@@ -26,7 +26,7 @@
 - **权限与审批**：工具白名单、敏感操作人工确认，人始终拥有最高控制权
 - **框架与产品一体**：既能直接当工作台用，也能 `import lc_agent` 嵌入业务项目
 
-## 核心能力
+## lc-aegnt核心能力
 
 | 能力 | 说明 |
 | --- | --- |
@@ -43,6 +43,10 @@
 | Knowledge Base | 不内置强绑定 RAG，可通过 MCP 接入 [nbrag](https://github.com/ydf0509/nbrag) 等 agentic search 知识库 |
 | Observability | HTTP trace、token 面板、工具调用卡片、子 Agent 过程可视化 |
 | Auth & Permission | 支持登录认证、用户隔离、管理员能力、审批白名单 |
+| 联网、rag知识库 | 同时通过接入对应的mcp来给llm提供能力，例如anysearch 和 nbrag |
+| ai coding | 内置工具组和第三方mcp例如serena mcp都能使lc-aegnt 实现ai coding |
+| Context Management | 内置 SummarizationMiddleware，长对话自动压缩摘要，避免上下文溢出 |
+| Streaming & Diff | 命令执行实时流式输出、文件编辑 diff 预览、写入预览，过程全程可视 |
 
 ## 截图
 
