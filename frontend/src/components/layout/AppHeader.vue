@@ -12,6 +12,7 @@
       <span class="logo">⚡ {{ appName }}</span>
     </div>
     <div class="header-center">
+      <div class="agent-select-wrapper">
       <el-select
         class="agent-select"
         :model-value="agentsStore.currentAgentId"
@@ -32,12 +33,15 @@
             <div class="agent-option-content">
               <span class="agent-option-name">{{ agent.display_name || agent.name }}</span>
             </div>
-            <span :class="['source-tag', `source-tag--${agent.source || 'user'}`]">
+            <span v-if="agent.project_mode" class="source-tag source-tag--project">项目</span>
+            <span v-else :class="['source-tag', `source-tag--${agent.source || 'user'}`]">
               {{ agent.source === 'builtin' ? '内置' : agent.source === 'code' ? '代码' : '自建' }}
             </span>
           </div>
         </el-option>
       </el-select>
+      <span v-if="agentsStore.currentAgent?.project_mode" class="selected-project-badge">项目</span>
+      </div>
       <div class="header-actions desktop-only">
         <button class="header-btn btn-edit" @click="$emit('editAgent')" :disabled="agentsStore.isBuiltin">编辑</button>
         <button class="header-btn btn-new-agent" @click="$emit('newAgent')">+ 新Agent</button>
@@ -208,6 +212,30 @@ defineEmits<{
   gap: 8px;
   min-width: 0;
   flex-wrap: nowrap;
+}
+
+.agent-select-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.selected-project-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(6, 182, 212, 0.1));
+  color: #0284c7;
+  border: 1px solid rgba(2, 132, 199, 0.2);
+  white-space: nowrap;
+}
+
+:global(html.dark) .selected-project-badge {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.25);
 }
 
 .agent-select {
@@ -381,6 +409,12 @@ defineEmits<{
   border: 1px solid rgba(217, 119, 6, 0.2);
 }
 
+.source-tag--project {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(6, 182, 212, 0.1));
+  color: #0284c7;
+  border: 1px solid rgba(2, 132, 199, 0.2);
+}
+
 :global(html.dark) .source-tag--builtin {
   background: rgba(124, 58, 237, 0.15);
   color: #a78bfa;
@@ -397,6 +431,12 @@ defineEmits<{
   background: rgba(245, 158, 11, 0.15);
   color: #fbbf24;
   border-color: rgba(251, 191, 36, 0.25);
+}
+
+:global(html.dark) .source-tag--project {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.25);
 }
 
 .header-btn {

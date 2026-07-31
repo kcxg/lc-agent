@@ -39,7 +39,10 @@ export const api = {
   refreshMcpServers: () => fetchApi<any[]>('/mcp/refresh', { method: 'POST' }),
   refreshMcpServer: (name: string) => fetchApi<any>(`/mcp/${name}/refresh`, { method: 'POST' }),
   toggleMcpServer: (name: string) => fetchApi<{ name: string; enabled: boolean }>(`/mcp/${name}/toggle`, { method: 'POST' }),
-  getSkills: () => fetchApi<any[]>('/skills'),
+  getSkills: (projectRoot?: string) => {
+    const qs = projectRoot ? `?project_root=${encodeURIComponent(projectRoot)}` : ''
+    return fetchApi<any[]>(`/skills${qs}`)
+  },
   getSkillDetail: (name: string) => fetchApi<any>(`/skills/${name}`),
   toggleSkill: (name: string) => fetchApi<{ name: string; enabled: boolean }>(`/skills/${name}/toggle`, { method: 'POST' }),
 

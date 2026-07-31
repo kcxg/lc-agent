@@ -76,4 +76,4 @@ class AppConfig(BaseModel):
     session: dict = Field(default_factory=lambda: {"db_path": ""})
     ui: dict = Field(default_factory=dict)
     skills: list[str] = Field(default_factory=lambda: ["./skills"])
-    mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
+    mcpServers: dict[str, McpServerConfig] = Field(default_factory=dict)

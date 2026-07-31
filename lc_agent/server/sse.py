@@ -329,6 +329,21 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             in_thinking = False
             last_event_time = time.time()
             active_subagent_tool_call_ids: set[str] = set()
+            # Pre-warm project context cache so the pre-build below can use async git snapshot.
+            try:
+                _pre_preset = engine._resolve_preset(preset_id)
+                if _pre_preset.project_mode and _pre_preset.project_root:
+                    import asyncio as _aio
+                    from pathlib import Path as _PP
+                    from lc_agent.core.engine import _build_project_context_text
+                    _pre_root = str(_PP(_pre_preset.project_root).expanduser().resolve())
+                    if _pre_root not in engine._project_ctx_text_cache:
+                        engine._project_ctx_text_cache[_pre_root] = await _aio.to_thread(
+                            _build_project_context_text, _pre_root
+                        )
+            except Exception as _e:
+                logger.warning("Failed to pre-warm project context cache: %s", _e)
+
             # Ensure the agent is built (and subagent tools are cached) before streaming
             try:
                 engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
@@ -541,6 +556,18 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     _cancel_flags[thread_id] = False
     user = await _authenticate_sse(request)
 
+    # Restore project context so tool path/cwd constraints are active during resume.
+    try:
+        _resume_preset = engine._resolve_preset(preset_id)
+        _resume_root = _resume_preset.project_root if _resume_preset.project_mode else None
+        if _resume_root:
+            from pathlib import Path as _RP
+            _resume_root = str(_RP(_resume_root).expanduser().resolve())
+        from lc_agent.tools.system_tools._config import set_active_project
+        set_active_project(_resume_root, _resume_preset.project_extra_dirs if _resume_preset.project_mode else None)
+    except Exception:
+        pass  # Non-fatal; resume proceeds without project context if preset resolution fails
+
     resume_value = req.command.get("resume", {}) if req.command else {}
 
     async def event_stream():
@@ -556,6 +583,20 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
 
             existing_tool_calls, existing_trace_count = await persistence.load_resume_context(_db_url, thread_id)
             tool_calls: list[dict[str, Any]] = list(existing_tool_calls)
+            # Pre-warm project context cache before pre-build
+            try:
+                _rp = engine._resolve_preset(preset_id)
+                if _rp.project_mode and _rp.project_root:
+                    import asyncio as _aio
+                    from pathlib import Path as _PP2
+                    from lc_agent.core.engine import _build_project_context_text
+                    _rroot = str(_PP2(_rp.project_root).expanduser().resolve())
+                    if _rroot not in engine._project_ctx_text_cache:
+                        engine._project_ctx_text_cache[_rroot] = await _aio.to_thread(
+                            _build_project_context_text, _rroot
+                        )
+            except Exception as _e:
+                logger.warning("Failed to pre-warm project context cache (resume): %s", _e)
             # Ensure the agent is built (and subagent tools are cached) before streaming
             try:
                 engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)

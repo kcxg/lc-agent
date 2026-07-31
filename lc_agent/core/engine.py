@@ -7,6 +7,8 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
 from langchain.agents.middleware.todo import WRITE_TODOS_SYSTEM_PROMPT, WRITE_TODOS_TOOL_DESCRIPTION
+from langchain_agentskills import SkillMiddleware
+
 try:
     from langchain.agents.middleware.types import AgentMiddleware as _AgentMiddlewareBase
     from langchain_core.messages import SystemMessage
@@ -81,6 +83,71 @@ _LOAD_SKILL_DESCRIPTION = (
 )
 
 
+def _build_skills_prompt(skills: list) -> str:
+    """Build the JSON-format skills system-prompt block. Returns empty string when skills list is empty."""
+    if not skills:
+        return ""
+    import json as _json
+    skill_entries = [
+        {"skill_name": s.name, "description": s.description.splitlines()[0]}
+        for s in skills
+    ]
+    lines = [
+        "## Available Skills",
+        "",
+        "The descriptions below are **triggers** — they tell you WHEN a skill applies.",
+        "The actual step-by-step instructions, required tools, and constraints are INSIDE the skill.",
+        "",
+        "**MANDATORY RULE**: When the user's request matches a skill's description,",
+        "you MUST call `load_skill(skill_name=\"<skill_name>\")` FIRST to retrieve",
+        "the full instructions, then follow them exactly.",
+        "Do NOT skip this step and proceed with your default approach.",
+        "",
+        "```json",
+        _json.dumps(skill_entries, ensure_ascii=False, indent=2),
+        "```",
+        "",
+        "After loading a skill, you may also call `read_skill_resource` to fetch",
+        "its reference files or `run_skill_script` to execute its scripts.",
+    ]
+    return "\n".join(lines)
+
+
+class _LcAgentSkillMiddleware(SkillMiddleware):
+    """SkillMiddleware with per-preset allowed_skills filtering.
+
+    Wraps the shared loader with ``_AllowedSkillsWrapper`` so only the
+    permitted skills for this preset appear in the system prompt and can
+    be loaded by the agent.  Also applies the lc-agent JSON prompt format
+    and the stricter ``load_skill`` tool description.
+    """
+
+    def __init__(
+        self,
+        loader: Any,
+        *,
+        allowed_skills: list[str] | None = None,
+    ) -> None:
+        from lc_agent.skills.filtered_loader import _AllowedSkillsWrapper
+        effective_loader = (
+            _AllowedSkillsWrapper(loader, set(allowed_skills))
+            if allowed_skills is not None
+            else loader
+        )
+        super().__init__(loader=effective_loader, prompt_builder=_build_skills_prompt)
+        self.tools = [
+            t.model_copy(update={"description": _LOAD_SKILL_DESCRIPTION})
+            if t.name == "load_skill"
+            else t
+            for t in self.tools
+        ]
+
+    @property
+    def has_visible_skills(self) -> bool:
+        """True when at least one skill is visible to this preset."""
+        return bool(self._skills_prompt and self._skills_prompt.strip())
+
+
 class _SystemBlockMiddleware(_AgentMiddlewareBase):  # type: ignore[misc]
     """Injects a text block as a separate system message content block."""
 
@@ -112,6 +179,106 @@ class _SystemBlockMiddleware(_AgentMiddlewareBase):  # type: ignore[misc]
 
 # Keep old name as alias for backwards compatibility
 _SkillsPromptMiddleware = _SystemBlockMiddleware
+
+
+def _build_project_context_text(project_root: str) -> str:
+    """Build a project context block with git snapshot and OS info.
+
+    Runs git commands synchronously (called once at agent build time).
+    """
+    import os
+    import platform
+    import subprocess
+
+    os_name = platform.system()
+    # Mirror run_command's shell selection logic for consistency:
+    # Windows defaults to powershell; Linux/macOS reads $SHELL.
+    # Check config.jsonc's system_tools.command.default_shell first.
+    try:
+        from lc_agent.tools.system_tools._config import get_command_config
+        _cmd_cfg = get_command_config()
+        _configured_shell = _cmd_cfg.get("default_shell", "")
+    except Exception:
+        _configured_shell = ""
+    if _configured_shell:
+        shell = _configured_shell.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+    elif os_name == "Windows":
+        shell = "powershell"
+    else:
+        shell = os.environ.get("SHELL", "bash").rsplit("/", 1)[-1]
+    # Also report platform version
+    try:
+        import platform as _pl
+        os_version = _pl.version() if os_name == "Linux" else _pl.release()
+        os_info = f"{os_name} {os_version} ({shell})"
+    except Exception:
+        os_info = f"{os_name} ({shell})"
+
+    def _git(cmd: list[str]) -> str:
+        try:
+            r = subprocess.run(
+                cmd, cwd=project_root, capture_output=True, text=True, timeout=5
+            )
+            return r.stdout.strip()
+        except Exception:
+            return ""
+
+    is_git = _git(["git", "rev-parse", "--git-dir"])
+    if is_git:
+        branch = _git(["git", "branch", "--show-current"]) or "(detached HEAD)"
+        last_commit = _git(["git", "log", "-1", "--oneline"]) or "(no commits)"
+        status_out = _git(["git", "status", "--short"])
+        git_section = (
+            f"**Branch**: {branch}\n"
+            f"**Last Commit**: {last_commit}\n"
+            f"**Git Status** (snapshot at session start):\n"
+            f"```\n{status_out or '(clean)'}\n```\n\n"
+            f"> Git status is a snapshot. Run `run_command` to refresh if needed."
+        )
+    else:
+        git_section = "**Git Status**: Not a git repository"
+
+    return (
+        "## Project Context\n\n"
+        f"**Root**: {project_root}\n"
+        f"**OS**: {os_info}\n"
+        f"{git_section}"
+    )
+
+
+class _RuntimeContextMiddleware(_AgentMiddlewareBase):  # type: ignore[misc]
+    """Appends the current date as the final system-message content block."""
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return "RuntimeContextMiddleware"
+
+    @staticmethod
+    def _runtime_context_text() -> str:
+        import datetime
+
+        now = datetime.datetime.now().astimezone()
+        offset = now.strftime("%z")
+        tz_display = f"UTC{offset[:3]}:{offset[3:]}" if offset else now.strftime("%Z") or "UTC"
+        return (
+            "<runtime_context>\n"
+            f"Current date: {now.strftime('%Y-%m-%d')} ({tz_display}).\n"
+            "</runtime_context>"
+        )
+
+    def _patched_system(self, existing: Any) -> Any:
+        block = {"type": "text", "text": f"\n\n{self._runtime_context_text()}"}
+        return SystemMessage(content_blocks=[*(existing.content_blocks if existing is not None else []), block])  # type: ignore[call-arg]
+
+    def wrap_model_call(self, request: Any, handler: Any) -> Any:
+        return handler(request.override(system_message=self._patched_system(request.system_message)))
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        return await handler(request.override(system_message=self._patched_system(request.system_message)))
+
+
+_RUNTIME_CONTEXT_MIDDLEWARE = _RuntimeContextMiddleware()
+
 
 # --------------------------------------------------------------------------- #
 # Subagent prompts
@@ -234,6 +401,9 @@ class AgentEngine:
         self._agent_mcp_gen: dict[str, int] = {}
         self._mcp_generation: int = 0
         self.recursion_limit: int = config.get("agent", {}).get("recursion_limit", 100)
+        # Cache for project git/OS context text, keyed by resolved project_root.
+        # Populated asynchronously in chat_stream; cleared on agent cache invalidation.
+        self._project_ctx_text_cache: dict[str, str] = {}
 
     def _memory_enabled(self) -> bool:
         memory_conf = self.config.get("memory", {})
@@ -533,55 +703,33 @@ class AgentEngine:
             system_prompt = f"{system_prompt}\n\n{SUBAGENT_DELEGATION_PROMPT}"
         tools = self.tool_registry.get_filtered_tools(preset.allowed_tool_groups)
 
+        # Set project skills overlay (only top-level; subagents inherit parent's overlay)
+        # project_mode is the master switch: without it, project_root is ignored entirely.
+        # Normalize to resolved path so it matches the cache key from chat_stream/chat.
+        _effective_project_root: str | None = None
+        if preset.project_mode and preset.project_root:
+            from pathlib import Path as _PRoot
+            _effective_project_root = str(_PRoot(preset.project_root).expanduser().resolve())
+        if _depth == 0 and hasattr(self, '_skills_toolkit') and self._skills_toolkit:
+            loader = getattr(self._skills_toolkit, '_resolved_loader', None)
+            if loader and hasattr(loader, 'set_project_overlay'):
+                if _effective_project_root:
+                    from pathlib import Path as _Path
+                    project_skills_dir = str(_Path(_effective_project_root) / ".agents" / "skills")
+                    loader.set_project_overlay(project_skills_dir)
+                else:
+                    loader.set_project_overlay(None)
+
         _memory_middleware: _SystemBlockMiddleware | None = None
-        _skills_middleware: _SystemBlockMiddleware | None = None
-        if hasattr(self, '_skills_toolkit') and self._skills_toolkit:
+        _skills_middleware: _LcAgentSkillMiddleware | None = None
+        if _HAS_MIDDLEWARE_BASE and hasattr(self, '_skills_toolkit') and self._skills_toolkit:
             allowed = preset.allowed_skills
             if allowed is None or allowed:
-                skill_tools = []
-                for _t in self._skills_toolkit.get_tools():
-                    if _t.name == "list_skills":
-                        continue
-                    if _t.name == "load_skill":
-                        try:
-                            _t = _t.model_copy(update={"description": _LOAD_SKILL_DESCRIPTION})
-                        except Exception:
-                            pass
-                    skill_tools.append(_t)
-                tools = tools + skill_tools
                 loader = self._skills_toolkit._resolved_loader
                 if loader:
-                    all_skills = loader.list_skills()
-                    if allowed is not None:
-                        all_skills = [s for s in all_skills if s.name in allowed]
-                    if all_skills and _HAS_MIDDLEWARE_BASE:
-                        import json as _json
-                        skill_entries = [
-                            {
-                                "skill_name": s.name,
-                                "description": s.description.splitlines()[0],
-                            }
-                            for s in all_skills
-                        ]
-                        lines = [
-                            "## Available Skills",
-                            "",
-                            "The descriptions below are **triggers** — they tell you WHEN a skill applies.",
-                            "The actual step-by-step instructions, required tools, and constraints are INSIDE the skill.",
-                            "",
-                            "**MANDATORY RULE**: When the user's request matches a skill's description,",
-                            "you MUST call `load_skill(skill_name=\"<skill_name>\")` FIRST to retrieve",
-                            "the full instructions, then follow them exactly.",
-                            "Do NOT skip this step and proceed with your default approach.",
-                            "",
-                            "```json",
-                            _json.dumps(skill_entries, ensure_ascii=False, indent=2),
-                            "```",
-                            "",
-                            "After loading a skill, you may also call `read_skill_resource` to fetch",
-                            "its reference files or `run_skill_script` to execute its scripts.",
-                        ]
-                        _skills_middleware = _SystemBlockMiddleware("\n".join(lines), "SkillsPromptMiddleware")
+                    _candidate = _LcAgentSkillMiddleware(loader, allowed_skills=allowed)
+                    if _candidate.has_visible_skills:
+                        _skills_middleware = _candidate
 
         if hasattr(self, '_mcp_manager') and self._mcp_manager:
             mcp_tools = self._mcp_manager.get_filtered_langchain_tools(preset.allowed_mcp_servers)
@@ -627,6 +775,27 @@ class AgentEngine:
             middleware.append(_SystemBlockMiddleware(
                 SUBAGENT_DELEGATION_PROMPT, "SubagentDelegationMiddleware", prepend=True
             ))
+
+        # Project folder mode (all controlled by project_mode master switch)
+        if _depth == 0 and _effective_project_root and _HAS_MIDDLEWARE_BASE:
+            # 1. AGENTS.md rules injection
+            _agents_md = self._read_project_agents_md(_effective_project_root)
+            if _agents_md:
+                middleware.append(_SystemBlockMiddleware(
+                    f"## Project Rules (AGENTS.md)\n\n{_agents_md}",
+                    "ProjectAgentsMdMiddleware",
+                ))
+            # 2. Git status + OS context snapshot injection
+            # Use cached text pre-computed async in chat_stream; fall back to sync if missing.
+            _ctx_text = self._project_ctx_text_cache.get(_effective_project_root) or _build_project_context_text(_effective_project_root)
+            middleware.append(_SystemBlockMiddleware(_ctx_text, "ProjectContextMiddleware"))
+            # 3. lc-agent tool usage guidelines (project mode always has file tools via UI validation)
+            try:
+                from lc_agent.prompts.lc_agent_ai_coding_prompts import TOOL_USAGE_PROMPT
+                middleware.append(_SystemBlockMiddleware(TOOL_USAGE_PROMPT, "ToolUsageGuidelinesMiddleware"))
+            except ImportError:
+                pass
+
         if _memory_middleware is not None:
             middleware.append(_memory_middleware)
         if _skills_middleware is not None:
@@ -642,16 +811,22 @@ class AgentEngine:
                 tool_description=TODO_TOOL_DESCRIPTION,
             ))
         middleware.extend(self._build_summarization_middleware(preset))
+        if _HAS_MIDDLEWARE_BASE:
+            middleware.append(_RUNTIME_CONTEXT_MIDDLEWARE)
 
         # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
         if hasattr(self, '_permissions_service') and self._permissions_service and _depth == 0:
             from langchain.agents.middleware import HumanInTheLoopMiddleware
+            # Include skill middleware tools so they're subject to permission checks
+            hitl_tools = list(tools)
+            if _skills_middleware is not None:
+                hitl_tools.extend(_skills_middleware.tools)
             interrupt_on = {
                 tool.name: {
                     "allowed_decisions": ["approve", "reject"],
                     "when": self._permissions_service.should_interrupt,
                 }
-                for tool in tools
+                for tool in hitl_tools
                 if tool.name != "ask_user"
             }
             if interrupt_on:
@@ -670,6 +845,44 @@ class AgentEngine:
         self._agent_subagent_tools[resolved_cache_key] = subagent_tool_names
         self._agent_subagent_display_map[resolved_cache_key] = subagent_display_map
         return agent
+
+    @staticmethod
+    def _read_project_agents_md(project_root: str) -> str | None:
+        """Read AGENTS.md from project root. Returns content or None."""
+        from pathlib import Path
+        p = Path(project_root) / "AGENTS.md"
+        if not p.is_file():
+            return None
+        try:
+            return p.read_text(encoding="utf-8")
+        except Exception:
+            return None
+
+    async def _ensure_project_mcp(self, project_root: str | None) -> None:
+        """Load project-level MCP servers from .agents/mcp.json.
+
+        Clears previous project servers first to handle preset switching.
+        """
+        await self._mcp_manager.clear_project_servers()
+
+        if not project_root:
+            return
+
+        from pathlib import Path
+        import json
+        mcp_file = Path(project_root) / ".agents" / "mcp.json"
+        if not mcp_file.is_file():
+            return
+        try:
+            config = json.loads(mcp_file.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if not isinstance(config, dict) or not config:
+            return
+        # Support both flat {name: conf} and the industry-standard {mcpServers: {name: conf}} wrapper
+        if "mcpServers" in config and isinstance(config["mcpServers"], dict):
+            config = config["mcpServers"]
+        await self._mcp_manager.merge_project_servers(config)
 
     def _build_tracing_async_client(self, model_info: ModelInfo | None, model_id: str):
         provider = model_info.provider if model_info else None
@@ -855,6 +1068,8 @@ class AgentEngine:
             self._agent_mcp_gen.pop(key, None)
             self._agent_subagent_tools.pop(key, None)
             self._agent_subagent_display_map.pop(key, None)
+        # Clear project context cache so a re-edited preset gets a fresh git snapshot.
+        self._project_ctx_text_cache.clear()
 
     def invalidate_all_agents(self) -> None:
         """Remove all cached agents, forcing rebuild on next use."""
@@ -862,6 +1077,7 @@ class AgentEngine:
         self._agent_mcp_gen.clear()
         self._agent_subagent_tools.clear()
         self._agent_subagent_display_map.clear()
+        self._project_ctx_text_cache.clear()
 
     def _resolve_preset_for_model(self, preset_id: str, model_id: str = "") -> AgentPreset:
         preset = self._resolve_preset(preset_id)
@@ -910,6 +1126,22 @@ class AgentEngine:
         user_id: str = "anonymous",
     ) -> str:
         """Send a message and get a response (non-streaming)."""
+        preset = self._resolve_preset(preset_id)
+        _eff_root = preset.project_root if preset.project_mode else None
+        if _eff_root:
+            from pathlib import Path as _PPath
+            if not _PPath(_eff_root).is_dir():
+                raise ValueError(f"项目根目录不存在或不可访问: {_eff_root}")
+            _eff_root = str(_PPath(_eff_root).expanduser().resolve())
+        from lc_agent.tools.system_tools._config import set_active_project
+        set_active_project(_eff_root, preset.project_extra_dirs if preset.project_mode else None)
+        if hasattr(self, '_mcp_manager') and self._mcp_manager:
+            await self._ensure_project_mcp(_eff_root)
+        if _eff_root and _eff_root not in self._project_ctx_text_cache:
+            import asyncio as _asyncio
+            self._project_ctx_text_cache[_eff_root] = await _asyncio.to_thread(
+                _build_project_context_text, _eff_root
+            )
         agent = self._get_or_build_agent(preset_id, model_id)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
@@ -938,6 +1170,37 @@ class AgentEngine:
 
         message: LangChain content blocks list, e.g. [{"type":"text","text":"..."}, {"type":"image_url","image_url":{"url":"data:..."}}]
         """
+        # Validate and activate project context (project_mode is the master switch)
+        preset = self._resolve_preset(preset_id)
+        _eff_project_root = preset.project_root if preset.project_mode else None
+        if preset.project_mode and not _eff_project_root:
+            raise ValueError("项目模式已开启，但 project_root 未设置，请编辑 Agent 并填写项目根目录。")
+        if _eff_project_root:
+            from pathlib import Path as _PPath
+            if not _PPath(_eff_project_root).is_dir():
+                raise ValueError(
+                    f"项目根目录不存在或不可访问: {_eff_project_root}\n"
+                    f"请检查 Preset 的 project_root 配置是否正确。"
+                )
+            # Normalize to resolved path for consistent cache key (matches ContextVar in _config.py)
+            _eff_project_root = str(_PPath(_eff_project_root).expanduser().resolve())
+
+        from lc_agent.tools.system_tools._config import set_active_project
+        _eff_extra_dirs = preset.project_extra_dirs if preset.project_mode else None
+        set_active_project(_eff_project_root, _eff_extra_dirs)
+
+        # Load project MCP servers (or clear previous project's servers on switch)
+        if hasattr(self, '_mcp_manager') and self._mcp_manager:
+            await self._ensure_project_mcp(_eff_project_root)
+
+        # Pre-compute git/OS context text asynchronously (avoids blocking event loop).
+        # Cached per resolved project_root; cleared when agent cache is invalidated.
+        if _eff_project_root and _eff_project_root not in self._project_ctx_text_cache:
+            import asyncio as _asyncio
+            self._project_ctx_text_cache[_eff_project_root] = await _asyncio.to_thread(
+                _build_project_context_text, _eff_project_root
+            )
+
         agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}

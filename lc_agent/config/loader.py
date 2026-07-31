@@ -94,7 +94,7 @@ def load_config(
             },
         },
         "skills": ["./skills"],
-        "mcp_servers": {},
+        "mcpServers": {},
         "_config_path": None,
         "_project_root": str(Path.cwd()),
     }

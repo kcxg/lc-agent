@@ -175,7 +175,7 @@ def run_command(
     ] = 30000,
     working_directory: Annotated[
         str | None,
-        "命令执行的工作目录。不指定则使用服务器当前工作目录。",
+        "命令执行的工作目录。不指定则使用项目根目录（项目模式）或服务器工作目录。",
     ] = None,
 ) -> str:
     """执行一次性命令并等待其完成，返回完整输出。超时后进程会被强制终止。
@@ -196,6 +196,9 @@ def run_command(
     full_cmd = shell_cmd + [command]
 
     cwd = working_directory
+    if not cwd:
+        from lc_agent.tools.system_tools._config import get_active_project_root
+        cwd = get_active_project_root()
     if cwd:
         cwd_path = os.path.expanduser(cwd)
         if not os.path.isdir(cwd_path):
@@ -440,7 +443,7 @@ def start_background_process(
     ] = 10000,
     working_directory: Annotated[
         str | None,
-        "命令执行的工作目录。",
+        "命令执行的工作目录。不指定则使用项目根目录（项目模式）或服务器工作目录。",
     ] = None,
 ) -> str:
     """启动长期运行的后台进程（不会被终止），返回 PID 和初始输出。
@@ -467,6 +470,9 @@ def start_background_process(
     full_cmd = shell_cmd + [command]
 
     cwd = working_directory
+    if not cwd:
+        from lc_agent.tools.system_tools._config import get_active_project_root
+        cwd = get_active_project_root()
     if cwd:
         cwd_path = os.path.expanduser(cwd)
         if not os.path.isdir(cwd_path):

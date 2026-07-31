@@ -46,6 +46,9 @@ class AgentCreateRequest(BaseModel):
     llm_params: dict | None = None
     subagents: list[SubAgentLink] | None = None
     enable_general_purpose_subagent: bool = False
+    project_mode: bool = False
+    project_root: str | None = None
+    project_extra_dirs: list[str] | None = None
 
     @field_validator("name")
     @classmethod
@@ -82,6 +85,9 @@ class AgentUpdateRequest(BaseModel):
     llm_params: dict | None = None
     subagents: list[SubAgentLink] | None = None
     enable_general_purpose_subagent: bool | None = None
+    project_mode: bool | None = None
+    project_root: str | None = None
+    project_extra_dirs: list[str] | None = None
 
     @field_validator("name")
     @classmethod
@@ -161,6 +167,9 @@ async def list_agents(
             "default_enabled": True,
             "subagents": row.subagents,
             "enable_general_purpose_subagent": row.enable_general_purpose_subagent,
+            "project_mode": row.project_mode,
+            "project_root": row.project_root,
+            "project_extra_dirs": row.project_extra_dirs,
         })
 
     if user.role != "admin":
@@ -205,6 +214,9 @@ async def create_agent(
         llm_params=body.llm_params,
         subagents=[item.model_dump() for item in body.subagents] if body.subagents else None,
         enable_general_purpose_subagent=body.enable_general_purpose_subagent,
+        project_mode=body.project_mode,
+        project_root=body.project_root,
+        project_extra_dirs=body.project_extra_dirs,
     )
     db.add(preset_db)
     await db.commit()
@@ -222,6 +234,9 @@ async def create_agent(
         llm_params=preset_db.llm_params,
         subagents=[SubAgentLink.model_validate(item) for item in preset_db.subagents] if preset_db.subagents else None,
         enable_general_purpose_subagent=preset_db.enable_general_purpose_subagent,
+        project_mode=preset_db.project_mode,
+        project_root=preset_db.project_root,
+        project_extra_dirs=preset_db.project_extra_dirs,
     )
     engine._presets[preset.id] = preset
 
@@ -319,6 +334,9 @@ async def update_agent(
         llm_params=preset_db.llm_params,
         subagents=[SubAgentLink.model_validate(item) for item in preset_db.subagents] if preset_db.subagents else None,
         enable_general_purpose_subagent=preset_db.enable_general_purpose_subagent,
+        project_mode=preset_db.project_mode,
+        project_root=preset_db.project_root,
+        project_extra_dirs=preset_db.project_extra_dirs,
     )
     engine._presets[preset.id] = preset
     engine.invalidate_agent_cache(agent_id)

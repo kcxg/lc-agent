@@ -48,3 +48,7 @@ class AgentPreset(BaseModel):
 
     subagents: list[SubAgentLink] | None = None
     enable_general_purpose_subagent: bool = False
+
+    project_mode: bool = False
+    project_root: str | None = None
+    project_extra_dirs: list[str] | None = None

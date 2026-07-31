@@ -27,6 +27,12 @@ class AgentPresetDB(SQLModel, table=True):
         sa_column=Column(Boolean, nullable=False, server_default=false()),
     )
     llm_params: dict | None = Field(default=None, sa_column=Column(JSON))
+    project_mode: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=false()),
+    )
+    project_root: str | None = Field(default=None)
+    project_extra_dirs: list[str] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

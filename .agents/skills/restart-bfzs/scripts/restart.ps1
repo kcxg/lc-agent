@@ -22,7 +22,8 @@ $Netstat = Join-Path $env:SystemRoot "System32\netstat.exe"
 Write-Host "`n=== [1/3] Building frontend ===" -ForegroundColor Cyan
 Push-Location $FrontendDir
 try {
-    npm run build
+    # Skip vue-tsc type checking (IDE handles it); run vite build only to avoid Zone OOM.
+    npx vite build
     if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
     Write-Host "Frontend build OK" -ForegroundColor Green
 } finally {

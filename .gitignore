@@ -243,3 +243,4 @@ nul
 .tmp_pytest_run/
 .tmp/bfzs-runlogs
 .tmp/*
+gitigonre_file1.txt

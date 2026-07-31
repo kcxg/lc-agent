@@ -86,7 +86,7 @@ class LcAgentApp:
         else:
             self.filtered_loader = None
             self.skills_toolkit = None
-        mcp_config = config.get("mcp_servers", {})
+        mcp_config = config.get("mcpServers", {})
         self.mcp_manager = McpManager(mcp_config, on_state_change=self._on_mcp_state_change)
         self.fastapi_app = create_app(config, lifespan=self._lifespan)
         self.fastapi_app.state.mcp_manager = self.mcp_manager
@@ -219,6 +219,9 @@ class LcAgentApp:
                     llm_params=row.llm_params,
                     subagents=[SubAgentLink.model_validate(item) for item in row.subagents] if row.subagents else None,
                     enable_general_purpose_subagent=row.enable_general_purpose_subagent,
+                    project_mode=row.project_mode,
+                    project_root=row.project_root,
+                    project_extra_dirs=row.project_extra_dirs,
                 )
                 self.engine._presets[preset.id] = preset
             loaded = len(self.engine._presets)

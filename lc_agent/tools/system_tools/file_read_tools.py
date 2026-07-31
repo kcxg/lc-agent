@@ -146,6 +146,9 @@ def list_directory(
     return "\n".join(lines)
 
 
+_ALWAYS_IGNORE = frozenset({".git"})
+
+
 def _walk_dir(
     dir_path: Path, lines: list[str], max_depth: int, current_depth: int, max_items: int
 ) -> None:
@@ -160,6 +163,10 @@ def _walk_dir(
         if len(lines) >= max_items:
             lines.append(f"{indent}... [truncated, {max_items} items limit reached]")
             return
+
+        if entry.name in _ALWAYS_IGNORE:
+            continue
+
         if entry.is_dir():
             lines.append(f"{indent}[DIR] {entry.name}/")
             if current_depth < max_depth:

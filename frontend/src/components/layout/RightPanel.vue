@@ -112,7 +112,7 @@
         </div>
       </template>
 
-      <div class="panel-section markdown-theme-section">
+        <div class="panel-section markdown-theme-section appearance-section">
         <div class="section-header compact-section-header">
           <h4>Markdown 风格</h4>
           <span class="theme-current">{{ currentOption.label }}</span>
@@ -209,8 +209,11 @@
           </div>
         </teleport>
 
-        <div class="panel-section">
-          <h4>工具</h4>
+        <div class="panel-section tools-section">
+          <div class="section-header tools-section-header">
+            <h4>工具</h4>
+            <span class="section-summary">{{ toolsStore.filteredGroups.length }} 组</span>
+          </div>
           <ToolGroupPanel
             :groups="toolsStore.filteredGroups"
             @toggle="toolsStore.toggleGroup"
@@ -534,16 +537,18 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 
 .right-panel-fixed {
   flex-shrink: 0;
-  padding: 16px 16px 0;
+  padding: 14px 16px 0;
 }
 
 .panel-collapse-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 8px;
-  margin-bottom: 10px;
-  border-radius: 6px;
+  padding: 6px 9px;
+  margin-bottom: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
   cursor: pointer;
   user-select: none;
   transition: background 0.15s;
@@ -554,11 +559,10 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .collapse-label {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+  font-weight: 700;
+  letter-spacing: 0.3px;
 }
 
 .collapse-arrow {
@@ -573,15 +577,15 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .panel-section {
-  margin-bottom: 16px;
-  padding: 12px;
-  background: var(--el-fill-color-light);
+  margin-bottom: 14px;
+  padding: 13px;
+  background: var(--el-fill-color-extra-light);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
 }
 
 .markdown-theme-section {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--el-fill-color-light) 88%, var(--el-color-primary) 4%), var(--el-fill-color-light));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--el-fill-color-extra-light) 90%, var(--el-color-primary) 5%), var(--el-fill-color-extra-light));
 }
 
 .window-trim-section,
@@ -617,8 +621,9 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .param-label {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -759,12 +764,28 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .panel-section h4 {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
   margin: 0;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.7px;
-  font-weight: 600;
+  padding: 0 9px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 999px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+}
+
+.panel-section h4::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
 }
 
 .section-header {
@@ -772,9 +793,19 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--el-border-color);
+  margin-bottom: 12px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.section-summary {
+  padding: 3px 7px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
+  color: var(--el-color-primary);
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .refresh-btn {
@@ -829,6 +860,14 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   background: var(--el-color-primary-light-8);
   color: var(--el-color-primary);
   font-weight: 700;
+}
+
+.tools-section {
+  padding-bottom: 10px;
+}
+
+.tools-section-header {
+  margin-bottom: 10px;
 }
 
 .process-item {

@@ -11,20 +11,75 @@ from langchain_agentskills.loaders.base import SkillLoader
 from langchain_agentskills.models import SkillContent, SkillMetadata
 
 
+class _AllowedSkillsWrapper(SkillLoader):
+    """Filters skill visibility by a per-preset allowed-names set.
+
+    Thin delegation wrapper: all actual loading is delegated to ``inner``;
+    only ``list_skills`` and guard methods apply the ``allowed`` filter.
+    Pass this to ``SkillMiddleware`` to enforce per-preset ``allowed_skills``.
+
+    Args:
+        inner: The underlying loader (usually ``FilteredSkillLoader``).
+        allowed: Set of permitted skill names, or ``None`` to allow all.
+    """
+
+    def __init__(self, inner: SkillLoader, allowed: set[str] | None = None) -> None:
+        self._inner = inner
+        self._allowed = allowed
+
+    def list_skills(self) -> list[SkillMetadata]:
+        skills = self._inner.list_skills()
+        if self._allowed is not None:
+            skills = [s for s in skills if s.name in self._allowed]
+        return skills
+
+    def has_skill(self, name: str) -> bool:
+        if self._allowed is not None and name not in self._allowed:
+            return False
+        return self._inner.has_skill(name)
+
+    def load_skill(self, name: str) -> SkillContent:
+        if self._allowed is not None and name not in self._allowed:
+            raise SkillNotFoundError(name)
+        return self._inner.load_skill(name)
+
+    def read_resource(self, skill_name: str, resource_name: str) -> str:
+        if self._allowed is not None and skill_name not in self._allowed:
+            raise SkillNotFoundError(skill_name)
+        return self._inner.read_resource(skill_name, resource_name)
+
+    def read_script(self, skill_name: str, script_name: str) -> Path:
+        if self._allowed is not None and skill_name not in self._allowed:
+            raise SkillNotFoundError(skill_name)
+        return self._inner.read_script(skill_name, script_name)
+
+
 class FilteredSkillLoader(SkillLoader):
     """Delegates to an inner loader but hides disabled skills.
 
     All skills are enabled by default.  Use :meth:`toggle` to flip a
     skill's state at runtime.
+
+    Supports a "project overlay" — an additional SkillLoader whose skills
+    take priority over global skills with the same name.
     """
 
     def __init__(self, inner: SkillLoader) -> None:
         self._inner = inner
         self._disabled: set[str] = set()
+        self._project_loader: SkillLoader | None = None
 
     @property
     def disabled_skills(self) -> set[str]:
         return self._disabled
+
+    def set_project_overlay(self, project_skills_dir: str | None) -> None:
+        """Set or clear a project-level skills directory overlay."""
+        if project_skills_dir and Path(project_skills_dir).is_dir():
+            from langchain_agentskills.loaders import DirectorySkillLoader
+            self._project_loader = DirectorySkillLoader(project_skills_dir)
+        else:
+            self._project_loader = None
 
     def is_enabled(self, name: str) -> bool:
         return name not in self._disabled
@@ -37,29 +92,72 @@ class FilteredSkillLoader(SkillLoader):
         self._disabled.add(name)
         return False
 
+    def _project_skills(self) -> list[SkillMetadata]:
+        if not self._project_loader:
+            return []
+        try:
+            return self._project_loader.list_skills()
+        except Exception:
+            return []
+
     def list_skills(self) -> list[SkillMetadata]:
-        return [s for s in self._inner.list_skills() if s.name not in self._disabled]
+        base = [s for s in self._inner.list_skills() if s.name not in self._disabled]
+        project = self._project_skills()
+        if not project:
+            return base
+        project_names = {s.name for s in project}
+        merged = [s for s in base if s.name not in project_names]
+        merged.extend(project)
+        return merged
 
     def list_all_skills(self) -> list[SkillMetadata]:
         """Return all skills including disabled ones (for UI display)."""
+        base = self._inner.list_skills()
+        project = self._project_skills()
+        if not project:
+            return base
+        project_names = {s.name for s in project}
+        merged = [s for s in base if s.name not in project_names]
+        merged.extend(project)
+        return merged
+
+    def list_global_skills(self) -> list[SkillMetadata]:
+        """Return only global skills from the base loader (no project overlay)."""
         return self._inner.list_skills()
 
     def load_skill(self, name: str) -> SkillContent:
         if name in self._disabled:
             raise SkillNotFoundError(name)
+        if self._project_loader:
+            try:
+                return self._project_loader.load_skill(name)
+            except SkillNotFoundError:
+                pass
         return self._inner.load_skill(name)
 
     def read_resource(self, skill_name: str, resource_name: str) -> str:
         if skill_name in self._disabled:
             raise SkillNotFoundError(skill_name)
+        if self._project_loader:
+            try:
+                return self._project_loader.read_resource(skill_name, resource_name)
+            except (SkillNotFoundError, Exception):
+                pass
         return self._inner.read_resource(skill_name, resource_name)
 
     def has_skill(self, name: str) -> bool:
         if name in self._disabled:
             return False
+        if self._project_loader and self._project_loader.has_skill(name):
+            return True
         return self._inner.has_skill(name)
 
     def read_script(self, skill_name: str, script_name: str) -> Path:
         if skill_name in self._disabled:
             raise SkillNotFoundError(skill_name)
+        if self._project_loader:
+            try:
+                return self._project_loader.read_script(skill_name, script_name)
+            except (SkillNotFoundError, Exception):
+                pass
         return self._inner.read_script(skill_name, script_name)
