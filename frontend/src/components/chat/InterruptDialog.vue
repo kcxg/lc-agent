@@ -2,37 +2,71 @@
   <el-dialog
     v-model="visible"
     :title="dialogTitle"
-    width="500px"
+    width="520px"
     class="interrupt-dialog"
     :close-on-click-modal="false"
     :close-on-press-escape="false"
     :show-close="false"
   >
-    <!-- ask_user 模式 -->
-    <template v-if="isAskUser">
-      <p class="ask-question">{{ askPayload?.question }}</p>
-      <p v-if="askPayload?.allow_multiple && askPayload?.options?.length" class="multi-hint">（可多选）</p>
-
-      <div v-if="askPayload?.options?.length" class="options-list">
-        <el-button
-          v-for="opt in askPayload.options"
-          :key="opt.id"
-          :type="isOptionSelected(opt.label) ? 'primary' : 'default'"
-          class="option-btn"
-          @click="selectOption(opt.label)"
+    <!-- ask_user 多问题模式 -->
+    <template v-if="isAskUser && askPayload">
+      <div class="questions-list">
+        <div
+          v-for="(q, idx) in askPayload.questions"
+          :key="idx"
+          class="question-block"
+          :class="{ 'question-done': isAnswered(idx) }"
         >
-          <span class="option-id">{{ opt.id }}</span>
-          {{ opt.label }}
-        </el-button>
-      </div>
+          <div class="question-header">
+            <span class="question-num">{{ idx + 1 }}</span>
+            <span class="question-text">{{ q.question }}</span>
+            <span v-if="q.required === false" class="optional-badge">可选</span>
+          </div>
 
-      <el-input
-        v-if="askPayload?.allow_free_input"
-        v-model="freeInput"
-        :placeholder="askPayload?.options?.length ? '或输入自定义回答...' : '请输入回答...'"
-        class="free-input"
-        @keyup.enter="canSubmitAskUser && submitAskUser()"
-      />
+          <!-- multiple_choice -->
+          <template v-if="q.type === 'multiple_choice'">
+            <div class="choices-list">
+              <button
+                v-for="(choice, ci) in q.choices"
+                :key="ci"
+                class="choice-btn"
+                :class="{ selected: isChoiceSelected(idx, choice) }"
+                @click="toggleChoice(idx, choice, q.allow_multiple, false)"
+              >
+                <span class="choice-id">{{ String.fromCharCode(65 + ci) }}</span>
+                {{ choice }}
+              </button>
+              <!-- Other option -->
+              <button
+                class="choice-btn choice-other"
+                :class="{ selected: otherSelected[idx] }"
+                @click="toggleOther(idx, q.allow_multiple)"
+              >
+                <span class="choice-id">…</span>自定义
+              </button>
+            </div>
+            <el-input
+              v-if="otherSelected[idx]"
+              v-model="otherTexts[idx]"
+              :placeholder="q.allow_multiple ? '追加自定义内容...' : '输入自定义回答...'"
+              class="other-input"
+              size="small"
+              @keyup.enter.prevent
+            />
+          </template>
+
+          <!-- text -->
+          <template v-else>
+            <el-input
+              v-model="textAnswers[idx]"
+              type="textarea"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              placeholder="请输入回答..."
+              class="text-input"
+            />
+          </template>
+        </div>
+      </div>
     </template>
 
     <!-- 标准工具审批模式 -->
@@ -57,7 +91,8 @@
 
     <template #footer>
       <template v-if="isAskUser">
-        <el-button type="primary" :disabled="!canSubmitAskUser" @click="submitAskUser">
+        <el-button link @click="cancelAskUser">跳过</el-button>
+        <el-button type="primary" :disabled="!canSubmit" @click="submitAskUser">
           提交
         </el-button>
       </template>
@@ -74,12 +109,17 @@
 import { computed, ref, watch } from 'vue'
 import type { InterruptInfo } from '@/stores/chat'
 
+interface Question {
+  question: string
+  type: 'text' | 'multiple_choice'
+  choices?: string[]
+  required?: boolean
+  allow_multiple?: boolean
+}
+
 interface AskUserPayload {
   type: 'ask_user'
-  question: string
-  options?: { id: string; label: string }[]
-  allow_multiple?: boolean
-  allow_free_input?: boolean
+  questions: Question[]
 }
 
 interface AskUserInterrupt {
@@ -99,12 +139,16 @@ const visible = computed({
   set: () => {},
 })
 
-const freeInput = ref('')
-const selectedOption = ref<string | null>(null)
-const selectedOptions = ref<string[]>([])
+// Per-question answer state
+const textAnswers = ref<string[]>([])       // for type='text'
+const selectedChoices = ref<string[][]>([]) // for type='multiple_choice', selected options
+const otherSelected = ref<boolean[]>([])    // whether "Other" is active per question
+const otherTexts = ref<string[]>([])        // custom text for "Other"
+
 const showDetails = ref(false)
 
 const allActions = computed(() => props.interrupt?.actionRequests ?? [])
+
 const askUserInterrupt = computed<AskUserInterrupt | null>(() => {
   const item = props.interrupt?.data?.[0]
   if (item?.value && typeof item.value === 'object' && item.value.type === 'ask_user') {
@@ -114,9 +158,7 @@ const askUserInterrupt = computed<AskUserInterrupt | null>(() => {
 })
 
 const askPayload = computed<AskUserPayload | null>(() => askUserInterrupt.value?.value ?? null)
-
 const isAskUser = computed(() => askPayload.value !== null)
-
 const dialogTitle = computed(() => isAskUser.value ? '💬 请回答' : '⚠️ 工具需要审批')
 
 const firstToolName = computed<string | null>(() => {
@@ -133,68 +175,95 @@ const firstToolName = computed<string | null>(() => {
   return null
 })
 
-const canSubmitAskUser = computed(() => {
-  return selectedOption.value !== null || selectedOptions.value.length > 0 || freeInput.value.trim() !== ''
-})
-
+// Reset state when interrupt changes
 watch(() => props.interrupt, () => {
-  freeInput.value = ''
-  selectedOption.value = null
-  selectedOptions.value = []
+  const qs = askPayload.value?.questions ?? []
+  textAnswers.value = qs.map(() => '')
+  selectedChoices.value = qs.map(() => [])
+  otherSelected.value = qs.map(() => false)
+  otherTexts.value = qs.map(() => '')
   showDetails.value = false
 })
 
-function isOptionSelected(label: string): boolean {
-  const payload = askPayload.value
-  if (payload?.allow_multiple) {
-    return selectedOptions.value.includes(label)
-  }
-  return selectedOption.value === label
+function isChoiceSelected(qIdx: number, choice: string): boolean {
+  return (selectedChoices.value[qIdx] ?? []).includes(choice)
 }
 
-function selectOption(label: string) {
-  const payload = askPayload.value
-  if (payload?.allow_multiple) {
-    const idx = selectedOptions.value.indexOf(label)
-    if (idx >= 0) {
-      selectedOptions.value.splice(idx, 1)
+function toggleChoice(qIdx: number, choice: string, allowMultiple: boolean | undefined, _isOther: boolean) {
+  const current = selectedChoices.value[qIdx] ?? []
+  const pos = current.indexOf(choice)
+  if (allowMultiple) {
+    if (pos >= 0) {
+      selectedChoices.value[qIdx] = current.filter(c => c !== choice)
     } else {
-      selectedOptions.value.push(label)
+      selectedChoices.value[qIdx] = [...current, choice]
     }
-    selectedOption.value = selectedOptions.value.length > 0 ? selectedOptions.value.join(', ') : null
   } else {
-    selectedOption.value = label
-    if (!payload?.allow_free_input) {
-      submitAskUser()
-    }
+    // Single select: clear Other when a regular choice is selected
+    otherSelected.value[qIdx] = false
+    otherTexts.value[qIdx] = ''
+    selectedChoices.value[qIdx] = pos >= 0 ? [] : [choice]
   }
+}
+
+function toggleOther(qIdx: number, allowMultiple: boolean | undefined) {
+  const next = !otherSelected.value[qIdx]
+  otherSelected.value[qIdx] = next
+  if (!next) {
+    otherTexts.value[qIdx] = ''
+  } else if (!allowMultiple) {
+    // Single select: deselect all regular choices when Other is selected
+    selectedChoices.value[qIdx] = []
+  }
+}
+
+function isAnswered(qIdx: number): boolean {
+  const q = askPayload.value?.questions[qIdx]
+  if (!q) return false
+  if (q.required === false) return true
+  if (q.type === 'text') return (textAnswers.value[qIdx] ?? '').trim().length > 0
+  const choices = selectedChoices.value[qIdx] ?? []
+  const other = otherSelected.value[qIdx] && (otherTexts.value[qIdx] ?? '').trim().length > 0
+  return choices.length > 0 || other
+}
+
+const canSubmit = computed(() => {
+  const qs = askPayload.value?.questions ?? []
+  return qs.every((q, i) => q.required === false || isAnswered(i))
+})
+
+function buildAnswer(qIdx: number, q: Question): string {
+  if (q.type === 'text') {
+    return (textAnswers.value[qIdx] ?? '').trim()
+  }
+  const parts: string[] = [...(selectedChoices.value[qIdx] ?? [])]
+  if (otherSelected.value[qIdx] && (otherTexts.value[qIdx] ?? '').trim()) {
+    parts.push((otherTexts.value[qIdx] ?? '').trim())
+  }
+  return parts.join(', ')
 }
 
 function submitAskUser() {
-  const parts: string[] = []
-  if (askPayload.value?.allow_multiple && selectedOptions.value.length > 0) {
-    parts.push(selectedOptions.value.join(', '))
-  } else if (selectedOption.value) {
-    parts.push(selectedOption.value)
-  }
-  if (freeInput.value.trim()) {
-    parts.push(freeInput.value.trim())
-  }
-  const answer = parts.join('; ')
-  if (!answer) return
+  if (!canSubmit.value) return
+  const qs = askPayload.value?.questions ?? []
+  const answers = qs.map((q, i) => buildAnswer(i, q))
   const interruptId = askUserInterrupt.value?.id
   if (!interruptId) {
-    console.warn('[InterruptDialog] Missing LangGraph interrupt id')
+    console.error('[InterruptDialog] Missing LangGraph interrupt id — cannot resume')
     return
   }
-  emit('resume', { [interruptId]: answer })
+  emit('resume', { [interruptId]: { status: 'answered', answers } })
+}
+
+function cancelAskUser() {
+  const interruptId = askUserInterrupt.value?.id
+  if (!interruptId) return
+  emit('resume', { [interruptId]: { status: 'cancelled' } })
 }
 
 function allowPermanently() {
   const toolName = firstToolName.value
-  if (toolName) {
-    emit('allow-permanently', toolName)
-  }
+  if (toolName) emit('allow-permanently', toolName)
 }
 
 function approve() {
@@ -207,56 +276,127 @@ function reject() {
 </script>
 
 <style scoped>
-.ask-question {
-  font-size: 15px;
-  margin-bottom: 16px;
-  line-height: 1.6;
-}
-
-.options-list {
+.questions-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
+}
+
+.question-block {
+  border: 1px solid var(--el-border-color);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--el-fill-color-lighter);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.question-block.question-done {
+  border-color: var(--el-color-success-light-5);
+  background: color-mix(in srgb, var(--el-color-success) 6%, transparent);
+}
+
+.question-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   margin-bottom: 12px;
 }
 
-.option-btn {
-  justify-content: flex-start;
-  text-align: left;
-  height: auto;
-  padding: 10px 16px;
-  white-space: normal;
-}
-
-.option-id {
-  display: inline-block;
+.question-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 22px;
   height: 22px;
-  line-height: 22px;
-  text-align: center;
-  border-radius: 4px;
-  background: var(--el-color-primary-light-9);
+  border-radius: 50%;
+  background: var(--el-color-primary-light-8);
   color: var(--el-color-primary);
-  font-weight: 600;
   font-size: 12px;
-  margin-right: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.question-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--el-text-color-primary);
+  flex: 1;
+}
+
+.optional-badge {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  padding: 1px 6px;
   flex-shrink: 0;
 }
 
-.multi-hint {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin: -8px 0 12px;
+.choices-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
 
-.free-input {
-  margin-top: 8px;
+.choice-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  padding: 9px 14px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-bg-color);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  transition: all 0.15s;
   width: 100%;
 }
 
-.free-input :deep(.el-input__wrapper),
-.free-input :deep(.el-textarea__inner) {
-  box-sizing: border-box;
+.choice-btn:hover {
+  border-color: var(--el-color-primary-light-5);
+  background: var(--el-color-primary-light-9);
+}
+
+.choice-btn.selected {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-weight: 500;
+}
+
+.choice-btn.choice-other {
+  color: var(--el-text-color-secondary);
+  border-style: dashed;
+}
+
+.choice-id {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--el-fill-color);
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.choice-btn.selected .choice-id {
+  background: var(--el-color-primary);
+  color: #fff;
+}
+
+.other-input {
+  margin-top: 8px;
+}
+
+.text-input {
+  width: 100%;
 }
 
 .tool-display-name {
@@ -297,21 +437,18 @@ function reject() {
   margin-top: 4px;
 }
 
-.dialog-footer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-  width: 100%;
-}
-
 :deep(.interrupt-dialog) {
-  max-width: min(500px, calc(100vw - 24px));
+  max-width: min(520px, calc(100vw - 24px));
 }
 
 @media (max-width: 768px) {
-  .ask-question {
-    font-size: 14px;
+  .question-text {
+    font-size: 13px;
+  }
+
+  .choice-btn {
+    padding: 8px 12px;
+    font-size: 12px;
   }
 
   .action-item {
@@ -321,21 +458,6 @@ function reject() {
   .action-args {
     font-size: 11px;
     max-height: 40vh;
-  }
-
-  .dialog-footer-actions {
-    flex-direction: column-reverse;
-    align-items: stretch;
-  }
-
-  .dialog-footer-actions .el-button {
-    width: 100%;
-    margin-left: 0;
-  }
-
-  .option-btn {
-    width: 100%;
-    margin-left: 0;
   }
 }
 </style>

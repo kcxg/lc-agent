@@ -441,8 +441,16 @@ function formatSize(len: number): string {
 function formatArgs(name: string, args: Record<string, unknown>): { key: string; value: string }[] {
   return Object.entries(args).map(([key, value]) => {
     let formatted: string
-    if (name.endsWith('ask_user') && key === 'options' && Array.isArray(value)) {
-      formatted = value.map((item, index) => `${String.fromCharCode(65 + index)}. ${String(item)}`).join('\n')
+    if (name.endsWith('ask_user') && key === 'questions' && Array.isArray(value)) {
+      formatted = (value as any[]).map((q: any, idx: number) => {
+        if (!q || typeof q !== 'object') return `${idx + 1}. ${String(q)}`
+        const header = `${idx + 1}. ${q.question ?? '?'}`
+        if (q.type === 'multiple_choice' && Array.isArray(q.choices)) {
+          const choiceLines = q.choices.map((c: string, ci: number) => `  ${String.fromCharCode(65 + ci)}. ${c}`).join('\n')
+          return `${header}\n${choiceLines}`
+        }
+        return header
+      }).join('\n\n')
     } else if (typeof value === 'string') {
       formatted = value
     } else {

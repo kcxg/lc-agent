@@ -12,6 +12,10 @@ from langchain_core.tools.base import ArgsSchema
 
 _TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
+# Tools registered under this group are injected into every agent regardless of
+# allowed_tool_groups (None / [] / [...]).  They are also hidden from the UI.
+_BUILTIN_GROUP = "__builtin__"
+
 
 class ToolRegistry:
     """Central registry for all tools, supporting groups and filtering."""
@@ -43,11 +47,12 @@ class ToolRegistry:
 
         None = all allowed, [] = none allowed, ["a","b"] = only those groups.
         Also excludes runtime-disabled groups.
+        Tools in ``_BUILTIN_GROUP`` are always appended regardless of the filter.
         """
         if allowed_groups is None:
             tools = self.get_all_tools()
         elif not allowed_groups:
-            return []
+            tools = []
         else:
             tools = self.get_tools_by_groups(allowed_groups)
 
@@ -56,22 +61,30 @@ class ToolRegistry:
                 t for t in tools
                 if self._global_tools.get(t.name, {}).get("group") not in self._disabled_groups
             ]
+
+        # Builtin tools are always available — append any not already present
+        builtin = self.get_tools_by_groups([_BUILTIN_GROUP])
+        if builtin:
+            existing = {t.name for t in tools}
+            tools = tools + [t for t in builtin if t.name not in existing]
+
         return tools
 
     def get_group_names(self) -> list[str]:
-        """Return unique list of all registered group names."""
+        """Return unique list of all registered group names (excludes builtin group)."""
         groups = set()
         for entry in self._global_tools.values():
-            if entry["group"]:
-                groups.add(entry["group"])
+            g = entry["group"]
+            if g and g != _BUILTIN_GROUP:
+                groups.add(g)
         return sorted(groups)
 
     def get_group_info(self) -> list[dict[str, str]]:
-        """Return group id + description pairs."""
+        """Return group id + description pairs (excludes builtin group)."""
         groups = {}
         for entry in self._global_tools.values():
             g = entry["group"]
-            if g and g not in groups:
+            if g and g != _BUILTIN_GROUP and g not in groups:
                 groups[g] = self._group_descriptions.get(g, g)
         return [{"id": gid, "description": desc} for gid, desc in sorted(groups.items())]
 

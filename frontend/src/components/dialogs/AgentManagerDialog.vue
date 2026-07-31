@@ -98,7 +98,7 @@
                       </el-button>
                     </div>
                     <div class="form-hint">
-                      开启后自动注入 AGENTS.md、git 快照、OS 信息等项目上下文到系统提示词
+                      开启后自动注入 AGENTS.md、skills、mcp、git 快照等等
                     </div>
                   </el-form-item>
 

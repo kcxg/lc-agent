@@ -813,6 +813,8 @@ class AgentEngine:
                 tool_description=TODO_TOOL_DESCRIPTION,
             ))
         middleware.extend(self._build_summarization_middleware(preset))
+        from lc_agent.middlewares import AskUserMiddleware
+        middleware.append(AskUserMiddleware())
         middleware.append(_RUNTIME_CONTEXT_MIDDLEWARE)
 
         # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
