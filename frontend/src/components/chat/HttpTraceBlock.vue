@@ -314,7 +314,7 @@ function estimateTokens(chars: number): string {
           {{ stat.label }} {{ stat.value }}
         </span>
       </span>
-      <button v-if="trace.request.body" class="http-analyze-inline-btn" title="分析提示词 & 工具" @click.stop="analyzeRequest()">🔍 分析</button>
+      <button v-if="trace.request.body" class="http-analyze-inline-btn" title="解析提示词 & 工具" @click.stop="analyzeRequest()">🔍 解析</button>
       <span class="http-summary-toggle" />
     </summary>
 
@@ -390,7 +390,7 @@ function estimateTokens(chars: number): string {
         <div class="http-modal-header">
           <div class="http-modal-title-wrap">
             <span class="http-modal-kicker">HTTP #{{ trace.sequence }}</span>
-            <span class="http-modal-title">提示词 & 工具分析</span>
+            <span class="http-modal-title">提示词 & 工具解析</span>
           </div>
           <button class="http-modal-close" aria-label="关闭" @click="showAnalyzeModal = false">✕</button>
         </div>

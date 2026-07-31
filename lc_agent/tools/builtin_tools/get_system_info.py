@@ -4,12 +4,12 @@ import platform
 from lc_agent.tools.registry import tool
 
 
-@tool(group="utility", group_description="通用工具")
+@tool(name="get_system_info", group="__builtin__")
 def get_system_info() -> str:
     """获取当前系统的基础环境信息（操作系统、架构、Shell 等）。
 
-    仅在需要确认用户操作系统类型时调用（如不确定该用什么命令语法、路径分隔符等），
-    不要在每次对话开始时自动调用。
+    在需要确认用户操作系统类型时调用（如不确定该用什么命令语法、路径分隔符等），
+    
     """
     system = platform.system()
     info_lines = [
