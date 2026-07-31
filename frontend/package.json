@@ -33,6 +33,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@vueuse/core": "^14.3.0",
+    "ansi_up": "^6.0.6",
     "element-plus": "^2.14.1",
     "highlight.js": "^11.11.1",
     "markdown-it": "^14.2.0",
@@ -52,4 +53,3 @@
     "vue-tsc": "^3.3.4"
   }
 }
-

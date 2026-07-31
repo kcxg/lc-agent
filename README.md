@@ -1,14 +1,14 @@
 # lc-agent
 
-> Visual Agent Runtime Control Plane built on LangChain / LangGraph.
+> Open-source AI Agent workbench & framework built on LangChain / LangGraph — visual, hot-swappable, fully extensible.
 >
-> 一个可视化、可热切换、可人在环路管控的 Agent 运行时控制平面。
+> 基于 LangChain / LangGraph 的 AI Agent 可视化工作台 & Python 框架，运行时热切换模型/工具/MCP/技能，无需重启。
 
 [![PyPI package](https://img.shields.io/badge/pypi-lc--agent--app-blue)](https://pypi.org/project/lc-agent-app/)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-`lc-agent` 既是可以直接使用的 Agent 工作台，也是可以被业务项目导入的 Python 框架。
+`lc-agent` 既是可以直接使用的 Agent 工作台，也是可以被用户被作为导入的 Python 框架，降低从0开发agent全套的繁琐。
 
 它把 **模型、思考参数、Tools、MCP、Skills、子 Agent、长期记忆、知识库入口、Human-in-the-top 控制** 放进一个统一的 Web UI 里，并支持运行时热切换配置，无需重启代码。
 
@@ -16,17 +16,17 @@
 
 ## 为什么是 lc-agent
 
-很多 Agent 项目只解决其中一部分问题：有的只做聊天 UI，有的只做 MCP，有的只做工具调用，有的只做 LangGraph 编排。
+大部分 LangChain / LangGraph 项目需要写大量胶水代码来把模型调用、Tools、MCP、子 Agent 串起来。切换模型或调整工具集往往意味着改代码、重启服务。
 
-`lc-agent` 的定位不是普通聊天网页，而是 **Agent Runtime Control Plane**：
+`lc-agent` 把这些能力整合进一个开箱即用的 Web 工作台：
 
-- **运行时热切换**：模型、思考等级、工具组、MCP、Skills、Agent 默认态都可以在前端切换，无需重启服务
-- **统一能力编排**：把 Tools、MCP、Skills、子 Agent、代码型 Graph 接入同一个执行入口
-- **Human-in-the-top**：人站在最高控制层，可以审批、接管、切换配置、限制工具权限
-- **可观测执行过程**：thinking、tool call、HTTP trace、token usage、子 Agent 执行过程都能看到
-- **框架与产品一体**：既能开箱当工作台用，也能 `import lc_agent` 嵌入自己的业务项目
+- **运行时热切换**：模型、思考等级、工具组、MCP、Skills、Agent 预设都可以在前端切换，无需重启服务
+- **统一能力编排**：Tools、MCP、Skills、子 Agent、代码型 Graph 接入同一个执行入口
+- **透明可观测**：thinking、tool call、diff 预览、HTTP trace、token usage、子 Agent 执行过程全部可视化
+- **权限与审批**：工具白名单、敏感操作人工确认，人始终拥有最高控制权
+- **框架与产品一体**：既能直接当工作台用，也能 `import lc_agent` 嵌入业务项目
 
-## 核心能力
+## lc-aegnt核心能力
 
 | 能力 | 说明 |
 | --- | --- |
@@ -43,6 +43,10 @@
 | Knowledge Base | 不内置强绑定 RAG，可通过 MCP 接入 [nbrag](https://github.com/ydf0509/nbrag) 等 agentic search 知识库 |
 | Observability | HTTP trace、token 面板、工具调用卡片、子 Agent 过程可视化 |
 | Auth & Permission | 支持登录认证、用户隔离、管理员能力、审批白名单 |
+| 联网、rag知识库 | 同时通过接入对应的mcp来给llm提供能力，例如anysearch 和 nbrag |
+| ai coding | 内置工具组和第三方mcp例如serena mcp都能使lc-aegnt 实现ai coding |
+| Context Management | 内置 SummarizationMiddleware，长对话自动压缩摘要，避免上下文溢出 |
+| Streaming & Diff | 命令执行实时流式输出、文件编辑 diff 预览、写入预览，过程全程可视 |
 
 ## 截图
 
@@ -63,6 +67,15 @@
 **移动端**
 
 ![移动端界面](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/phone01.png)
+
+**ai coding 执行用户代码，流式打字机效果**
+![ai coding 执行用户代码，流式打字机效果](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/ai_coding_run.png)
+
+**ai coding 编辑用户代码，类似cursor codex的代码变动 diff 红绿渲染**
+![ai coding 编辑用户代码，类似cursor codex的代码变动 diff 红绿渲染](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/aicoding_edit.png)
+
+**子 agent 效果，可委派给子 agent 执行，并流式打字机显示和保留独立执行过程**
+![子 agent 效果，可委派给子 agent 执行，并流式打字机显示和保留独立执行过程](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/subagent.png)
 
 ## 快速开始
 
@@ -223,6 +236,12 @@ lc-agent 已经支持登录认证、用户隔离、管理员能力。
 
 如果你给 Agent 接了文件系统、命令执行或自定义 MCP，它运行的仍然是**部署机器的权限边界**。
 
+当然你也可以部署到云端。如果仅用于聊天和信息检索，包括联网和rag知识库检索（不开启文件/命令工具组），lc-agent 完全可以多人共用一个实例。
+
+但若开启了 `file_write`、`command` 等工具组，请确保**单人独占**——它们直接操作部署机器的文件系统，多人同时操作会相互冲突。这和 Claude Code / Cursor / Codex 的道理一样：涉及本机文件读写的工具需要每人各自一份环境。
+
+多用户 + 文件操作的隔离（如虚拟容器沙箱）技术上可行，但成本极高，例如kimi minimax官网的agent功能单次agent任务收费极其高昂，这种共用一个web服务但是通过虚拟容器隔离不同用户agent操作的技术不在 lc-agent 当前的考虑范围内。
+
 ## 开发
 
 后端开发：
@@ -276,6 +295,9 @@ npm run test:code-agent
 所以你可以配置mcp，市面上能联网的mcp有很多
 
 例如配置 Open Web Search MCP，你在docker里面启动mcp服务，然后配置到config.jsonc里面的mcp_servers，agent可以勾选启用这个mcp，这样`agent`就能联网查询新闻了，而且可以启用web-search这个skill，引导ai何时联网，怎么高效使用这个mcp的各个工具。
+
+除了 `openwebsearch` mcp另外推荐一个更好更稳定更适合agent联网的mcp，`anysearch`，每天免费1000次，我在联网搜索某些技术文档时候，实测比deepseek 豆包官网的联网搜索更强。
+
 ```jsonc
 {
     ...其他配置...
@@ -293,6 +315,21 @@ npm run test:code-agent
   }
 }
 ```
+
+## lc-agent 能不能作为aicoding 工具来使用？
+
+答：完全可以，而且编程效果和体验都很好。
+
+方案A:
+可以，你可以搭配serena mcp全套来编程。但是这个因为是第三方mcp，对于edit文件 和 执行命令，lc-agent的前端界面没有精细化适配，例如文件变更diff、执行命令的流式打字机效果等，对serena没支持。
+
+方案B：
+开启lc-agent 内置赠送的工具组， 用户开启`file_read` `file_write` `command` 三个工具组，大约20个工具，足以编程了。另外你还可以搭配 nbrag 或者codegraph mcp，使代码语义和符号检索更强大。
+lc-agent前端对代码改动和代码执行的渲染，达到了 traework codex-gui 的体验效果。
+
+
+lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以作为 通用agent来使用，ai coding只是能力之一。
+
 
 ## License
 

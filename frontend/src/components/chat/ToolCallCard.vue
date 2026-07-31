@@ -21,6 +21,12 @@
         <span v-if="toolCall.duration" class="meta-item">⏱ {{ formatDuration(toolCall.duration) }}</span>
         <span v-if="toolCall.resultLength" class="meta-item">📦 {{ formatSize(toolCall.resultLength) }}</span>
       </span>
+      <span v-if="toolCall.pid && !processKilled && (toolCall.bgProcessRunning || toolCall.status === 'running')" class="process-info">
+        <span class="pid-badge">PID {{ toolCall.pid }}</span>
+        <button class="stop-btn" title="终止进程" @click.stop="killProcess" :disabled="killing">
+          {{ killing ? '...' : '■ 停止' }}
+        </button>
+      </span>
       <button
         v-if="toolCall.status === 'error'"
         class="dismiss-btn"
@@ -36,7 +42,43 @@
         <span class="arg-value">{{ arg.value }}</span>
       </div>
     </div>
-    <div v-if="toolCall.result" class="tool-result">
+    <div v-if="(toolCall.status === 'running' || toolCall.bgProcessRunning) && toolCall.streamingOutput" class="tool-result streaming">
+      <div class="tool-result-rendered" v-html="renderedStreamingOutput" />
+      <button class="fullscreen-btn" @click.stop="showModal = true" title="查看完整内容">⛶</button>
+      <div v-if="pollPaused" class="poll-paused-bar">
+        <span>输出刷新已暂停（5 分钟无操作）</span>
+        <button class="resume-poll-btn" @click.stop="resumeBgPolling">▶ 继续刷新</button>
+      </div>
+    </div>
+    <div v-else-if="toolCall.fileDiff" class="tool-result diff-result">
+      <div class="diff-header">{{ toolCall.fileDiff.file }}</div>
+      <div class="diff-body" :class="{ collapsed: diffCollapsed && diffTotalLines > 30 }">
+        <div v-for="(line, i) in diffLines" :key="i" class="diff-line" :class="line.type">
+          <span class="diff-linenum">{{ line.num }}</span>
+          <span class="diff-prefix">{{ line.prefix }}</span>
+          <span class="diff-content">{{ line.text }}</span>
+        </div>
+      </div>
+      <button v-if="diffTotalLines > 30" class="diff-expand-btn" @click="diffCollapsed = !diffCollapsed">
+        {{ diffCollapsed ? `展开全部 (${diffTotalLines} 行)` : '折叠' }}
+      </button>
+    </div>
+    <div v-else-if="toolCall.filePreview && !toolCall.fileDiff" class="tool-result diff-result">
+      <div class="diff-header">{{ toolCall.filePreview.file }} ({{ toolCall.filePreview.mode === 'append' ? '追加' : '写入' }})</div>
+      <div class="diff-body" :class="{ collapsed: diffCollapsed && toolCall.filePreview.total_lines > 30 }">
+        <div v-for="(line, i) in previewLines" :key="i" class="diff-line added">
+          <span class="diff-linenum">{{ (toolCall.filePreview.start_line || 1) + i }}</span>
+          <span class="diff-prefix">+</span>
+          <span class="diff-content">{{ line }}</span>
+        </div>
+        <div v-if="toolCall.filePreview.total_lines > previewLines.length" class="diff-line context">
+          <span class="diff-linenum"></span>
+          <span class="diff-prefix"></span>
+          <span class="diff-content">... {{ toolCall.filePreview.total_lines - previewLines.length }} more lines</span>
+        </div>
+      </div>
+    </div>
+    <div v-else-if="toolCall.result" class="tool-result">
       <div class="tool-result-rendered" v-html="renderedResult" />
       <button v-if="isLong" class="fullscreen-btn" @click.stop="showModal = true" title="查看完整内容">⛶</button>
     </div>
@@ -78,9 +120,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Loading, Check, Tools, CircleCloseFilled } from '@element-plus/icons-vue'
-import type { ToolCall } from '@/stores/chat'
+import { AnsiUp } from 'ansi_up'
+import type { ToolCall, FileDiffData, FilePreviewData } from '@/stores/chat'
+import { fetchApi } from '@/api/http'
+
+const ansiUp = new AnsiUp()
 
 const props = defineProps<{ toolCall: ToolCall; collapsed?: boolean }>()
 const showModal = ref(false)
@@ -90,11 +136,165 @@ const isDismissed = ref(false)
 const searchQuery = ref('')
 const activeMatchIndex = ref(0)
 const modalBodyRef = ref<HTMLElement | null>(null)
+const diffCollapsed = ref(true)
+
+interface DiffLine {
+  type: 'context' | 'removed' | 'added'
+  num: string
+  prefix: string
+  text: string
+}
+
+const diffLines = computed<DiffLine[]>(() => {
+  const diff = props.toolCall.fileDiff
+  if (!diff) return []
+  const lines: DiffLine[] = []
+  let lineNum = diff.start_line
+
+  for (const line of diff.context_before) {
+    lines.push({ type: 'context', num: String(lineNum++), prefix: ' ', text: line })
+  }
+  for (const line of diff.removed) {
+    lines.push({ type: 'removed', num: String(lineNum++), prefix: '-', text: line })
+  }
+  lineNum = diff.start_line + diff.context_before.length
+  for (const line of diff.added) {
+    lines.push({ type: 'added', num: String(lineNum++), prefix: '+', text: line })
+  }
+  for (const line of diff.context_after) {
+    lines.push({ type: 'context', num: String(lineNum++), prefix: ' ', text: line })
+  }
+  return lines
+})
+
+const diffTotalLines = computed(() => diffLines.value.length)
+
+const previewLines = computed<string[]>(() => {
+  return props.toolCall.filePreview?.preview_lines || []
+})
 
 function toggleCollapse() {
   userToggled.value = true
   isCollapsed.value = !isCollapsed.value
 }
+
+const killing = ref(false)
+const processKilled = ref(false)
+
+async function killProcess() {
+  if (!props.toolCall.pid || killing.value) return
+  killing.value = true
+  try {
+    const res = await fetchApi<{ success: boolean }>(`/tools/process/${props.toolCall.pid}/kill`, { method: 'POST' })
+    if (res.success) {
+      processKilled.value = true
+      stopBgPolling()
+    }
+  } catch (e) {
+    console.error('Failed to kill process:', e)
+  } finally {
+    killing.value = false
+  }
+}
+
+// --- Background process output polling ---
+let bgPollTimer: ReturnType<typeof setInterval> | null = null
+let bgPollOffset = 0
+let bgPollStartTime = 0
+let pollInFlight = false
+const BG_POLL_DURATION_MS = 5 * 60 * 1000
+const pollPaused = ref(false)
+
+function startBgPolling() {
+  if (bgPollTimer) return
+  const tc = props.toolCall
+  bgPollOffset = (tc.streamingOutput || '').length
+  bgPollStartTime = Date.now()
+  pollPaused.value = false
+  bgPollTimer = setInterval(pollProcessOutput, 1000)
+  pollProcessOutput()
+}
+
+function stopBgPolling() {
+  if (bgPollTimer) {
+    clearInterval(bgPollTimer)
+    bgPollTimer = null
+  }
+  pollInFlight = false
+  const tc = props.toolCall
+  if (tc.bgProcessRunning) {
+    tc.bgProcessRunning = false
+    if (tc.streamingOutput) {
+      tc.result = (tc.result ? tc.result + '\n' : '') + tc.streamingOutput
+      tc.resultLength = tc.result.length
+      delete tc.streamingOutput
+    }
+  }
+}
+
+function pauseBgPolling() {
+  if (bgPollTimer) {
+    clearInterval(bgPollTimer)
+    bgPollTimer = null
+  }
+  pollPaused.value = true
+}
+
+function resumeBgPolling() {
+  if (bgPollTimer) {
+    clearInterval(bgPollTimer)
+    bgPollTimer = null
+  }
+  bgPollStartTime = Date.now()
+  pollPaused.value = false
+  bgPollTimer = setInterval(pollProcessOutput, 1000)
+  pollProcessOutput()
+}
+
+async function pollProcessOutput() {
+  const tc = props.toolCall
+  if (!tc.pid) { stopBgPolling(); return }
+  if (pollInFlight) return
+
+  if (Date.now() - bgPollStartTime > BG_POLL_DURATION_MS) {
+    pauseBgPolling()
+    return
+  }
+
+  pollInFlight = true
+  try {
+    const data = await fetchApi<{
+      pid: number
+      status: string
+      output: string
+      offset: number
+    }>(`/tools/process/${tc.pid}/output?offset=${bgPollOffset}`)
+
+    if (!tc.bgProcessRunning) return
+
+    if (data.output) {
+      tc.streamingOutput = (tc.streamingOutput || '') + data.output
+      bgPollOffset = data.offset
+    }
+
+    if (!data.status.startsWith('running')) {
+      stopBgPolling()
+    }
+  } catch {
+    // Transient error — don't stop, just skip this tick
+  } finally {
+    pollInFlight = false
+  }
+}
+
+watch(() => props.toolCall.bgProcessRunning, (val) => {
+  if (val) startBgPolling()
+  else stopBgPolling()
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  stopBgPolling()
+})
 
 watch(() => props.collapsed, (collapsed) => {
   if (userToggled.value || collapsed === undefined) return
@@ -127,20 +327,40 @@ function renderTextToHtml(value: string): string {
     .replace(/ {2}/g, '&nbsp;&nbsp;')
 }
 
+const isCommandTool = computed(() => props.toolCall.name.startsWith('command__'))
+
+function renderAnsiToHtml(value: string): string {
+  return ansiUp.ansi_to_html(value)
+    .replace(/\n/g, '<br>')
+    .replace(/ {2}/g, '&nbsp;&nbsp;')
+}
+
 const normalizedResult = computed(() => normalizeResult(props.toolCall.result))
 
-const renderedResult = computed(() => renderTextToHtml(normalizedResult.value))
+const renderedResult = computed(() => {
+  const text = normalizedResult.value
+  return isCommandTool.value ? renderAnsiToHtml(text) : renderTextToHtml(text)
+})
+
+const renderedStreamingOutput = computed(() => {
+  const raw = props.toolCall.streamingOutput || ''
+  const tail = raw.length > 100000 ? raw.slice(-100000) : raw
+  return isCommandTool.value ? renderAnsiToHtml(tail) : renderTextToHtml(tail)
+})
 
 const modalRenderedResult = computed(() => {
+  const source = props.toolCall.streamingOutput || normalizedResult.value
   const query = searchQuery.value.trim()
-  if (!query) return renderedResult.value
+  const base = isCommandTool.value ? renderAnsiToHtml(source) : renderTextToHtml(source)
+  if (!query) return base
 
-  const highlighted = normalizedResult.value.replace(
+  const highlighted = source.replace(
     new RegExp(escapeRegExp(query), 'gi'),
     (match) => `@@HIT_START@@${match}@@HIT_END@@`,
   )
 
-  return renderTextToHtml(highlighted)
+  const rendered = isCommandTool.value ? renderAnsiToHtml(highlighted) : renderTextToHtml(highlighted)
+  return rendered
     .replace(/@@HIT_START@@/g, '<mark class="tool-search-hit">')
     .replace(/@@HIT_END@@/g, '</mark>')
 })
@@ -370,13 +590,167 @@ const statusLabel = computed(() => {
 .tool-result {
   margin-top: 8px;
   padding: 8px 10px;
-  background: var(--el-fill-color);
+  background: #0d1117;
   border-radius: 6px;
   font-size: 12px;
-  max-height: 200px;
+  max-height: 400px;
   overflow-y: auto;
   border: 1px solid var(--el-border-color);
   position: relative;
+}
+
+.diff-result {
+  padding: 0;
+  overflow: hidden;
+}
+
+.diff-header {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #8b949e;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-body {
+  overflow-y: auto;
+  max-height: 380px;
+}
+
+.diff-body.collapsed {
+  max-height: 200px;
+}
+
+.diff-line {
+  display: flex;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 0 8px;
+}
+
+.diff-line.context {
+  color: #8b949e;
+}
+
+.diff-line.removed {
+  background: rgba(248, 81, 73, 0.1);
+  color: #f85149;
+}
+
+.diff-line.added {
+  background: rgba(63, 185, 80, 0.1);
+  color: #3fb950;
+}
+
+.diff-linenum {
+  width: 36px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 8px;
+  color: #484f58;
+  user-select: none;
+}
+
+.diff-prefix {
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  font-weight: 700;
+}
+
+.diff-content {
+  flex: 1;
+  min-width: 0;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-expand-btn {
+  width: 100%;
+  padding: 4px 0;
+  border: none;
+  border-top: 1px solid #30363d;
+  background: #161b22;
+  color: var(--el-color-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.diff-expand-btn:hover {
+  background: #1c2128;
+}
+
+.tool-result.streaming {
+  border-color: var(--el-color-primary-light-5);
+  background: #0d1117;
+}
+
+.poll-paused-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 0;
+  margin-top: 6px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
+.resume-poll-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.resume-poll-btn:hover {
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
+}
+
+.process-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.pid-badge {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.stop-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--el-color-danger-light-5);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--el-color-danger);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.stop-btn:hover {
+  background: var(--el-color-danger-light-9);
+  border-color: var(--el-color-danger);
 }
 
 .tool-result-rendered {
@@ -384,8 +758,9 @@ const statusLabel = computed(() => {
   white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
-  color: var(--el-text-color-secondary);
+  color: #c9d1d9;
   line-height: 1.65;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 }
 
 .fullscreen-btn {
@@ -419,8 +794,8 @@ const statusLabel = computed(() => {
 }
 
 .tool-modal {
-  width: min(900px, calc(100vw - 80px));
-  max-height: min(80vh, 760px);
+  width: min(1300px, calc(100vw - 40px));
+  max-height: min(92vh, 960px);
   min-height: 0;
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color);
@@ -576,10 +951,10 @@ const statusLabel = computed(() => {
 
 .tool-modal-body {
   min-height: 100%;
-  padding: 16px;
+  padding: 20px;
   margin: 0;
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: 15px;
+  line-height: 1.8;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
