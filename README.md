@@ -60,6 +60,9 @@
 
 ![HTTP追踪与Token面板](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc02.png)
 
+**智能体管理**
+![智能体管理](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/agent_management.png)
+
 **工具调用详情**
 
 ![工具调用卡片](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc03.png)
@@ -389,7 +392,7 @@ npm run test:code-agent
 }
 ```
 
-## lc-agent 能不能作为aicoding 工具来使用？
+### lc-agent 能不能作为aicoding 工具来使用？
 
 答：完全可以，而且编程效果和体验都很好。
 
@@ -403,6 +406,16 @@ lc-agent前端对代码改动和代码执行的渲染，达到了 traework codex
 
 lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以作为 通用agent来使用，ai coding只是能力之一。
 
+### agent 设置项目模式后有什么区别？
+
+答：相当于 Cursor / Codex 打开某个项目的效果。绑定本地目录后，AI 自动识别并遵守该项目的 `AGENTS.md` 规则，同时加载项目专属的 Skills（技能），加载项目级mcp配置文件，无需每次手动告知 AI 当前在哪个项目。
+相当于你为cursor codex创建的项目级别的 AGENTS.md 和 .agents 文件夹的skills和mcp配置，能被`lc-agent`自动复用。
+
+### 质疑lc-agent是不是装逼重复造轮子，为什么不用codex traework？
+
+lc-agent既是产品又是框架， 是给希望开发agent人员用的，对agent开发感兴趣，能自定义开发agent的，尤其是使用langchain开发agent的。 里面的很多功能都是对观测llm行为有巨大帮助的，看下lc-agent的前端界面就知道了，里面有大量的功能是帮助看清和llm交互的详细过程，而不是简单的想openwebui那样给普通飞码农用的聊天网页。从lc-agent前端就能很清楚知道到底和llm是怎么交互的，codex traework qoder是黑盒的，不方便你看到底层交互原理。
+
+codex是给普通码农编程用的，如果你对开发自己的agent毫无兴需求和兴趣，对和llm交互毫无兴趣，对ai原理毫无兴趣，只是希望用ai来完成写普通业务项目代码，那当然直接用codex就可以了。
 
 ## License
 

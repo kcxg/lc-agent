@@ -87,14 +87,19 @@ def _emit_write_preview(file_path: str, content: str, mode: str) -> None:
 
 @tool(group="file_write", group_description="文件写入")
 def write_file(
-    path: Annotated[str, "要写入的文件路径"],
-    content: Annotated[str, "要写入的文本内容"],
+    path: Annotated[str, "Path to the file to write"],
+    content: Annotated[str, "Text content to write"],
     mode: Annotated[
         str,
-        "写入模式：'rewrite' 覆盖全部内容（默认）；'append' 追加到文件末尾",
+        "Write mode: 'rewrite' replaces the entire file (default); 'append' adds content to the end",
     ] = "rewrite",
 ) -> str:
-    """写入文件内容。支持覆盖写入和追加模式，自动创建父目录。"""
+    """Write content to a file, creating it if it doesn't exist or replacing it entirely — no confirmation is asked.
+
+    Paths resolve relative to the project root (project mode) or server working directory; absolute paths are also accepted. Parent directories are created automatically.
+    IMPORTANT: If the file already exists and you intend to rewrite it, call `read_file` first to avoid accidentally discarding content you didn't mean to remove.
+    For partial edits to an existing file, prefer `edit_block` instead of a full rewrite.
+    """
     try:
         resolved = validate_write_path(path)
     except PermissionError as e:
@@ -127,9 +132,9 @@ def write_file(
 
 @tool(group="file_write", group_description="文件写入")
 def create_directory(
-    path: Annotated[str, "要创建的目录路径（支持多级创建）"],
+    path: Annotated[str, "Directory path to create (multi-level creation supported)"],
 ) -> str:
-    """创建目录。自动创建所有不存在的父级目录。"""
+    """Create a directory (and all missing parent directories) at the given path."""
     try:
         resolved = validate_write_path(path)
     except PermissionError as e:
@@ -152,10 +157,10 @@ def create_directory(
 
 @tool(group="file_write", group_description="文件写入")
 def move_file(
-    source: Annotated[str, "源文件或目录的路径"],
-    destination: Annotated[str, "目标路径"],
+    source: Annotated[str, "Source file or directory path"],
+    destination: Annotated[str, "Destination path"],
 ) -> str:
-    """移动或重命名文件/目录。"""
+    """Move or rename a file or directory. Destination parent directories are created automatically."""
     try:
         resolved_src = validate_write_path(source)
         resolved_dst = validate_write_path(destination)
@@ -179,18 +184,18 @@ def move_file(
 
 @tool(group="file_write", group_description="文件写入")
 def edit_block(
-    file_path: Annotated[str, "要编辑的文件路径"],
-    old_string: Annotated[str, "要被替换的原始文本（必须精确匹配文件中的内容）"],
-    new_string: Annotated[str, "替换后的新文本"],
+    file_path: Annotated[str, "Path to the file to edit"],
+    old_string: Annotated[str, "Exact text to replace; must match the file content character-for-character including whitespace"],
+    new_string: Annotated[str, "Replacement text"],
     expected_replacements: Annotated[
         int,
-        "期望替换的次数（默认 1）。用于校验精确性——如果实际匹配数不等于此值则拒绝替换。",
+        "Expected number of replacements (default 1). The edit is refused if the actual match count differs, preventing accidental bulk changes.",
     ] = 1,
 ) -> str:
-    """精确查找并替换文件中的文本片段。
+    """Precisely find and replace a text block in a file.
 
-    要求 old_string 在文件中的出现次数恰好等于 expected_replacements，
-    否则拒绝操作以防止误修改。
+    IMPORTANT: Call `read_file` on the target file before using this tool. The old_string must match the current file content exactly (character-for-character, including indentation and newlines) — use the text returned by `read_file` as the source.
+    Requires old_string to appear exactly expected_replacements times; refuses to edit if the count doesn't match, preventing accidental bulk changes.
     """
     try:
         resolved = validate_write_path(file_path)

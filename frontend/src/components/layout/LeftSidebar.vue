@@ -36,7 +36,7 @@
           v-for="group in renderedGroups"
           :key="group.agentId"
           class="agent-section"
-          :class="{ 'is-active-agent': group.agentName === activeAgentName }"
+          :class="[`agent-src-${group.agentSource}`, { 'is-active-agent': group.agentId === activeAgentId }]"
         >
           <button
             type="button"
@@ -44,6 +44,7 @@
             @click="toggleGroup(group.agentName)"
           >
             <span class="agent-group-arrow" :class="{ collapsed: collapsedGroups.has(group.agentName) }">▶</span>
+            <span class="agent-group-icon">{{ group.agentIcon }}</span>
             <span class="agent-group-name">{{ group.agentName }}</span>
             <span class="agent-card-count">{{ group.badgeText }}</span>
           </button>
@@ -89,8 +90,9 @@
               class="show-more-btn"
               @click="showMore(group.agentId)"
             >
+              <span class="show-more-icon">↓</span>
               <span>显示更多</span>
-              <span class="show-more-hint">每次显示更多 20 条</span>
+              <span class="show-more-hint">还有 {{ group.hiddenCount }} 条</span>
             </button>
           </div>
         </section>
@@ -128,9 +130,22 @@ const visibleCountByAgent = ref<Record<string, number>>({})
 interface SidebarGroup {
   agentId: string
   agentName: string
+  agentIcon: string
+  agentSource: 'builtin' | 'code' | 'user' | 'deleted'
+  isProjectMode: boolean
   badgeText: string
   visibleSessions: Session[]
   hiddenCount: number
+}
+
+function getAgentIcon(agent: { id: string; source: string; project_mode?: boolean } | null): string {
+  if (!agent) return '🤖'
+  if (agent.project_mode) return '📁'
+  if (agent.source === 'code') return '⚙️'
+  if (agent.id === 'chat') return '💬'
+  if (agent.id === 'empty') return '🧩'
+  if (agent.source === 'builtin') return '✨'
+  return '🤖'
 }
 
 function loadCollapsedGroups() {
@@ -149,9 +164,9 @@ function persistCollapsedGroups() {
 
 const collapsedGroups = ref<Set<string>>(loadCollapsedGroups())
 
-const activeAgentName = computed(() => {
+const activeAgentId = computed(() => {
   const session = sessionsStore.sessions.find(s => s.id === sessionsStore.currentSessionId)
-  return agentsStore.getAgentName(session?.agent_id || 'chat')
+  return session?.agent_id || 'chat'
 })
 
 const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
@@ -190,6 +205,7 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
 
   return [...buckets.entries()]
     .map(([agentId, sessions]) => {
+      const agentInfo = agentsStore.agents.find(a => a.id === agentId)
       const agentName = agentsStore.getAgentName(agentId)
       const sorted = sessions.slice().sort(compareSessions)
       const visibleCount = getVisibleCount(agentId)
@@ -197,6 +213,9 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
       return {
         agentId,
         agentName,
+        agentIcon: getAgentIcon(agentInfo ?? null),
+        agentSource: (agentInfo?.source ?? 'deleted') as SidebarGroup['agentSource'],
+        isProjectMode: agentInfo?.project_mode ?? false,
         badgeText: normalizedQuery.value ? `${sorted.length}/${totalCount}` : String(sorted.length),
         visibleSessions: sorted.slice(0, visibleCount),
         hiddenCount: Math.max(sorted.length - visibleCount, 0),
@@ -446,15 +465,24 @@ onBeforeUnmount(() => {
 
 .agent-section {
   border: 1px solid var(--sidebar-agent-card-border);
+  border-left: 3px solid var(--sidebar-agent-card-border);
   border-radius: 10px;
   background: var(--sidebar-agent-card-bg);
   overflow: visible;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
+/* Source-based left accent color */
+.agent-src-user    { border-left-color: var(--el-color-primary-light-4); }
+.agent-src-code    { border-left-color: var(--el-color-warning-light-3); }
+.agent-src-builtin { border-left-color: var(--el-color-success-light-4); }
+.agent-src-deleted { border-left-color: var(--el-text-color-placeholder); opacity: 0.8; }
+
 .agent-section.is-active-agent {
   border-color: var(--sidebar-agent-card-active-border);
+  border-left-color: var(--el-color-primary);
   box-shadow: 0 0 0 1px var(--sidebar-agent-card-active-ring);
+  background: var(--sidebar-agent-card-active-bg);
 }
 
 .agent-section-header {
@@ -462,17 +490,27 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   border: none;
+  border-radius: 8px 8px 0 0;
   background: transparent;
   cursor: pointer;
   font-weight: 700;
   color: var(--el-text-color-primary);
   text-align: left;
+  transition: background 0.13s;
 }
 
 .agent-section-header:hover {
-  background: var(--el-fill-color-lighter);
+  background: color-mix(in srgb, var(--el-fill-color-light) 60%, transparent);
+}
+
+.is-active-agent .agent-section-header {
+  color: var(--el-color-primary);
+}
+
+.is-active-agent .agent-group-name {
+  color: var(--el-color-primary);
 }
 
 .agent-group-arrow {
@@ -487,6 +525,12 @@ onBeforeUnmount(() => {
   transform: rotate(0deg);
 }
 
+.agent-group-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
 .agent-group-name {
   font-size: 12px;
   font-weight: 700;
@@ -497,6 +541,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 
 .agent-card-count {
   font-size: 10px;
@@ -538,6 +583,18 @@ onBeforeUnmount(() => {
 .session-item.is-active {
   background: var(--sidebar-agent-card-active-bg);
   color: var(--el-color-primary);
+  font-weight: 600;
+}
+
+.session-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--el-color-primary);
 }
 
 .session-rail {
@@ -625,24 +682,35 @@ onBeforeUnmount(() => {
 
 .show-more-btn {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  margin-top: 2px;
-  padding: 8px 8px 4px;
-  border: none;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 5px 10px;
+  border: 1px dashed var(--el-border-color-lighter);
+  border-radius: 6px;
   background: transparent;
   color: var(--el-text-color-secondary);
   cursor: pointer;
+  font-size: 12px;
+  width: 100%;
+  transition: all 0.15s;
 }
 
 .show-more-btn:hover {
+  background: var(--el-fill-color-light);
   color: var(--el-text-color-primary);
+  border-color: var(--el-border-color-light);
+}
+
+.show-more-icon {
+  font-size: 11px;
+  opacity: 0.7;
 }
 
 .show-more-hint {
   font-size: 11px;
-  opacity: 0.72;
+  color: var(--el-text-color-placeholder);
+  margin-left: auto;
 }
 
 .empty-state {

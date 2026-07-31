@@ -18,14 +18,13 @@
         :model-value="agentsStore.currentAgentId"
         size="small"
         @change="$emit('changeAgent', $event)"
-        :prefix-icon="MagicStick"
         placeholder="选择智能体"
         popper-class="agent-select-popper"
       >
         <el-option
           v-for="agent in agentsStore.agents"
           :key="agent.id"
-          :label="agent.display_name || agent.name"
+          :label="`${getAgentIcon(agent)} ${agent.display_name || agent.name}`"
           :value="agent.id"
         >
           <div class="agent-option">
@@ -40,16 +39,17 @@
           </div>
         </el-option>
       </el-select>
-      <span v-if="agentsStore.currentAgent?.project_mode" class="selected-project-badge">项目</span>
       </div>
       <div class="header-actions desktop-only">
-        <button class="header-btn btn-edit" @click="$emit('editAgent')" :disabled="agentsStore.isBuiltin">编辑</button>
-        <button class="header-btn btn-new-agent" @click="$emit('newAgent')">+ 新Agent</button>
+        <button class="header-btn btn-manage-agents" @click="$emit('manageAgents')">⚙ Agents管理</button>
         <button class="header-btn btn-new-chat" @click="$emit('newChat')">+ 新对话</button>
         <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
       </div>
     </div>
     <div class="header-right">
+      <button class="header-btn mobile-agents-btn" @click="$emit('manageAgents')" aria-label="Agents管理">
+        <el-icon><Briefcase /></el-icon>
+      </button>
       <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">
         <el-icon class="mobile-btn-icon"><Plus /></el-icon>
         <span class="mobile-btn-text">新对话</span>
@@ -65,6 +65,7 @@
         </span>
         <template #dropdown>
           <el-dropdown-menu>
+            <el-dropdown-item command="manage-agents" class="mobile-manage-agents-item">⚙ Agents管理</el-dropdown-item>
             <el-dropdown-item command="change-password">修改密码</el-dropdown-item>
             <el-dropdown-item v-if="authStore.isAdmin" command="admin">管理后台</el-dropdown-item>
             <el-dropdown-item divided command="logout">登出</el-dropdown-item>
@@ -96,7 +97,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon, Menu, Setting, RefreshRight, MagicStick, UserFilled, ArrowDown, Plus } from '@element-plus/icons-vue'
+import { Sunny, Moon, Menu, Setting, RefreshRight, UserFilled, ArrowDown, Plus, Briefcase } from '@element-plus/icons-vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
 import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
 
@@ -109,7 +110,9 @@ const { isDark, toggleDark } = useTheme()
 const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
 
 function handleUserCommand(command: string) {
-  if (command === 'change-password') {
+  if (command === 'manage-agents') {
+    emit('manageAgents')
+  } else if (command === 'change-password') {
     changePasswordRef.value?.open()
   } else if (command === 'admin') {
     router.push('/admin')
@@ -124,6 +127,7 @@ function reloadPage() {
 }
 
 function getAgentIcon(agent: any): string {
+  if (agent.project_mode) return '📁'
   if (agent.source === 'code') return '⚙️'
   if (agent.id === 'chat') return '💬'
   if (agent.id === 'empty') return '🧩'
@@ -145,9 +149,8 @@ defineProps<{
   modelName: string
 }>()
 
-defineEmits<{
-  editAgent: []
-  newAgent: []
+const emit = defineEmits<{
+  manageAgents: []
   newChat: []
   changeAgent: [id: string]
   openMobileSidebar: []
@@ -220,23 +223,6 @@ defineEmits<{
   gap: 6px;
 }
 
-.selected-project-badge {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(6, 182, 212, 0.1));
-  color: #0284c7;
-  border: 1px solid rgba(2, 132, 199, 0.2);
-  white-space: nowrap;
-}
-
-:global(html.dark) .selected-project-badge {
-  background: rgba(14, 165, 233, 0.15);
-  color: #38bdf8;
-  border-color: rgba(56, 189, 248, 0.25);
-}
 
 .agent-select {
   width: 260px;
@@ -467,31 +453,15 @@ defineEmits<{
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent), 0 8px 20px rgba(15, 23, 42, 0.12);
 }
 
-.btn-edit {
+.btn-manage-agents {
   color: #f5f3ff;
-  background: linear-gradient(135deg, #5b4b8a, #475569);
-  border-color: rgba(109, 91, 163, 0.42);
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  border-color: rgba(99, 102, 241, 0.42);
 }
 
-.btn-edit:hover:not(:disabled) {
-  background: linear-gradient(135deg, #6d5fa8, #52627a);
-  border-color: rgba(129, 111, 181, 0.5);
-}
-
-.btn-edit:disabled {
-  opacity: 0.48;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-.btn-new-agent {
-  color: #ffffff;
-  background: linear-gradient(135deg, #2563eb, #3b82f6);
-  border-color: rgba(37, 99, 235, 0.42);
-}
-
-.btn-new-agent:hover {
-  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+.btn-manage-agents:hover {
+  background: linear-gradient(135deg, #4338ca, #4f46e5);
+  border-color: rgba(99, 102, 241, 0.55);
 }
 
 .btn-new-chat,
@@ -531,15 +501,41 @@ defineEmits<{
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.34);
 }
 
-:global(html.dark) .btn-edit {
-  color: #f5f3ff;
-  background: linear-gradient(135deg, rgba(88, 70, 139, 0.98), rgba(51, 65, 85, 0.96));
-  border-color: rgba(129, 111, 181, 0.3);
+:global(html.dark) .btn-manage-agents {
+  color: #ede9fe;
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.9), rgba(99, 102, 241, 0.85));
+  border-color: rgba(129, 140, 248, 0.3);
 }
 
-:global(html.dark) .btn-edit:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(109, 95, 168, 0.98), rgba(71, 85, 105, 0.98));
-  border-color: rgba(167, 139, 250, 0.42);
+:global(html.dark) .btn-manage-agents:hover {
+  background: linear-gradient(135deg, rgba(67, 56, 202, 0.95), rgba(79, 70, 229, 0.95));
+  border-color: rgba(165, 180, 252, 0.42);
+}
+
+/* Hide "Agents管理" dropdown item everywhere (dedicated buttons on both desktop and mobile) */
+:global(.mobile-manage-agents-item) {
+  display: none !important;
+}
+
+/* Mobile Agents管理 icon button — hidden on desktop */
+.mobile-agents-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 18px;
+  color: var(--el-text-color-regular);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+.mobile-agents-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-color-primary);
 }
 
 @keyframes pulse {
@@ -548,6 +544,11 @@ defineEmits<{
 }
 
 @media (max-width: 900px) {
+  /* Show Agents管理 icon button on mobile */
+  .mobile-agents-btn {
+    display: flex;
+  }
+
   .app-header {
     padding: 8px 10px;
     gap: 6px;

@@ -9,13 +9,8 @@ from langchain.agents.middleware.summarization import SummarizationMiddleware
 from langchain.agents.middleware.todo import WRITE_TODOS_SYSTEM_PROMPT, WRITE_TODOS_TOOL_DESCRIPTION
 from langchain_agentskills import SkillMiddleware
 
-try:
-    from langchain.agents.middleware.types import AgentMiddleware as _AgentMiddlewareBase
-    from langchain_core.messages import SystemMessage
-    _HAS_MIDDLEWARE_BASE = True
-except ImportError:
-    _AgentMiddlewareBase = object  # type: ignore[misc,assignment]
-    _HAS_MIDDLEWARE_BASE = False
+from langchain.agents.middleware.types import AgentMiddleware as _AgentMiddlewareBase
+from langchain_core.messages import SystemMessage
 
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
@@ -70,7 +65,7 @@ TODO_FINAL_ANSWER_GUARD = """## Final Answer Guard for `write_todos`
 - If the only remaining todo is about producing the final answer, do not call `write_todos` just to mark it complete. Deliver the final answer directly.
 """
 
-TODO_SYSTEM_PROMPT = f"{WRITE_TODOS_SYSTEM_PROMPT}\n\n{TODO_FINAL_ANSWER_GUARD}"
+TODO_SYSTEM_PROMPT = f"<todo_usage_rules>\n{WRITE_TODOS_SYSTEM_PROMPT}\n\n{TODO_FINAL_ANSWER_GUARD}\n</todo_usage_rules>"
 TODO_TOOL_DESCRIPTION = f"{WRITE_TODOS_TOOL_DESCRIPTION}\n\n{TODO_FINAL_ANSWER_GUARD}"
 
 _LOAD_SKILL_DESCRIPTION = (
@@ -93,6 +88,7 @@ def _build_skills_prompt(skills: list) -> str:
         for s in skills
     ]
     lines = [
+        "<available_skills>",
         "## Available Skills",
         "",
         "The descriptions below are **triggers** — they tell you WHEN a skill applies.",
@@ -109,6 +105,7 @@ def _build_skills_prompt(skills: list) -> str:
         "",
         "After loading a skill, you may also call `read_skill_resource` to fetch",
         "its reference files or `run_skill_script` to execute its scripts.",
+        "</available_skills>",
     ]
     return "\n".join(lines)
 
@@ -127,6 +124,7 @@ class _LcAgentSkillMiddleware(SkillMiddleware):
         loader: Any,
         *,
         allowed_skills: list[str] | None = None,
+        executor: Any = None,
     ) -> None:
         from lc_agent.skills.filtered_loader import _AllowedSkillsWrapper
         effective_loader = (
@@ -134,7 +132,11 @@ class _LcAgentSkillMiddleware(SkillMiddleware):
             if allowed_skills is not None
             else loader
         )
-        super().__init__(loader=effective_loader, prompt_builder=_build_skills_prompt)
+        super().__init__(
+            loader=effective_loader,
+            executor=executor,
+            prompt_builder=_build_skills_prompt,
+        )
         self.tools = [
             t.model_copy(update={"description": _LOAD_SKILL_DESCRIPTION})
             if t.name == "load_skill"
@@ -239,10 +241,12 @@ def _build_project_context_text(project_root: str) -> str:
         git_section = "**Git Status**: Not a git repository"
 
     return (
+        "<project_context>\n"
         "## Project Context\n\n"
         f"**Root**: {project_root}\n"
         f"**OS**: {os_info}\n"
         f"{git_section}"
+        "\n</project_context>"
     )
 
 
@@ -297,6 +301,7 @@ SUBAGENT_DELEGATION_PROMPT = (
 )
 
 TASK_SYSTEM_PROMPT = """\
+<subagent_usage_rules>
 ## task（子智能体调度器）
 
 你拥有 `task` 工具，可以将独立任务委派给专用子智能体完成。\
@@ -335,7 +340,8 @@ TASK_SYSTEM_PROMPT = """\
 - 任务简单（几次工具调用或快速查询即可）
 - 你需要看到中间推理过程（task 工具会隐藏中间步骤）
 - 委派的子任务过于简短，拆分只会增加延迟而没有收益
-- 任务依赖你的当前上下文，无法独立表达为完整的委派描述"""
+- 任务依赖你的当前上下文，无法独立表达为完整的委派描述
+</subagent_usage_rules>"""
 
 
 @dataclass(frozen=True)
@@ -699,8 +705,6 @@ class AgentEngine:
 
         system_prompt = preset.system_prompt
         # Subagents need an explicit reminder that only the final message is returned to the caller
-        if _depth > 0 and not _HAS_MIDDLEWARE_BASE:
-            system_prompt = f"{system_prompt}\n\n{SUBAGENT_DELEGATION_PROMPT}"
         tools = self.tool_registry.get_filtered_tools(preset.allowed_tool_groups)
 
         # Set project skills overlay (only top-level; subagents inherit parent's overlay)
@@ -722,12 +726,16 @@ class AgentEngine:
 
         _memory_middleware: _SystemBlockMiddleware | None = None
         _skills_middleware: _LcAgentSkillMiddleware | None = None
-        if _HAS_MIDDLEWARE_BASE and hasattr(self, '_skills_toolkit') and self._skills_toolkit:
+        if hasattr(self, '_skills_toolkit') and self._skills_toolkit:
             allowed = preset.allowed_skills
             if allowed is None or allowed:
                 loader = self._skills_toolkit._resolved_loader
                 if loader:
-                    _candidate = _LcAgentSkillMiddleware(loader, allowed_skills=allowed)
+                    _candidate = _LcAgentSkillMiddleware(
+                        loader,
+                        allowed_skills=allowed,
+                        executor=self._skills_toolkit._executor,
+                    )
                     if _candidate.has_visible_skills:
                         _skills_middleware = _candidate
 
@@ -747,10 +755,7 @@ class AgentEngine:
             )
 
             tools = tools + build_memory_tools()
-            if _HAS_MIDDLEWARE_BASE:
-                _memory_middleware = _SystemBlockMiddleware(MEMORY_SYSTEM_PROMPT, "MemoryPromptMiddleware")
-            else:
-                system_prompt = f"{system_prompt}\n\n{MEMORY_SYSTEM_PROMPT}"
+            _memory_middleware = _SystemBlockMiddleware(MEMORY_SYSTEM_PROMPT, "MemoryPromptMiddleware")
             kwargs["store"] = self._store
             kwargs["context_schema"] = AgentRuntimeContext
 
@@ -771,48 +776,44 @@ class AgentEngine:
         llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
 
         middleware = []
-        if _depth > 0 and _HAS_MIDDLEWARE_BASE:
+        if _depth > 0:
             middleware.append(_SystemBlockMiddleware(
                 SUBAGENT_DELEGATION_PROMPT, "SubagentDelegationMiddleware", prepend=True
             ))
 
         # Project folder mode (all controlled by project_mode master switch)
-        if _depth == 0 and _effective_project_root and _HAS_MIDDLEWARE_BASE:
+        if _depth == 0 and _effective_project_root:
             # 1. AGENTS.md rules injection
             _agents_md = self._read_project_agents_md(_effective_project_root)
             if _agents_md:
                 middleware.append(_SystemBlockMiddleware(
-                    f"## Project Rules (AGENTS.md)\n\n{_agents_md}",
+                    f"<project_rules>\n## Project Rules (AGENTS.md)\n\n{_agents_md}\n</project_rules>",
                     "ProjectAgentsMdMiddleware",
                 ))
             # 2. Git status + OS context snapshot injection
             # Use cached text pre-computed async in chat_stream; fall back to sync if missing.
             _ctx_text = self._project_ctx_text_cache.get(_effective_project_root) or _build_project_context_text(_effective_project_root)
             middleware.append(_SystemBlockMiddleware(_ctx_text, "ProjectContextMiddleware"))
-            # 3. lc-agent tool usage guidelines (project mode always has file tools via UI validation)
-            try:
-                from lc_agent.prompts.lc_agent_ai_coding_prompts import TOOL_USAGE_PROMPT
-                middleware.append(_SystemBlockMiddleware(TOOL_USAGE_PROMPT, "ToolUsageGuidelinesMiddleware"))
-            except ImportError:
-                pass
+            # 3. Per-tool-group usage guidelines (injected only for enabled groups)
+            from lc_agent.prompts.builtin_agent_prompts import TOOL_GROUP_GUIDELINES
+            _tg = preset.allowed_tool_groups  # None=all, []=none, [...]=specific
+            for _group_id, _group_prompt in TOOL_GROUP_GUIDELINES.items():
+                if _tg is None or _group_id in _tg:
+                    middleware.append(_SystemBlockMiddleware(_group_prompt, f"{_group_id}GuidelinesMiddleware"))
 
         if _memory_middleware is not None:
             middleware.append(_memory_middleware)
         if _skills_middleware is not None:
             middleware.append(_skills_middleware)
         if _depth == 0 and subagent_registry:
-            if _HAS_MIDDLEWARE_BASE:
-                middleware.append(_SystemBlockMiddleware(TASK_SYSTEM_PROMPT, "TaskSystemPromptMiddleware"))
-            else:
-                system_prompt = f"{system_prompt}\n\n{TASK_SYSTEM_PROMPT}"
+            middleware.append(_SystemBlockMiddleware(TASK_SYSTEM_PROMPT, "TaskSystemPromptMiddleware"))
         if _depth == 0:
             middleware.append(TodoListMiddleware(
                 system_prompt=TODO_SYSTEM_PROMPT,
                 tool_description=TODO_TOOL_DESCRIPTION,
             ))
         middleware.extend(self._build_summarization_middleware(preset))
-        if _HAS_MIDDLEWARE_BASE:
-            middleware.append(_RUNTIME_CONTEXT_MIDDLEWARE)
+        middleware.append(_RUNTIME_CONTEXT_MIDDLEWARE)
 
         # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
         if hasattr(self, '_permissions_service') and self._permissions_service and _depth == 0:

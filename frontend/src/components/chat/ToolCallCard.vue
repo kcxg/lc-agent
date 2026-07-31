@@ -19,7 +19,7 @@
       <el-tag size="small" :type="statusType">{{ statusLabel }}</el-tag>
       <span class="tool-meta" v-if="toolCall.status === 'done'">
         <span v-if="toolCall.duration" class="meta-item">⏱ {{ formatDuration(toolCall.duration) }}</span>
-        <span v-if="toolCall.resultLength" class="meta-item">📦 {{ formatSize(toolCall.resultLength) }}</span>
+        <span v-if="toolCall.resultLength" class="meta-item">📦 {{ formatSize(toolCall.resultLength) }}<template v-if="tokenCount !== null"> | {{ formatTokenCount(tokenCount) }} tokens</template></span>
       </span>
       <span v-if="toolCall.pid && !processKilled && (toolCall.bgProcessRunning || toolCall.status === 'running')" class="process-info">
         <span class="pid-badge">PID {{ toolCall.pid }}</span>
@@ -125,6 +125,15 @@ import { Loading, Check, Tools, CircleCloseFilled } from '@element-plus/icons-vu
 import { AnsiUp } from 'ansi_up'
 import type { ToolCall, FileDiffData, FilePreviewData } from '@/stores/chat'
 import { fetchApi } from '@/api/http'
+
+// lazy-load js-tiktoken only when the first tool result arrives
+let _encPromise: Promise<{ encode: (text: string) => ArrayLike<number> }> | null = null
+function getTiktokenEnc() {
+  if (!_encPromise) {
+    _encPromise = import('js-tiktoken').then(({ getEncoding }) => getEncoding('cl100k_base'))
+  }
+  return _encPromise
+}
 
 const ansiUp = new AnsiUp()
 
@@ -465,6 +474,30 @@ const statusLabel = computed(() => {
     default: return '等待'
   }
 })
+
+const tokenCount = ref<number | null>(null)
+
+watch(
+  [() => props.toolCall.result, () => props.toolCall.status],
+  async ([result, status]) => {
+    if (!result || status !== 'done' || result.length > 500_000) {
+      tokenCount.value = null
+      return
+    }
+    try {
+      const enc = await getTiktokenEnc()
+      tokenCount.value = enc.encode(result).length
+    } catch {
+      tokenCount.value = null
+    }
+  },
+  { immediate: true }
+)
+
+function formatTokenCount(count: number): string {
+  if (count < 1000) return `~${count}`
+  return `~${(count / 1000).toFixed(1)}K`
+}
 </script>
 
 <style scoped>

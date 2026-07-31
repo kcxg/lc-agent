@@ -94,6 +94,7 @@
             <th>状态</th>
             <th>耗时</th>
             <th>返回长度</th>
+            <th>Tokens</th>
           </tr>
         </thead>
         <tbody>
@@ -103,6 +104,7 @@
             <td><span class="status-dot" :class="tc.status" />{{ statusLabel(tc.status) }}</td>
             <td class="col-duration">{{ tc.duration ? formatDuration(tc.duration) : '-' }}</td>
             <td>{{ tc.resultLength ? formatSize(tc.resultLength) : '-' }}</td>
+            <td class="col-tokens">{{ toolTokenCounts[i] != null ? formatToolTokenCount(toolTokenCounts[i]!) : (tc.status === 'done' && tc.result ? '…' : '-') }}</td>
           </tr>
         </tbody>
       </table>
@@ -112,8 +114,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import type { MessageUsage, ToolCall } from '@/stores/chat'
+
+let _encPromise: Promise<{ encode: (text: string) => ArrayLike<number> }> | null = null
+function getTiktokenEnc() {
+  if (!_encPromise) {
+    _encPromise = import('js-tiktoken').then(({ getEncoding }) => getEncoding('cl100k_base'))
+  }
+  return _encPromise
+}
 
 const props = defineProps<{
   usage: MessageUsage | undefined
@@ -123,6 +133,35 @@ const expanded = ref(false)
 const toolsExpanded = ref(false)
 const usageDetailsRef = ref<HTMLElement>()
 const toolsDetailsRef = ref<HTMLElement>()
+const toolTokenCounts = ref<Record<number, number | null>>({})
+
+async function computeToolTokens(tcs: ToolCall[]) {
+  const enc = await getTiktokenEnc()
+  const newCounts: Record<number, number | null> = {}
+  for (let i = 0; i < tcs.length; i++) {
+    const result = tcs[i].result
+    if (result && tcs[i].status === 'done' && result.length <= 500_000) {
+      try {
+        newCounts[i] = enc.encode(result).length
+      } catch {
+        newCounts[i] = null
+      }
+    } else {
+      newCounts[i] = null
+    }
+  }
+  toolTokenCounts.value = newCounts
+}
+
+watch(
+  [() => props.toolCalls, toolsExpanded],
+  ([tcs, expanded]) => {
+    if (expanded && tcs && tcs.length > 0) {
+      computeToolTokens(tcs as ToolCall[])
+    }
+  },
+  { immediate: true }
+)
 
 const totalInput = computed(() =>
   props.usage?.rounds.reduce((s, r) => s + r.inputTokens, 0) || 0
@@ -163,6 +202,11 @@ function formatDuration(ms: number): string {
 function formatSize(len: number): string {
   if (len < 1024) return `${len} chars`
   return `${(len / 1024).toFixed(1)}K`
+}
+
+function formatToolTokenCount(count: number): string {
+  if (count < 1000) return `~${count}`
+  return `~${(count / 1000).toFixed(1)}K`
 }
 
 function statusLabel(status: string): string {

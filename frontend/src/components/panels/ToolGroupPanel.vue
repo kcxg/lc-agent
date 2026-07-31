@@ -3,7 +3,7 @@
     <div v-for="group in groups" :key="group.id" class="group-item" :class="{ 'not-allowed': !(group as any).allowed && (group as any).allowed !== undefined }">
       <div class="group-header">
         <div class="group-title">
-          <span class="group-name">{{ group.description || group.id }}</span>
+          <span class="group-name">{{ group.id }}{{ group.description ? `（${group.description}）` : '' }}</span>
           <span class="group-count">{{ group.tools.length }}</span>
         </div>
         <div class="group-actions">

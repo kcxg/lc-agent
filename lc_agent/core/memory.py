@@ -15,9 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_MEMORY_NAMESPACE = ("lc-agent", "memories")
 
-MEMORY_SYSTEM_PROMPT = """You may use the memory tools to store and retrieve durable user memories.
+MEMORY_SYSTEM_PROMPT = """<memory_usage_rules>
+You may use the memory tools to store and retrieve durable user memories.
 Only save stable, user-relevant preferences or facts when the user explicitly asks you to remember them
-or when a memory is clearly useful for future conversations. Keep memory keys short and specific."""
+or when a memory is clearly useful for future conversations. Keep memory keys short and specific.
+</memory_usage_rules>"""
 
 
 @dataclass(frozen=True)

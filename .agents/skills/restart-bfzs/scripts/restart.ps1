@@ -9,7 +9,8 @@
 
 param(
     [int]$Port = 8001,
-    [string]$Host_ = "0.0.0.0"
+    [string]$Host_ = "0.0.0.0",
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,18 +20,7 @@ $BfzsDir = "D:\codes\lc-agent-bfzs"
 $Python = "D:\ProgramData\miniconda3\envs\py312\python.exe"
 $Netstat = Join-Path $env:SystemRoot "System32\netstat.exe"
 
-Write-Host "`n=== [1/3] Building frontend ===" -ForegroundColor Cyan
-Push-Location $FrontendDir
-try {
-    # Skip vue-tsc type checking (IDE handles it); run vite build only to avoid Zone OOM.
-    npx vite build
-    if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
-    Write-Host "Frontend build OK" -ForegroundColor Green
-} finally {
-    Pop-Location
-}
-
-Write-Host "`n=== [2/3] Stopping existing server on port $Port ===" -ForegroundColor Cyan
+Write-Host "`n=== [1/3] Stopping existing server on port $Port (free RAM before build) ===" -ForegroundColor Cyan
 function Get-PortProcessIds {
     param([int]$TargetPort)
 
@@ -98,6 +88,23 @@ if ($pids) {
     Write-Host "  Old server stopped" -ForegroundColor Green
 } else {
     Write-Host "  No existing server found" -ForegroundColor Yellow
+}
+
+if ($SkipBuild) {
+    Write-Host "`n=== [2/3] Skipping frontend build (SkipBuild flag set) ===" -ForegroundColor Yellow
+} else {
+    Write-Host "`n=== [2/3] Building frontend ===" -ForegroundColor Cyan
+    Push-Location $FrontendDir
+    try {
+        # Skip vue-tsc type checking (IDE handles it); run vite build only to avoid Zone OOM.
+        $env:NODE_OPTIONS = "--max-old-space-size=3072"
+        npx vite build
+        if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
+        Write-Host "Frontend build OK" -ForegroundColor Green
+    } finally {
+        $env:NODE_OPTIONS = ""
+        Pop-Location
+    }
 }
 
 Write-Host "`n=== [3/3] Starting bfzs server ===" -ForegroundColor Cyan

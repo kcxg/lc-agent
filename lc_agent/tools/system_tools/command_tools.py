@@ -168,20 +168,23 @@ def _get_shell() -> list[str]:
 
 @tool(group="command", group_description="命令执行")
 def run_command(
-    command: Annotated[str, "要执行的命令字符串"],
+    command: Annotated[str, "Command string to execute"],
     max_run_ms: Annotated[
         int,
-        "最大运行时间（毫秒）。命令运行超过此时间将被强制终止。默认 30000（30秒）。",
+        "Maximum run time in milliseconds before force-killing the process (default 30000 = 30s)",
     ] = 30000,
     working_directory: Annotated[
         str | None,
-        "命令执行的工作目录。不指定则使用项目根目录（项目模式）或服务器工作目录。",
+        "Working directory for the command; defaults to the project root (project mode) or server working directory",
     ] = None,
 ) -> str:
-    """执行一次性命令并等待其完成，返回完整输出。超时后进程会被强制终止。
+    """Execute a one-shot command and wait for it to finish; returns the full combined output. The process is force-killed on timeout.
 
-    适用场景：ls、pip install、git status、编译构建、运行会自行退出的脚本等。
-    不适用：Flask/Celery/dev server 等需要持续运行的服务——请改用 start_background_process。
+    Uses PowerShell (-NoProfile -Command) on Windows and $SHELL (default: /bin/sh) on Linux/macOS.
+    WARNING (Windows PowerShell 5.1): '&&' is not supported. Chain dependent commands with 'cmd1; if ($?) { cmd2 }' instead.
+
+    Use for: ls, pip install, git status, build scripts, or any command that exits on its own.
+    Do NOT use for: long-running servers (Flask, Celery, dev servers) — use start_background_process instead.
     """
     error = _validate_command(command)
     if error:
@@ -356,7 +359,7 @@ def _emit_output_chunk(content: str) -> None:
 
 @tool(group="command", group_description="命令执行")
 def list_all_processes() -> str:
-    """列出系统当前所有运行的进程（PID、名称、内存占用）。"""
+    """List all currently running system processes with their PID, name, and memory usage. Limited to the first 100 results."""
     system = platform.system()
     try:
         if system == "Windows":
@@ -392,7 +395,7 @@ def list_all_processes() -> str:
 
 @tool(group="command", group_description="命令执行")
 def list_agent_started_processes() -> str:
-    """列出由 start_background_process 启动的、当前被追踪的后台进程。"""
+    """List all background processes started by start_background_process that are currently tracked in this session."""
     _reap_exited_processes()
 
     if not _processes:
@@ -409,9 +412,9 @@ def list_agent_started_processes() -> str:
 
 @tool(group="command", group_description="命令执行")
 def kill_process(
-    pid: Annotated[int, "要终止的进程 PID"],
+    pid: Annotated[int, "PID of the process to terminate"],
 ) -> str:
-    """终止指定 PID 的进程。"""
+    """Terminate a process by its PID using SIGKILL on Linux/macOS or taskkill /F on Windows."""
     try:
         if platform.system() == "Windows":
             result = subprocess.run(
@@ -436,23 +439,22 @@ def kill_process(
 
 @tool(group="command", group_description="命令执行")
 def start_background_process(
-    command: Annotated[str, "要执行的命令字符串"],
+    command: Annotated[str, "Command string to execute in the background"],
     wait_ms: Annotated[
         int,
-        "等待初始输出的时间（毫秒）。超时后返回已收集到的输出，进程继续在后台运行不会被终止。默认 10000（10秒）。",
+        "Milliseconds to wait for initial output (default 10000 = 10s). After the wait the process keeps running in the background.",
     ] = 10000,
     working_directory: Annotated[
         str | None,
-        "命令执行的工作目录。不指定则使用项目根目录（项目模式）或服务器工作目录。",
+        "Working directory for the command; defaults to the project root (project mode) or server working directory",
     ] = None,
 ) -> str:
-    """启动长期运行的后台进程（不会被终止），返回 PID 和初始输出。
+    """Start a long-running process in the background and return its PID with initial output.
 
-    适用场景：Flask/Django/FastAPI 服务、Celery worker、webpack dev server、
-    数据库服务、任何不会自行退出的守护进程。
-    不适用：会自行退出的一次性命令——请改用 run_command。
+    Use for: Flask/Django/FastAPI servers, Celery workers, webpack dev servers, or any daemon that doesn't exit on its own.
+    Do NOT use for: one-shot commands that exit by themselves — use run_command instead.
 
-    启动后可用 read_process_output 查看后续输出，用 kill_process 终止。
+    After starting, use read_process_output to poll subsequent output and kill_process to terminate.
     """
     _reap_exited_processes()
 
@@ -545,13 +547,13 @@ def start_background_process(
 
 @tool(group="command", group_description="命令执行")
 def read_process_output(
-    pid: Annotated[int, "后台进程的 PID（由 start_background_process 返回）"],
+    pid: Annotated[int, "PID of the background process (returned by start_background_process)"],
     tail: Annotated[
         int,
-        "读取最后 N 行输出。设为 0 读取全部缓冲输出。默认 50。",
+        "Number of tail lines to return (default 50). Set 0 to return all buffered output.",
     ] = 50,
 ) -> str:
-    """读取后台进程的输出。返回进程状态和最近的 stdout/stderr 内容。"""
+    """Read buffered stdout/stderr from a tracked background process. Returns process status and recent output."""
     entry = _processes.get(pid)
     if entry is None:
         return f"Error: No tracked background process with PID {pid}. Use start_background_process to start one."
