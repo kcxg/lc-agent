@@ -413,7 +413,7 @@ lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以�
 
 ### 质疑lc-agent是不是装逼重复造轮子，为什么不用codex traework？
 
-lc-agent既是产品又是框架， 是给希望开发agent人员用的，对agent开发感兴趣，能自定义开发agent的，尤其是使用langchain开发agent的。 里面的很多功能都是对观测llm行为有巨大帮助的，看下lc-agent的前端界面就知道了，里面有大量的功能是帮助看清和llm交互的详细过程，而不是简单的想openwebui那样给普通飞码农用的聊天网页。从lc-agent前端就能很清楚知道到底和llm是怎么交互的，codex traework qoder是黑盒的，不方便你看到底层交互原理。
+lc-agent既是产品又是框架， 是给希望开发agent人员用的，或者对agent开发感兴趣，或者对ai为什么能编程写代码有兴趣的人员用的。希望自定义开发agent的，尤其是使用langchain开发agent的人，可以用这个。 里面的很多功能都是对观测llm行为有巨大帮助的，看下lc-agent的前端界面就知道了，里面有大量的功能是帮助看清和llm交互的详细过程，而不是简单的像`openwebui`那样给普通非码农用的普通聊天网页。从lc-agent前端就能很清楚知道到底和llm是怎么交互的，codex traework qoder是黑盒的，不方便你看到底层交互原理。
 
 codex是给普通码农编程用的，如果你对开发自己的agent毫无兴需求和兴趣，对和llm交互毫无兴趣，对ai原理毫无兴趣，只是希望用ai来完成写普通业务项目代码，那当然直接用codex就可以了。
 
