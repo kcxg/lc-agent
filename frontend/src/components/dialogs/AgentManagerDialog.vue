@@ -98,7 +98,7 @@
                       </el-button>
                     </div>
                     <div class="form-hint">
-                      开启后自动注入 AGENTS.md、skills、mcp、git 快照等等
+                      开启后自动注入 项目根目录下的AGENTS.md、 .agents 目录下的skills和mcp.json 和git status快照等等
                     </div>
                   </el-form-item>
 

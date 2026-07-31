@@ -33,9 +33,12 @@ def list_tool_groups(
     registry: ToolRegistry = Depends(get_registry),
 ):
     """List tool groups with their tools."""
+    from lc_agent.tools.registry import _BUILTIN_GROUP
     groups: dict[str, list] = {}
     for name, entry in registry._global_tools.items():
         group_name = entry["group"] or "__ungrouped__"
+        if group_name == _BUILTIN_GROUP:
+            continue  # always-on builtin tools are not user-selectable
         if group_name not in groups:
             groups[group_name] = []
         tool_obj = entry["tool"]

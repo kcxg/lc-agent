@@ -236,11 +236,20 @@ function buildAnswer(qIdx: number, q: Question): string {
   if (q.type === 'text') {
     return (textAnswers.value[qIdx] ?? '').trim()
   }
-  const parts: string[] = [...(selectedChoices.value[qIdx] ?? [])]
-  if (otherSelected.value[qIdx] && (otherTexts.value[qIdx] ?? '').trim()) {
-    parts.push((otherTexts.value[qIdx] ?? '').trim())
+  const selected = selectedChoices.value[qIdx] ?? []
+  const otherText = otherSelected.value[qIdx] ? (otherTexts.value[qIdx] ?? '').trim() : ''
+
+  const items: string[] = []
+  for (const choice of selected) {
+    const idx = (q.choices ?? []).indexOf(choice)
+    const label = idx >= 0 ? String.fromCharCode(65 + idx) : '?'
+    items.push(`${label}. ${choice}`)
   }
-  return parts.join(', ')
+  if (otherText) items.push(`自定义: ${otherText}`)
+
+  if (items.length === 0) return ''
+  const lines = items.map(p => `- ${p}`).join('\n')
+  return `已选 ${items.length} 项:\n${lines}`
 }
 
 function submitAskUser() {
