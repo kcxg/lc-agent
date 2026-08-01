@@ -2,7 +2,8 @@
 from unittest.mock import MagicMock
 
 from lc_agent.core.models import AgentPreset, SubAgentLink
-from lc_agent.core.engine import AgentEngine, SubAgentDescriptor
+from lc_agent.core.engine import AgentEngine
+from lc_agent.core.engine_helpers.subagent_helpers import SubAgentDescriptor
 
 
 MINIMAL_CONFIG = {
@@ -179,7 +180,7 @@ def test_build_subagent_registry_no_general_purpose_when_disabled():
 
 def test_build_agent_injects_delegation_prompt_into_subagent(monkeypatch):
     """_depth > 0 时，SubagentDelegationMiddleware 应作为 middleware[0] (prepend=True)，system_prompt 保持不变。"""
-    from lc_agent.core.engine import SUBAGENT_DELEGATION_PROMPT
+    from lc_agent.prompts.subagent_prompts import SUBAGENT_DELEGATION_PROMPT
 
     engine = AgentEngine(MINIMAL_CONFIG)
     child = AgentPreset(

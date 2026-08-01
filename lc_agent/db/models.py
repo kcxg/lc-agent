@@ -3,11 +3,33 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlmodel import SQLModel, Field
-from sqlalchemy import Boolean, Column, JSON, false
+from sqlalchemy import Boolean, Column, Integer, JSON, false
 
 
 def utcnow():
     return datetime.now(timezone.utc)
+
+
+class PromptTemplateDB(SQLModel, table=True):
+    __tablename__ = "prompt_templates"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    name: str
+    content: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class AgentPromptBindingDB(SQLModel, table=True):
+    __tablename__ = "agent_prompt_bindings"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    agent_id: str = Field(index=True)
+    prompt_id: str = Field(index=True)
+    sort_order: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )
 
 
 class AgentPresetDB(SQLModel, table=True):

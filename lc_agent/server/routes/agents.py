@@ -11,6 +11,7 @@ from lc_agent.core.models import AgentPreset, SubAgentLink
 from lc_agent.db.engine import get_async_session as _get_db_session
 from lc_agent.db.models import AgentPresetDB
 from lc_agent.db.models_auth import User, UserAgentAccess
+from lc_agent.db.repository import PromptRepository
 from lc_agent.server.auth_middleware import get_current_user, require_admin
 from lc_agent.server.dependencies import get_engine
 
@@ -322,6 +323,7 @@ async def update_agent(
     await db.commit()
     await db.refresh(preset_db)
 
+    extra = await PromptRepository(db).resolve_extra_prompts(preset_db.id)
     preset = AgentPreset(
         id=preset_db.id,
         name=preset_db.name,
@@ -337,6 +339,7 @@ async def update_agent(
         project_mode=preset_db.project_mode,
         project_root=preset_db.project_root,
         project_extra_dirs=preset_db.project_extra_dirs,
+        extra_system_prompts=extra,
     )
     engine._presets[preset.id] = preset
     engine.invalidate_agent_cache(agent_id)
@@ -363,6 +366,8 @@ async def delete_agent(
     if preset_db is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    # Clean up prompt bindings before deleting the agent
+    await PromptRepository(db).set_bindings_for_agent(agent_id, [])
     await db.delete(preset_db)
     await db.commit()
 

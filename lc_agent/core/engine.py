@@ -1,17 +1,19 @@
 # lc_agent/core/engine.py
 import logging
-from dataclasses import dataclass
 from typing import Annotated, Any, AsyncIterator, Literal
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
-from langchain.agents.middleware.todo import WRITE_TODOS_SYSTEM_PROMPT, WRITE_TODOS_TOOL_DESCRIPTION
-from langchain_agentskills import SkillMiddleware
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolCallId
+from langchain_core.tools import tool as lc_tool
+from pydantic import Field as _PydanticField
 
-from langchain.agents.middleware.types import AgentMiddleware as _AgentMiddlewareBase
-from langchain_core.messages import SystemMessage
-
+from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, _convert_text_file_blocks
+from lc_agent.core.engine_helpers.project_context import _build_project_context_text
+from lc_agent.skills.skill_middleware import _LcAgentSkillMiddleware
+from lc_agent.core.engine_helpers.subagent_helpers import SubAgentDescriptor, _extract_subagent_result
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
     bind_http_trace_collector,
@@ -21,341 +23,13 @@ from lc_agent.core.http_trace import (
 )
 from lc_agent.core.http_trace_httpx import TracingAsyncClient
 from lc_agent.core.models import AgentPreset, ModelInfo
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool as lc_tool
-from pydantic import Field as _PydanticField
-
+from lc_agent.middlewares.inject_current_time_prompt_middleware import inject_current_time_prompt_middleware
 from lc_agent.middlewares.system_prompt import SystemPromptMiddleware
+from lc_agent.prompts.subagent_prompts import GENERAL_PURPOSE_DESCRIPTION, SUBAGENT_DELEGATION_PROMPT, TASK_SYSTEM_PROMPT
+from lc_agent.prompts.todo_prompts import TODO_SYSTEM_PROMPT, TODO_TOOL_DESCRIPTION
 from lc_agent.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
-
-
-def _convert_text_file_blocks(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert text_file blocks to native text blocks for LangChain consumption."""
-    converted = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "text_file":
-            name = block.get("name", "")
-            text_content = block.get("textContent", "")
-            lang = block.get("lang", "")
-            converted.append(
-                {
-                    "type": "text",
-                    "text": f"📎 `{name}`:\n```{lang}\n{text_content}\n```",
-                }
-            )
-        else:
-            converted.append(block)
-    return converted
-
-
-def _convert_history_item(item: dict[str, Any]) -> dict[str, Any]:
-    """Convert text_file blocks in a history message's content."""
-    content = item.get("content")
-    if isinstance(content, list):
-        return {**item, "content": _convert_text_file_blocks(content)}
-    return item
-
-
-TODO_FINAL_ANSWER_GUARD = """## Final Answer Guard for `write_todos`
-
-- Do not create todo items whose only purpose is to write, organize, summarize, or deliver the final answer.
-- Before writing the substantive final answer to the user, make your last necessary `write_todos` call.
-- After you start writing the substantive final answer, do not call `write_todos` again in the same turn.
-- If the only remaining todo is about producing the final answer, do not call `write_todos` just to mark it complete. Deliver the final answer directly.
-"""
-
-TODO_SYSTEM_PROMPT = f"<todo_usage_rules>\n{WRITE_TODOS_SYSTEM_PROMPT}\n\n{TODO_FINAL_ANSWER_GUARD}\n</todo_usage_rules>"
-TODO_TOOL_DESCRIPTION = f"{WRITE_TODOS_TOOL_DESCRIPTION}\n\n{TODO_FINAL_ANSWER_GUARD}"
-
-_LOAD_SKILL_DESCRIPTION = (
-    "Retrieve the full step-by-step instructions for a skill. "
-    "This MUST be called before executing any task that matches a skill — "
-    "the brief description in the system prompt is only a trigger hint, "
-    "not the actual procedure. "
-    "Returns the skill's markdown body, available resources, and scripts. "
-    "Skill names are listed in the system prompt under '## Available Skills'."
-)
-
-
-def _build_skills_prompt(skills: list) -> str:
-    """Build the JSON-format skills system-prompt block. Returns empty string when skills list is empty."""
-    if not skills:
-        return ""
-    import json as _json
-    skill_entries = [
-        {"skill_name": s.name, "description": s.description.splitlines()[0]}
-        for s in skills
-    ]
-    lines = [
-        "<available_skills>",
-        "## Available Skills",
-        "",
-        "The descriptions below are **triggers** — they tell you WHEN a skill applies.",
-        "The actual step-by-step instructions, required tools, and constraints are INSIDE the skill.",
-        "",
-        "**MANDATORY RULE**: When the user's request matches a skill's description,",
-        "you MUST call `load_skill(skill_name=\"<skill_name>\")` FIRST to retrieve",
-        "the full instructions, then follow them exactly.",
-        "Do NOT skip this step and proceed with your default approach.",
-        "",
-        "```json",
-        _json.dumps(skill_entries, ensure_ascii=False, indent=2),
-        "```",
-        "",
-        "After loading a skill, you may also call `read_skill_resource` to fetch",
-        "its reference files or `run_skill_script` to execute its scripts.",
-        "</available_skills>",
-    ]
-    return "\n".join(lines)
-
-
-class _LcAgentSkillMiddleware(SkillMiddleware):
-    """SkillMiddleware with per-preset allowed_skills filtering.
-
-    Wraps the shared loader with ``_AllowedSkillsWrapper`` so only the
-    permitted skills for this preset appear in the system prompt and can
-    be loaded by the agent.  Also applies the lc-agent JSON prompt format
-    and the stricter ``load_skill`` tool description.
-    """
-
-    def __init__(
-        self,
-        loader: Any,
-        *,
-        allowed_skills: list[str] | None = None,
-        executor: Any = None,
-    ) -> None:
-        from lc_agent.skills.filtered_loader import _AllowedSkillsWrapper
-        effective_loader = (
-            _AllowedSkillsWrapper(loader, set(allowed_skills))
-            if allowed_skills is not None
-            else loader
-        )
-        super().__init__(
-            loader=effective_loader,
-            executor=executor,
-            prompt_builder=_build_skills_prompt,
-        )
-        self.tools = [
-            t.model_copy(update={"description": _LOAD_SKILL_DESCRIPTION})
-            if t.name == "load_skill"
-            else t
-            for t in self.tools
-        ]
-
-    @property
-    def has_visible_skills(self) -> bool:
-        """True when at least one skill is visible to this preset."""
-        return bool(self._skills_prompt and self._skills_prompt.strip())
-
-
-def _build_project_context_text(project_root: str) -> str:
-    """Build a project context block with git snapshot and OS info.
-
-    Runs git commands synchronously (called once at agent build time).
-    """
-    import os
-    import platform
-    import subprocess
-
-    os_name = platform.system()
-    # Mirror run_command's shell selection logic for consistency:
-    # Windows defaults to powershell; Linux/macOS reads $SHELL.
-    # Check config.jsonc's system_tools.command.default_shell first.
-    try:
-        from lc_agent.tools.system_tools._config import get_command_config
-        _cmd_cfg = get_command_config()
-        _configured_shell = _cmd_cfg.get("default_shell", "")
-    except Exception:
-        _configured_shell = ""
-    if _configured_shell:
-        shell = _configured_shell.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
-    elif os_name == "Windows":
-        shell = "powershell"
-    else:
-        shell = os.environ.get("SHELL", "bash").rsplit("/", 1)[-1]
-    # Also report platform version
-    try:
-        import platform as _pl
-        os_version = _pl.version() if os_name == "Linux" else _pl.release()
-        os_info = f"{os_name} {os_version} ({shell})"
-    except Exception:
-        os_info = f"{os_name} ({shell})"
-
-    def _git(cmd: list[str]) -> str:
-        try:
-            r = subprocess.run(
-                cmd, cwd=project_root, capture_output=True, text=True, timeout=5
-            )
-            return r.stdout.strip()
-        except Exception:
-            return ""
-
-    is_git = _git(["git", "rev-parse", "--git-dir"])
-    if is_git:
-        branch = _git(["git", "branch", "--show-current"]) or "(detached HEAD)"
-        last_commit = _git(["git", "log", "-1", "--oneline"]) or "(no commits)"
-        status_out = _git(["git", "status", "--short"])
-        git_section = (
-            f"**Branch**: {branch}\n"
-            f"**Last Commit**: {last_commit}\n"
-            f"**Git Status** (snapshot at session start):\n"
-            f"```\n{status_out or '(clean)'}\n```\n\n"
-            f"> Git status is a snapshot. Run `run_command` to refresh if needed."
-        )
-    else:
-        git_section = "**Git Status**: Not a git repository"
-
-    return (
-        "<project_context>\n"
-        "## Project Context\n\n"
-        f"**Root**: {project_root}\n"
-        f"**OS**: {os_info}\n"
-        f"{git_section}"
-        "\n</project_context>"
-    )
-
-
-class _RuntimeContextMiddleware(_AgentMiddlewareBase):  # type: ignore[misc]
-    """Appends the current date as the final system-message content block."""
-
-    @property
-    def name(self) -> str:  # type: ignore[override]
-        return "RuntimeContextMiddleware"
-
-    @staticmethod
-    def _runtime_context_text() -> str:
-        import datetime
-
-        now = datetime.datetime.now().astimezone()
-        offset = now.strftime("%z")
-        tz_display = f"UTC{offset[:3]}:{offset[3:]}" if offset else now.strftime("%Z") or "UTC"
-        return (
-            "<runtime_context>\n"
-            f"Current date: {now.strftime('%Y-%m-%d')} ({tz_display}).\n"
-            "</runtime_context>"
-        )
-
-    def _patched_system(self, existing: Any) -> Any:
-        block = {"type": "text", "text": f"\n\n{self._runtime_context_text()}"}
-        return SystemMessage(content_blocks=[*(existing.content_blocks if existing is not None else []), block])  # type: ignore[call-arg]
-
-    def wrap_model_call(self, request: Any, handler: Any) -> Any:
-        return handler(request.override(system_message=self._patched_system(request.system_message)))
-
-    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
-        return await handler(request.override(system_message=self._patched_system(request.system_message)))
-
-
-_RUNTIME_CONTEXT_MIDDLEWARE = _RuntimeContextMiddleware()
-
-
-# --------------------------------------------------------------------------- #
-# Subagent prompts
-# --------------------------------------------------------------------------- #
-
-SUBAGENT_DELEGATION_PROMPT = (
-    "In order to complete the objective that the user asks of you, "
-    "you have access to a number of standard tools.\n\n"
-    "Only your **last assistant message** is returned as the final output — "
-    "every message you produce during tool use (including thoughts between tool calls) is discarded. "
-    "After finishing all tool use, write a single complete answer in your final message. "
-    "Do NOT say 'as shown above' or reference any intermediate tool output — "
-    "your final message must be fully self-contained and contain the complete answer."
-)
-
-TASK_SYSTEM_PROMPT = """\
-<subagent_usage_rules>
-## task（子智能体调度器）
-
-你拥有 `task` 工具，可以将独立任务委派给专用子智能体完成。\
-这些子智能体是一次性的，仅在任务期间存在，完成后返回单一结果。
-
-**每次子智能体调用都是无状态且单次往返（stateless, one-shot）**：子智能体看不到你的对话历史、记忆或上下文，\
-你也无法向它追加消息。它只会收到你在 `description` 参数里写的内容，并在唯一一次回复中返回结果。\
-因此，`description` 必须包含子智能体**独立完成任务**所需的全部背景和上下文，\
-并明确说明它需要在唯一回复中返回什么内容（格式、语言、字数等）。
-
-`description` 错误示例（子智能体无法访问你的对话历史）：
-- ❌ "帮我查一下" （无背景、无上下文、无输出要求）
-- ❌ "修复上面讨论的 bug" （子智能体没有"上面"的对话上下文）
-
-**子智能体的返回结果对用户不可见**——它只返回给你。你有责任将结果整合后再呈现给用户，而不是直接转发原文。
-
-子智能体的完整生命周期：
-1. **派遣** → 在 `description` 里写明角色、任务、期望输出格式和语言
-2. **执行** → 子智能体自主完成任务
-3. **返回** → 子智能体以单条消息返回结果给你
-4. **整合** → 你将结果融合到当前对话，呈现给用户
-
-**重要：若有多个独立任务，必须在同一条消息中同时发起多个 `task` 调用并行执行，而不是逐一等待。**\
-并行调用能显著减少用户等待时间，请务必利用：
-- ❌ 错误：先调用 `task(A)`，等 A 返回后再调用 `task(B)`
-- ✅ 正确：在同一条 assistant 消息里同时发出 `task(A)` 和 `task(B)` 两个工具调用
-- ⚠️ 例外：若 B 依赖 A 的结果，则必须等 A 返回后才能发起 B
-
-何时使用 `task`：
-- 任务复杂、多步骤，且可以完整委派，不需要你参与中间过程
-- 任务相互独立，可以并行启动以节省时间（例如：同时研究 A 话题和 B 话题）
-- 任务需要大量工具调用或 token，委派可以避免你的上下文窗口被污染
-- 你只关心子智能体的最终输出，不需要中间步骤
-
-何时**不**使用 `task`：
-- 任务简单（几次工具调用或快速查询即可）
-- 你需要看到中间推理过程（task 工具会隐藏中间步骤）
-- 委派的子任务过于简短，拆分只会增加延迟而没有收益
-- 任务依赖你的当前上下文，无法独立表达为完整的委派描述
-</subagent_usage_rules>"""
-
-
-@dataclass(frozen=True)
-class SubAgentDescriptor:
-    subagent_type: str
-    preset_id: str
-    display_name: str
-    description: str
-
-
-_GENERAL_PURPOSE_DESCRIPTION = (
-    "General-purpose agent for researching complex questions, searching for files and content, "
-    "and executing multi-step tasks. When you are searching for a keyword or file and are not "
-    "confident that you will find the right match in the first few tries use this agent to "
-    "perform the search for you. This agent has access to all tools as the main agent."
-)
-
-
-def _extract_subagent_result(messages: list[Any]) -> str:
-    """Extract the last non-empty AI message text from a subagent's message list.
-
-    Iterates in reverse to skip any trailing empty messages that some providers
-    (e.g. Anthropic Claude) may append after the final tool call.
-    Returns the first non-empty AI text found — the subagent's conclusive answer.
-    """
-    for msg in reversed(messages):
-        if getattr(msg, "type", None) != "ai":
-            continue
-        content = getattr(msg, "content", "")
-        if isinstance(content, str):
-            text = content.strip()
-        elif isinstance(content, list):
-            text = "".join(
-                part.get("text", "") if isinstance(part, dict) else str(part)
-                for part in content
-            ).strip()
-        else:
-            text = str(content).strip()
-        if text:
-            return text
-    return ""
-
-try:
-    from langchain_core.tools import InjectedToolCallId
-    _HAS_INJECTED_TOOL_CALL_ID = True
-except ImportError:
-    InjectedToolCallId = None  # type: ignore[assignment,misc]
-    _HAS_INJECTED_TOOL_CALL_ID = False
 
 
 class AgentEngine:
@@ -526,7 +200,7 @@ class AgentEngine:
                 subagent_type="general-purpose",
                 preset_id=gp_id,
                 display_name="通用助手",
-                description=_GENERAL_PURPOSE_DESCRIPTION,
+                description=GENERAL_PURPOSE_DESCRIPTION,
             )
 
         return registry
@@ -633,32 +307,19 @@ class AgentEngine:
             "(sections, format, language, length)."
         )
 
-        if _HAS_INJECTED_TOOL_CALL_ID:
-            @lc_tool("task", description=task_description)
-            async def task(
-                subagent_type: Annotated[Literal[*available_types], _PydanticField(  # type: ignore[valid-type]
-                    description=subagent_type_field_desc,
-                )],
-                description: Annotated[str, _PydanticField(description=description_field_desc)],
-                tool_call_id: Annotated[str, InjectedToolCallId],
-                config: RunnableConfig,
-            ) -> str:
-                return await _run_subagent(subagent_type, description, config, tool_call_id)
-        else:
-            @lc_tool("task", description=task_description)
-            async def task(
-                subagent_type: Annotated[Literal[*available_types], _PydanticField(  # type: ignore[valid-type]
-                    description=subagent_type_field_desc,
-                )],
-                description: Annotated[str, _PydanticField(description=description_field_desc)],
-                config: RunnableConfig,
-            ) -> str:
-                import uuid
-
-                tool_call_id = ((config or {}).get("configurable") or {}).get("tool_call_id") or uuid.uuid4().hex
-                return await _run_subagent(subagent_type, description, config, tool_call_id)
+        @lc_tool("task", description=task_description)
+        async def task(
+            subagent_type: Annotated[Literal[*available_types], _PydanticField(  # type: ignore[valid-type]
+                description=subagent_type_field_desc,
+            )],
+            description: Annotated[str, _PydanticField(description=description_field_desc)],
+            tool_call_id: Annotated[str, InjectedToolCallId],
+            config: RunnableConfig,
+        ) -> str:
+            return await _run_subagent(subagent_type, description, config, tool_call_id)
 
         return task
+
     def build_agent(
         self,
         preset: AgentPreset | None = None,
@@ -672,7 +333,11 @@ class AgentEngine:
             preset = self.get_default_preset()
         self._current_preset = preset
 
-        system_prompt = preset.system_prompt
+        # Combine base prompt with any library prompts bound to this agent
+        if preset.extra_system_prompts:
+            system_prompt = preset.system_prompt + "\n\n" + "\n\n".join(preset.extra_system_prompts)
+        else:
+            system_prompt = preset.system_prompt
         # Subagents need an explicit reminder that only the final message is returned to the caller
         tools = self.tool_registry.get_filtered_tools(preset.allowed_tool_groups)
 
@@ -785,7 +450,7 @@ class AgentEngine:
         if _depth == 0:
             from lc_agent.middlewares import AskUserMiddleware
             middleware.append(AskUserMiddleware())
-        middleware.append(_RUNTIME_CONTEXT_MIDDLEWARE)
+        middleware.append(inject_current_time_prompt_middleware)
 
         # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
         if hasattr(self, '_permissions_service') and self._permissions_service and _depth == 0:

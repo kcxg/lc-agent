@@ -335,7 +335,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 if _pre_preset.project_mode and _pre_preset.project_root:
                     import asyncio as _aio
                     from pathlib import Path as _PP
-                    from lc_agent.core.engine import _build_project_context_text
+                    from lc_agent.core.engine_helpers.project_context import _build_project_context_text
                     _pre_root = str(_PP(_pre_preset.project_root).expanduser().resolve())
                     if _pre_root not in engine._project_ctx_text_cache:
                         engine._project_ctx_text_cache[_pre_root] = await _aio.to_thread(
@@ -589,7 +589,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 if _rp.project_mode and _rp.project_root:
                     import asyncio as _aio
                     from pathlib import Path as _PP2
-                    from lc_agent.core.engine import _build_project_context_text
+                    from lc_agent.core.engine_helpers.project_context import _build_project_context_text
                     _rroot = str(_PP2(_rp.project_root).expanduser().resolve())
                     if _rroot not in engine._project_ctx_text_cache:
                         engine._project_ctx_text_cache[_rroot] = await _aio.to_thread(

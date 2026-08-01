@@ -522,11 +522,11 @@ const emit = defineEmits<{
   display: none;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border-radius: 8px;
-  font-size: 18px;
+  border-radius: 50%;
+  font-size: 16px;
   color: var(--el-text-color-regular);
   background: transparent;
   border: 1px solid transparent;
@@ -583,10 +583,16 @@ const emit = defineEmits<{
     gap: 0;
   }
 
+  /* agent 选择器行全宽填充 */
+  .agent-select-wrapper {
+    width: 100%;
+    flex: 1;
+  }
+
   .agent-select {
     display: inline-flex;
     flex: 1;
-    width: auto;
+    width: 100%;
     min-width: 0;
     max-width: none;
   }
@@ -602,6 +608,11 @@ const emit = defineEmits<{
   .status-dot,
   .status-text {
     display: none;
+  }
+
+  /* mobile-agents-btn 也有 header-btn class，需在 header-btn 规则之后重新显示 */
+  .mobile-agents-btn {
+    display: flex;
   }
 
   .mobile-new-chat-btn {
@@ -660,6 +671,7 @@ const emit = defineEmits<{
     justify-content: center;
     border-radius: 50%;
   }
+
 }
 </style>
 

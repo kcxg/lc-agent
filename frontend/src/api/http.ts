@@ -74,6 +74,19 @@ export const api = {
   getSummarization: () => fetchApi<{ enabled: boolean; default_model: string; trigger: any; keep: any }>('/settings/summarization'),
   updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>
     fetchApi<any>('/settings/summarization', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Prompt library
+  getPrompts: () => fetchApi<any[]>('/prompts'),
+  createPrompt: (data: { name: string; content: string }) =>
+    fetchApi<any>('/prompts', { method: 'POST', body: JSON.stringify(data) }),
+  updatePrompt: (id: string, data: { name?: string; content?: string }) =>
+    fetchApi<any>(`/prompts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePrompt: (id: string) => fetchApi<void>(`/prompts/${id}`, { method: 'DELETE' }),
+
+  // Agent ↔ prompt bindings
+  getAgentPrompts: (agentId: string) => fetchApi<string[]>(`/agents/${agentId}/prompts`),
+  setAgentPrompts: (agentId: string, promptIds: string[]) =>
+    fetchApi<string[]>(`/agents/${agentId}/prompts`, { method: 'PUT', body: JSON.stringify({ prompt_ids: promptIds }) }),
 }
 
 export async function fetchAvailableSubagents(): Promise<Array<{

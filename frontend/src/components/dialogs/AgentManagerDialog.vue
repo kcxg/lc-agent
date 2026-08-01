@@ -1,73 +1,181 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="Agents 管理"
     width="900px"
     class="agent-manager-dialog"
     :close-on-click-modal="false"
+    :show-close="false"
   >
+    <template #header>
+      <div class="dialog-mode-header">
+        <div class="dialog-mode-tabs">
+          <button
+            class="dialog-mode-tab"
+            :class="{ 'is-active': viewMode === 'agents' }"
+            @click="switchToAgentsView"
+          >🤖 Agents 管理</button>
+          <button
+            class="dialog-mode-tab"
+            :class="{ 'is-active': viewMode === 'prompts' }"
+            @click="switchToPromptsView"
+          >📚 提示词库</button>
+        </div>
+        <button class="dialog-close-btn" @click="visible = false">×</button>
+      </div>
+    </template>
     <div class="manager-layout">
       <!-- ===== Left Sidebar ===== -->
       <div class="manager-sidebar">
-        <!-- Desktop: card list -->
-        <template v-if="!isMobile">
-          <button class="sidebar-new-btn" @click="handleNewAgent">
-            <el-icon><Plus /></el-icon>
-            <span>新建 Agent</span>
-          </button>
-          <div class="sidebar-list">
-            <div
-              v-if="isPendingNew"
-              class="agent-list-item is-selected is-pending"
-            >
-              <span class="agent-item-icon">✨</span>
-              <div class="agent-item-info">
-                <span class="agent-item-name">新 Agent</span>
-                <span class="pending-badge">未保存</span>
+        <!-- Agents mode sidebar -->
+        <template v-if="viewMode === 'agents'">
+          <!-- Desktop -->
+          <template v-if="!isMobile">
+            <button class="sidebar-new-btn" @click="handleNewAgent">
+              <el-icon><Plus /></el-icon>
+              <span>新建 Agent</span>
+            </button>
+            <div class="sidebar-list">
+              <div
+                v-if="isPendingNew"
+                class="agent-list-item is-selected is-pending"
+              >
+                <span class="agent-item-icon">✨</span>
+                <div class="agent-item-info">
+                  <span class="agent-item-name">新 Agent</span>
+                  <span class="pending-badge">未保存</span>
+                </div>
+              </div>
+              <div
+                v-for="agent in agentsStore.agents"
+                :key="agent.id"
+                class="agent-list-item"
+                :class="{ 'is-selected': !isPendingNew && selectedAgentId === agent.id }"
+                @click="trySelectAgent(agent.id)"
+              >
+                <span class="agent-item-icon">{{ getAgentIcon(agent) }}</span>
+                <div class="agent-item-info">
+                  <span class="agent-item-name">{{ agent.display_name || agent.name }}</span>
+                </div>
+                <span v-if="agent.project_mode" class="source-tag source-tag--project">项目</span>
+                <span v-else :class="['source-tag', `source-tag--${agent.source || 'user'}`]">
+                  {{ agent.source === 'builtin' ? '内置' : agent.source === 'code' ? '代码' : '自建' }}
+                </span>
               </div>
             </div>
-            <div
-              v-for="agent in agentsStore.agents"
-              :key="agent.id"
-              class="agent-list-item"
-              :class="{ 'is-selected': !isPendingNew && selectedAgentId === agent.id }"
-              @click="trySelectAgent(agent.id)"
+          </template>
+          <!-- Mobile -->
+          <div v-else class="mobile-sidebar-bar">
+            <el-select
+              v-model="mobileAgentSelectValue"
+              class="mobile-agent-select"
+              placeholder="选择 Agent"
+              :disabled="formLoading"
             >
-              <span class="agent-item-icon">{{ getAgentIcon(agent) }}</span>
-              <div class="agent-item-info">
-                <span class="agent-item-name">{{ agent.display_name || agent.name }}</span>
-              </div>
-              <span v-if="agent.project_mode" class="source-tag source-tag--project">项目</span>
-              <span v-else :class="['source-tag', `source-tag--${agent.source || 'user'}`]">
-                {{ agent.source === 'builtin' ? '内置' : agent.source === 'code' ? '代码' : '自建' }}
-              </span>
-            </div>
+              <el-option
+                v-for="opt in agentSelectOptions"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+            <button class="sidebar-new-btn mobile-new-btn" @click="handleNewAgent">
+              <el-icon><Plus /></el-icon>
+            </button>
           </div>
         </template>
 
-        <!-- Mobile: select + new button -->
-        <div v-else class="mobile-sidebar-bar">
-          <el-select
-            v-model="mobileAgentSelectValue"
-            class="mobile-agent-select"
-            placeholder="选择 Agent"
-            :disabled="formLoading"
-          >
-            <el-option
-              v-for="opt in agentSelectOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-          <button class="sidebar-new-btn mobile-new-btn" @click="handleNewAgent">
-            <el-icon><Plus /></el-icon>
-          </button>
-        </div>
+        <!-- Prompts mode sidebar -->
+        <template v-else>
+          <!-- Desktop -->
+          <template v-if="!isMobile">
+            <button class="sidebar-new-btn" @click="handleNewPrompt">
+              <el-icon><Plus /></el-icon>
+              <span>新建提示词</span>
+            </button>
+            <div class="sidebar-list">
+              <div
+                v-for="pt in promptsStore.prompts"
+                :key="pt.id"
+                class="agent-list-item"
+                :class="{ 'is-selected': editingPromptId === pt.id }"
+                @click="selectPromptForEdit(pt.id)"
+              >
+                <span class="agent-item-icon">📝</span>
+                <div class="agent-item-info">
+                  <span class="agent-item-name">{{ pt.name }}</span>
+                </div>
+              </div>
+              <el-empty v-if="!promptsStore.prompts.length" description="暂无提示词" :image-size="48" />
+            </div>
+          </template>
+          <!-- Mobile: prompts list as select -->
+          <div v-else class="mobile-sidebar-bar">
+            <el-select
+              v-model="editingPromptId"
+              class="mobile-agent-select"
+              placeholder="选择提示词"
+              clearable
+              @change="onMobilePromptSelectChange"
+            >
+              <el-option
+                v-for="pt in promptsStore.prompts"
+                :key="pt.id"
+                :label="pt.name"
+                :value="pt.id"
+              />
+            </el-select>
+            <button class="sidebar-new-btn mobile-new-btn" @click="handleNewPrompt">
+              <el-icon><Plus /></el-icon>
+            </button>
+          </div>
+        </template>
       </div>
 
       <!-- ===== Right Content ===== -->
-      <div class="manager-content" v-loading="formLoading">
+      <div class="manager-content" v-loading="viewMode === 'agents' ? formLoading : promptsStore.loading">
+
+        <!-- ===== Prompt Editor Panel ===== -->
+        <template v-if="viewMode === 'prompts'">
+          <template v-if="!!editingPromptId || isNewPrompt">
+            <div class="prompts-editor-body form-scroll">
+              <el-form label-position="top">
+                <el-form-item label="名称" required>
+                  <el-input v-model="promptForm.name" placeholder="提示词名称，例如：安全规范、代码风格" />
+                </el-form-item>
+                <el-form-item label="内容">
+                  <el-input
+                    v-model="promptForm.content"
+                    type="textarea"
+                    :autosize="{ minRows: 6, maxRows: 18 }"
+                    placeholder="在此填写提示词内容，将追加注入到绑定该模板的 Agent 系统提示词末尾..."
+                  />
+                </el-form-item>
+              </el-form>
+            </div>
+            <div class="prompts-editor-footer form-footer">
+              <div>
+                <el-button v-if="editingPromptId && !isNewPrompt" type="danger" plain @click="handleDeletePrompt">
+                  删除
+                </el-button>
+              </div>
+              <div class="prompts-editor-footer-right">
+                <el-button @click="cancelEditPrompt">取消</el-button>
+                <el-button type="primary" :loading="promptSaving" @click="handleSavePrompt">
+                  {{ isNewPrompt ? '创建' : '保存' }}
+                </el-button>
+              </div>
+            </div>
+          </template>
+          <div v-else class="empty-placeholder">
+            <el-empty
+              :description="isMobile ? '从上方选择提示词，或点击 + 新建' : '从左侧选择提示词，或点击「新建提示词」'"
+              :image-size="72"
+            />
+          </div>
+        </template>
+
+        <!-- ===== Agent Form Panel ===== -->
+        <template v-else>
         <template v-if="selectedAgentId !== null || isPendingNew">
           <!-- Code agent readonly view -->
           <div v-if="isCodeAgent" class="form-scroll">
@@ -353,6 +461,42 @@
                     <el-empty v-if="availableSubagents.length === 0" description="暂无可用的子 Agent" :image-size="60" />
                   </div>
                 </el-tab-pane>
+
+                <el-tab-pane label="关联提示词" name="prompts_tab">
+                  <div class="bound-prompts-section" v-loading="promptBindingLoading">
+                    <p class="picker-hint">
+                      勾选要追加注入到此 Agent 系统提示词的提示词模板。提示词在「提示词库」中集中管理，修改后对所有绑定的 Agent 立即生效。
+                    </p>
+                    <template v-if="promptsStore.prompts.length">
+                      <div
+                        v-for="pt in promptsStore.prompts"
+                        :key="pt.id"
+                        class="prompt-binding-item"
+                      >
+                        <el-checkbox
+                          :model-value="boundPromptIds.includes(pt.id)"
+                          @update:model-value="toggleBoundPrompt(pt.id, $event)"
+                        >
+                          <span class="prompt-binding-name">{{ pt.name }}</span>
+                        </el-checkbox>
+                        <p v-if="pt.content" class="prompt-binding-preview">
+                          {{ pt.content.length > 100 ? pt.content.slice(0, 100) + '…' : pt.content }}
+                        </p>
+                      </div>
+                    </template>
+                    <div v-else>
+                      <el-empty
+                        :description="isMobile ? '暂无提示词，点击顶部「📚 提示词库」tab 创建' : '暂无提示词，请点击弹窗顶部「📚 提示词库」tab 进行创建'"
+                        :image-size="60"
+                      />
+                      <div style="text-align:center; margin-top: -8px;">
+                        <el-button text type="primary" @click="switchToPromptsView">
+                          前往提示词库
+                        </el-button>
+                      </div>
+                    </div>
+                  </div>
+                </el-tab-pane>
               </el-tabs>
             </el-form>
           </div>
@@ -376,6 +520,8 @@
             :image-size="80"
           />
         </div>
+        </template><!-- end v-else (viewMode === 'agents') -->
+
       </div>
     </div>
 
@@ -414,16 +560,21 @@ import { useMediaQuery } from '@vueuse/core'
 import { fetchAvailableSubagents, api } from '@/api/http'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore, type AgentPreset, type AgentSubagentConfig } from '@/stores/agents'
+import { usePromptsStore } from '@/stores/prompts'
 
 const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
 
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
+const promptsStore = usePromptsStore()
 
 const visible = ref(false)
 const saving = ref(false)
 const activeTab = ref('basic')
 const showProjectModeHelp = ref(false)
+
+// ===== View mode (agents | prompts) =====
+const viewMode = ref<'agents' | 'prompts'>('agents')
 
 // Sidebar state
 const selectedAgentId = ref<string | null>(null)
@@ -436,6 +587,129 @@ let _loadSeq = 0
 
 // Ref for name input focus after copy
 const nameInputRef = ref<InputInstance | null>(null)
+
+// ===== Prompt library state =====
+const editingPromptId = ref<string | null>(null)
+const isNewPrompt = ref(false)
+const promptSaving = ref(false)
+const promptForm = ref({ name: '', content: '' })
+
+function switchToPromptsView() {
+  if (viewMode.value === 'prompts') return  // already active, don't reset
+  viewMode.value = 'prompts'
+  editingPromptId.value = null
+  isNewPrompt.value = false
+  promptsStore.fetchPrompts()
+}
+
+function switchToAgentsView() {
+  viewMode.value = 'agents'
+}
+
+function handleNewPrompt() {
+  editingPromptId.value = null
+  isNewPrompt.value = true
+  promptForm.value = { name: '', content: '' }
+}
+
+function selectPromptForEdit(id: string) {
+  const pt = promptsStore.getById(id)
+  if (!pt) return
+  editingPromptId.value = id
+  isNewPrompt.value = false
+  promptForm.value = { name: pt.name, content: pt.content }
+}
+
+function cancelEditPrompt() {
+  editingPromptId.value = null
+  isNewPrompt.value = false
+}
+
+function onMobilePromptSelectChange(val: string | null | undefined) {
+  editingPromptId.value = val ?? null
+  if (val) selectPromptForEdit(val)
+  else cancelEditPrompt()
+}
+
+async function handleSavePrompt() {
+  if (!promptForm.value.name.trim()) {
+    ElMessage.error('提示词名称不能为空')
+    return
+  }
+  promptSaving.value = true
+  try {
+    if (isNewPrompt.value) {
+      const created = await promptsStore.createPrompt(promptForm.value)
+      isNewPrompt.value = false
+      editingPromptId.value = created.id
+      ElMessage.success('提示词已创建')
+    } else if (editingPromptId.value) {
+      await promptsStore.updatePrompt(editingPromptId.value, promptForm.value)
+      ElMessage.success('提示词已保存')
+    }
+  } catch {
+    ElMessage.error('保存失败，请检查后端服务')
+  } finally {
+    promptSaving.value = false
+  }
+}
+
+async function handleDeletePrompt() {
+  if (!editingPromptId.value) return
+  const pt = promptsStore.getById(editingPromptId.value)
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除提示词「${pt?.name}」吗？已绑定此提示词的 Agent 将无法删除，需先解绑。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+    try {
+      await promptsStore.deletePrompt(editingPromptId.value)
+      editingPromptId.value = null
+      isNewPrompt.value = false
+      ElMessage.success('提示词已删除')
+    } catch (e: any) {
+      const detail = e?.message || ''
+      if (detail.includes('409') || detail.includes('in use')) {
+        ElMessage.error('该提示词已被 Agent 使用，请先在 Agent 的「关联提示词」tab 中解绑后再删除')
+      } else {
+        ElMessage.error('删除失败')
+      }
+    }
+  } catch {
+    // cancelled
+  }
+}
+
+// ===== Agent prompt binding state =====
+const boundPromptIds = ref<string[]>([])
+const promptBindingLoading = ref(false)
+
+async function _loadBoundPrompts(agentId: string, seq: number) {
+  if (!agentId) return
+  promptBindingLoading.value = true
+  try {
+    const ids = await api.getAgentPrompts(agentId)
+    if (seq !== _loadSeq) return  // stale load, discard result
+    boundPromptIds.value = ids
+  } catch {
+    if (seq !== _loadSeq) return
+    boundPromptIds.value = []
+  } finally {
+    if (seq === _loadSeq) promptBindingLoading.value = false
+  }
+}
+
+function toggleBoundPrompt(promptId: string, checked: boolean | string | number) {
+  if (checked) {
+    if (!boundPromptIds.value.includes(promptId)) {
+      boundPromptIds.value = [...boundPromptIds.value, promptId]
+    }
+  } else {
+    boundPromptIds.value = boundPromptIds.value.filter(id => id !== promptId)
+  }
+  isDirty.value = true
+}
 
 // ===== Mobile detection =====
 
@@ -713,7 +987,11 @@ async function _loadAgentIntoForm(agent: AgentPreset) {
   formLoading.value = true
   activeTab.value = 'basic'
 
-  const { subagents } = await _populateFormFromAgent(agent, { excludeAgentId: agent.id })
+  const [{ subagents }] = await Promise.all([
+    _populateFormFromAgent(agent, { excludeAgentId: agent.id }),
+    _loadBoundPrompts(agent.id, seq),
+    promptsStore.prompts.length === 0 ? promptsStore.fetchPrompts() : Promise.resolve(),
+  ])
   if (seq !== _loadSeq) return  // a newer load started; discard stale result
 
   availableSubagents.value = subagents
@@ -745,10 +1023,12 @@ async function _loadNewForm() {
   mcpMode.value = 'none'; selectedMcpServers.value = []
   globalSkillsMode.value = 'none'; selectedGlobalSkills.value = []
   projectSkillsMode.value = 'none'; selectedProjectSkills.value = []
+  boundPromptIds.value = []
 
   const [allSubagents] = await Promise.all([
     fetchAvailableSubagents(),
     fetchDialogSkills(),
+    promptsStore.prompts.length === 0 ? promptsStore.fetchPrompts() : Promise.resolve(),
   ])
   if (seq !== _loadSeq) return
 
@@ -785,6 +1065,9 @@ async function open(agentId?: string) {
   formLoading.value = true
   isPendingNew.value = false
   isDirty.value = false
+  viewMode.value = 'agents'
+  editingPromptId.value = null
+  isNewPrompt.value = false
   visible.value = true
 
   const targetId = agentId ?? agentsStore.currentAgentId
@@ -836,11 +1119,16 @@ async function handleCopy() {
   formLoading.value = true
   activeTab.value = 'basic'
 
-  const { subagents } = await _populateFormFromAgent(agent, { nameOverride: `${agent.name}-copy` })
+  const [{ subagents }, copiedBoundIds] = await Promise.all([
+    _populateFormFromAgent(agent, { nameOverride: `${agent.name}-copy` }),
+    api.getAgentPrompts(agent.id).catch(() => [] as string[]),
+    promptsStore.prompts.length === 0 ? promptsStore.fetchPrompts() : Promise.resolve(),
+  ])
   if (seq !== _loadSeq) return
 
   availableSubagents.value = subagents
   _distributeAllowedSkills(agent.allowed_skills)
+  boundPromptIds.value = copiedBoundIds
 
   selectedAgentId.value = null
   isPendingNew.value = true
@@ -947,12 +1235,17 @@ async function handleSave() {
 
     if (isPendingNew.value) {
       const created = await agentsStore.createAgent(data as any)
+      // Save prompt bindings if any were selected
+      if (boundPromptIds.value.length > 0) {
+        await api.setAgentPrompts(created.id, boundPromptIds.value)
+      }
       isPendingNew.value = false
       selectedAgentId.value = created.id
       isDirty.value = false
       ElMessage.success('Agent 创建成功')
     } else if (selectedAgentId.value) {
       await agentsStore.updateAgent(selectedAgentId.value, data)
+      await api.setAgentPrompts(selectedAgentId.value, boundPromptIds.value)
       isDirty.value = false
       ElMessage.success('Agent 已保存')
     }
@@ -1588,11 +1881,127 @@ defineExpose({ open })
   overflow-y: auto;
 }
 
+/* ===== Dialog mode header (custom #header slot) ===== */
+.dialog-mode-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dialog-mode-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--el-fill-color-light);
+  padding: 3px;
+  border-radius: 10px;
+}
+
+.dialog-mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.dialog-mode-tab:hover {
+  color: var(--el-text-color-primary);
+}
+
+.dialog-mode-tab.is-active {
+  background: var(--el-bg-color);
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.dialog-close-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--el-text-color-secondary);
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.dialog-close-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+}
+
+/* ===== Prompt editor (in right content area) ===== */
+.prompts-editor-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.prompts-editor-footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.prompts-editor-footer-right {
+  display: flex;
+  gap: 8px;
+}
+
+
+/* ===== Bound prompts tab ===== */
+.bound-prompts-section {
+  padding: 4px 0;
+}
+
+.prompt-binding-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-extra-light);
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+
+.prompt-binding-item:hover {
+  border-color: var(--el-border-color);
+}
+
+.prompt-binding-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.prompt-binding-preview {
+  margin: 4px 0 0 26px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ===== Mobile layout ===== */
 @media (max-width: 760px) {
-  .agent-manager-dialog :deep(.el-dialog) {
+  /* agent-manager-dialog class 就是 .el-dialog 元素本身，不能用后代选择器 */
+  .agent-manager-dialog {
     width: calc(100vw - 16px) !important;
-    /* 覆盖 Element Plus 默认水平 margin:auto，防止居中失效 */
     margin: 3vh auto 0 !important;
   }
 
@@ -1638,12 +2047,7 @@ defineExpose({ open })
     padding: 10px 10px;
   }
 
-  /* Tabs: stretch + sticky header when form scrolls */
   .form-scroll :deep(.el-tabs__header) {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: var(--el-bg-color);
     margin-bottom: 8px;
   }
 
@@ -1672,6 +2076,12 @@ defineExpose({ open })
   /* dialog header 水平内边距收窄 */
   .agent-manager-dialog :deep(.el-dialog__header) {
     padding: 14px 14px 12px;
+  }
+
+  /* 移动端对话框标题 tab 缩小间距 */
+  .dialog-mode-tab {
+    padding: 5px 10px;
+    font-size: 12px;
   }
 }
 </style>
@@ -1763,7 +2173,8 @@ defineExpose({ open })
 }
 
 @media (max-width: 760px) {
-  .agent-manager-dialog .el-dialog {
+  /* agent-manager-dialog class 就是 .el-dialog 元素本身 */
+  .agent-manager-dialog {
     width: calc(100vw - 16px) !important;
     margin: 3vh auto 0 !important;
   }
