@@ -1,19 +1,17 @@
 """Ask-user middleware: always-available tool for interactive Q&A during agent execution.
 
-Modeled after deepagents_code.ask_user.AskUserMiddleware — bundles the tool
-definition and system-prompt injection together as a single AgentMiddleware,
+Bundles the ask_user tool and system-prompt injection together as a QuickToolsMiddleware,
 so the tool and its LLM guidance are always added as a unit.
 """
-from __future__ import annotations
-
 import logging
 from typing import Annotated, Any, Literal, cast
 
-from langchain.agents.middleware.types import AgentMiddleware
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command, interrupt
 from typing_extensions import NotRequired, TypedDict
+
+from lc_agent.middlewares.quick_tools import QuickToolsMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +208,7 @@ def _parse_answers(
         # Include labeled options so the AI can cross-reference letter answers (e.g. "A") with choices
         if q.get("type") == "multiple_choice" and isinstance(q.get("choices"), list):
             option_lines = "\n".join(
-                f"  {chr(65 + j)}. {c}" for j, c in enumerate(q["choices"])
+                f"  {chr(65 + j)}. {c}" for j, c in enumerate(q.get("choices", []))
             )
             lines.append(f"Options:\n{option_lines}")
         lines.append(f"User answer: {answer}")
@@ -219,58 +217,35 @@ def _parse_answers(
     return Command(update={"messages": [ToolMessage(result_text, tool_call_id=tool_call_id)]})
 
 
-class AskUserMiddleware(AgentMiddleware):  # type: ignore[type-arg]
+@tool('ask_user',description=ASK_USER_TOOL_DESCRIPTION)
+def _ask_user(
+    questions: list[Question],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command[Any]:
+    """Ask the user one or more questions and return their answers."""
+    _validate_questions(questions)
+    payload = {
+        "type": "ask_user",
+        "questions": questions,
+        "tool_call_id": tool_call_id,
+    }
+    response = interrupt(payload)
+    return _parse_answers(response, questions, tool_call_id)
+
+
+class AskUserMiddleware(QuickToolsMiddleware):
     """Middleware that provides the always-available ``ask_user`` tool.
 
-    Bundles the tool definition and system-prompt injection in one class,
-    mirroring the pattern used by ``deepagents_code.AskUserMiddleware``
-    and ``langchain.agents.middleware.TodoListMiddleware``.
+    Bundles the tool definition and system-prompt injection as a QuickToolsMiddleware.
 
     Args:
         system_prompt: System-level instructions injected into every LLM request
             to guide ``ask_user`` usage.  Defaults to ``ASK_USER_SYSTEM_PROMPT``.
-        tool_description: Description string visible to the LLM in the tool schema.
-            Defaults to ``ASK_USER_TOOL_DESCRIPTION``.
     """
 
-    def __init__(
-        self,
-        *,
-        system_prompt: str = ASK_USER_SYSTEM_PROMPT,
-        tool_description: str = ASK_USER_TOOL_DESCRIPTION,
-    ) -> None:
-        super().__init__()
-        self.system_prompt = system_prompt
-
-        @tool(description=tool_description)
-        def _ask_user(
-            questions: list[Question],
-            tool_call_id: Annotated[str, InjectedToolCallId],
-        ) -> Command[Any]:
-            """Ask the user one or more questions and return their answers."""
-            _validate_questions(questions)
-            payload = {
-                "type": "ask_user",
-                "questions": questions,
-                "tool_call_id": tool_call_id,
-            }
-            response = interrupt(payload)
-            return _parse_answers(response, questions, tool_call_id)
-
-        _ask_user.name = "ask_user"
-        self.tools = [_ask_user]
-
-    def _patched_system(self, existing: Any) -> SystemMessage:
-        if existing is not None:
-            new_content = [*existing.content_blocks, {"type": "text", "text": f"\n\n{self.system_prompt}"}]
-        else:
-            new_content = [{"type": "text", "text": self.system_prompt}]
-        return SystemMessage(content_blocks=new_content)  # type: ignore[call-arg]
-
-    def wrap_model_call(self, request: Any, handler: Any) -> Any:
-        return handler(request.override(system_message=self._patched_system(request.system_message)))
-
-    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
-        return await handler(
-            request.override(system_message=self._patched_system(request.system_message))
+    def __init__(self, *, system_prompt: str = ASK_USER_SYSTEM_PROMPT) -> None:
+        super().__init__(
+            middleware_name="AskUserMiddleware",
+            tools=[_ask_user],
+            system_prompt=system_prompt,
         )

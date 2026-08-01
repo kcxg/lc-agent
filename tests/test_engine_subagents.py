@@ -152,7 +152,7 @@ def test_build_subagent_registry_injects_general_purpose():
     gp = registry["general-purpose"]
     assert gp.preset_id == "__gp__:parent-agent"
     assert gp.display_name == "通用助手"
-    assert "隔离上下文" in gp.description
+    assert "all tools as the main agent" in gp.description
 
     # The cloned general-purpose preset must not have subagents or gp flag
     gp_preset = engine._presets["__gp__:parent-agent"]
@@ -287,3 +287,57 @@ def test_build_agent_no_task_middleware_when_no_subagents(monkeypatch):
     middleware = captured.get("middleware", [])
     mw_names = [getattr(m, "name", type(m).__name__) for m in middleware]
     assert "TaskSystemPromptMiddleware" not in mw_names
+
+
+def test_build_agent_includes_ask_user_middleware_at_depth_0(monkeypatch):
+    """顶层 agent (_depth=0) 应注入 AskUserMiddleware。"""
+    engine = AgentEngine(MINIMAL_CONFIG)
+    preset = AgentPreset(
+        id="top-agent",
+        name="top-agent",
+        system_prompt="顶层助手",
+        default_model="test-model",
+    )
+    engine._presets = {preset.id: preset}
+
+    captured = {}
+    monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id, llm_params=None: object())
+    monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+
+    def fake_create_agent(**kwargs):
+        captured.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
+    engine.build_agent(preset, cache_key="top-agent", _depth=0)
+
+    middleware = captured.get("middleware", [])
+    mw_names = [getattr(m, "name", type(m).__name__) for m in middleware]
+    assert "AskUserMiddleware" in mw_names
+
+
+def test_build_agent_excludes_ask_user_middleware_at_depth_gt_0(monkeypatch):
+    """子 agent (_depth>0) 不应注入 AskUserMiddleware，防止前端无法响应的死锁。"""
+    engine = AgentEngine(MINIMAL_CONFIG)
+    child = AgentPreset(
+        id="worker",
+        name="worker",
+        system_prompt="子任务执行者",
+        default_model="test-model",
+    )
+    engine._presets = {child.id: child}
+
+    captured = {}
+    monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id, llm_params=None: object())
+    monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+
+    def fake_create_agent(**kwargs):
+        captured.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
+    engine.build_agent(child, cache_key="worker", _depth=1)
+
+    middleware = captured.get("middleware", [])
+    mw_names = [getattr(m, "name", type(m).__name__) for m in middleware]
+    assert "AskUserMiddleware" not in mw_names

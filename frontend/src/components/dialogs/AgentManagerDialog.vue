@@ -9,37 +9,60 @@
     <div class="manager-layout">
       <!-- ===== Left Sidebar ===== -->
       <div class="manager-sidebar">
-        <button class="sidebar-new-btn" @click="handleNewAgent">
-          <el-icon><Plus /></el-icon>
-          <span>新建 Agent</span>
-        </button>
-        <div class="sidebar-list">
-          <div
-            v-if="isPendingNew"
-            class="agent-list-item is-selected is-pending"
-          >
-            <span class="agent-item-icon">✨</span>
-            <div class="agent-item-info">
-              <span class="agent-item-name">新 Agent</span>
-              <span class="pending-badge">未保存</span>
+        <!-- Desktop: card list -->
+        <template v-if="!isMobile">
+          <button class="sidebar-new-btn" @click="handleNewAgent">
+            <el-icon><Plus /></el-icon>
+            <span>新建 Agent</span>
+          </button>
+          <div class="sidebar-list">
+            <div
+              v-if="isPendingNew"
+              class="agent-list-item is-selected is-pending"
+            >
+              <span class="agent-item-icon">✨</span>
+              <div class="agent-item-info">
+                <span class="agent-item-name">新 Agent</span>
+                <span class="pending-badge">未保存</span>
+              </div>
+            </div>
+            <div
+              v-for="agent in agentsStore.agents"
+              :key="agent.id"
+              class="agent-list-item"
+              :class="{ 'is-selected': !isPendingNew && selectedAgentId === agent.id }"
+              @click="trySelectAgent(agent.id)"
+            >
+              <span class="agent-item-icon">{{ getAgentIcon(agent) }}</span>
+              <div class="agent-item-info">
+                <span class="agent-item-name">{{ agent.display_name || agent.name }}</span>
+              </div>
+              <span v-if="agent.project_mode" class="source-tag source-tag--project">项目</span>
+              <span v-else :class="['source-tag', `source-tag--${agent.source || 'user'}`]">
+                {{ agent.source === 'builtin' ? '内置' : agent.source === 'code' ? '代码' : '自建' }}
+              </span>
             </div>
           </div>
-          <div
-            v-for="agent in agentsStore.agents"
-            :key="agent.id"
-            class="agent-list-item"
-            :class="{ 'is-selected': !isPendingNew && selectedAgentId === agent.id }"
-            @click="trySelectAgent(agent.id)"
+        </template>
+
+        <!-- Mobile: select + new button -->
+        <div v-else class="mobile-sidebar-bar">
+          <el-select
+            v-model="mobileAgentSelectValue"
+            class="mobile-agent-select"
+            placeholder="选择 Agent"
+            :disabled="formLoading"
           >
-            <span class="agent-item-icon">{{ getAgentIcon(agent) }}</span>
-            <div class="agent-item-info">
-              <span class="agent-item-name">{{ agent.display_name || agent.name }}</span>
-            </div>
-            <span v-if="agent.project_mode" class="source-tag source-tag--project">项目</span>
-            <span v-else :class="['source-tag', `source-tag--${agent.source || 'user'}`]">
-              {{ agent.source === 'builtin' ? '内置' : agent.source === 'code' ? '代码' : '自建' }}
-            </span>
-          </div>
+            <el-option
+              v-for="opt in agentSelectOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+          <button class="sidebar-new-btn mobile-new-btn" @click="handleNewAgent">
+            <el-icon><Plus /></el-icon>
+          </button>
         </div>
       </div>
 
@@ -74,7 +97,7 @@
           <!-- Editable form -->
           <div v-else class="form-scroll">
             <el-form :model="form" label-width="100px" label-position="top">
-              <el-tabs v-model="activeTab">
+              <el-tabs v-model="activeTab" :stretch="isMobile">
                 <el-tab-pane label="基本设置" name="basic">
 
                   <el-form-item class="project-mode-field project-mode-field--toggle">
@@ -348,7 +371,10 @@
         </template>
 
         <div v-else class="empty-placeholder">
-          <el-empty description="从左侧选择 Agent 或新建" :image-size="80" />
+          <el-empty
+            :description="isMobile ? '从上方选择 Agent 或点 + 新建' : '从左侧选择 Agent 或新建'"
+            :image-size="80"
+          />
         </div>
       </div>
     </div>
@@ -357,10 +383,11 @@
     <el-dialog
       v-model="showProjectModeHelp"
       title="项目文件夹模式说明"
-      width="520px"
+      :width="isMobile ? 'calc(100vw - 24px)' : '520px'"
+      :align-center="isMobile"
       :append-to-body="true"
     >
-      <div class="project-mode-help">
+      <div class="project-mode-help" :class="{ 'project-mode-help--mobile': isMobile }">
         <p>开启"项目模式"后，该 Agent 将以项目文件夹为中心运行，类似 Cursor / Codex 打开一个项目的体验：</p>
         <ul>
           <li><strong>项目上下文注入</strong> — 自动将 git 状态快照、当前分支、最近提交、OS 信息注入系统提示词</li>
@@ -383,6 +410,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { InputInstance } from 'element-plus'
 import { QuestionFilled, Folder, Plus } from '@element-plus/icons-vue'
+import { useMediaQuery } from '@vueuse/core'
 import { fetchAvailableSubagents, api } from '@/api/http'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore, type AgentPreset, type AgentSubagentConfig } from '@/stores/agents'
@@ -408,6 +436,37 @@ let _loadSeq = 0
 
 // Ref for name input focus after copy
 const nameInputRef = ref<InputInstance | null>(null)
+
+// ===== Mobile detection =====
+
+const isMobile = useMediaQuery('(max-width: 760px)')
+
+const _PENDING_NEW_VALUE = '__pending_new__'
+
+const mobileAgentSelectValue = computed({
+  get() {
+    if (isPendingNew.value) return _PENDING_NEW_VALUE
+    return selectedAgentId.value ?? ''
+  },
+  set(val: string) {
+    if (val === _PENDING_NEW_VALUE) {
+      void handleNewAgent()
+      return
+    }
+    if (val) void trySelectAgent(val)
+  },
+})
+
+const agentSelectOptions = computed(() => {
+  const opts: { value: string; label: string }[] = agentsStore.agents.map(a => ({
+    value: a.id,
+    label: `${getAgentIcon(a)} ${a.display_name || a.name}`,
+  }))
+  if (isPendingNew.value) {
+    opts.unshift({ value: _PENDING_NEW_VALUE, label: '✨ 新 Agent（未保存）' })
+  }
+  return opts
+})
 
 // ===== Computed =====
 
@@ -1524,15 +1583,17 @@ defineExpose({ open })
   font-size: 12px;
 }
 
+.project-mode-help--mobile {
+  max-height: calc(70dvh - 60px);
+  overflow-y: auto;
+}
+
 /* ===== Mobile layout ===== */
 @media (max-width: 760px) {
   .agent-manager-dialog :deep(.el-dialog) {
     width: calc(100vw - 16px) !important;
-    margin-top: 3vh;
-  }
-
-  .agent-manager-dialog :deep(.el-dialog__body) {
-    height: calc(92dvh - 56px);
+    /* 覆盖 Element Plus 默认水平 margin:auto，防止居中失效 */
+    margin: 3vh auto 0 !important;
   }
 
   .manager-layout {
@@ -1545,48 +1606,51 @@ defineExpose({ open })
     flex-shrink: 0;
     border-right: none;
     border-bottom: 1px solid var(--el-border-color-lighter);
-    max-height: 120px;
   }
 
-  .sidebar-new-btn {
-    margin: 6px 6px 4px;
-    padding: 6px 10px;
-    font-size: 12px;
-    flex-shrink: 0;
-  }
-
-  .sidebar-list {
+  /* Mobile: select + new-btn row */
+  .mobile-sidebar-bar {
     display: flex;
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-    flex-wrap: nowrap;
-    padding: 4px 6px 6px;
-    gap: 4px;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
   }
 
-  .agent-list-item {
+  .mobile-agent-select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .mobile-new-btn {
     flex-shrink: 0;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 3px;
-    padding: 6px 8px;
-    min-width: 80px;
-    max-width: 100px;
+    padding: 6px 10px;
+    font-size: 14px;
+    margin: 0; /* 重置 .sidebar-new-btn 的 margin: 10px 10px 4px */
   }
 
-  .agent-item-icon {
-    width: auto;
+  /* 缩减表单区水平内边距，给内容更多空间 */
+  .form-scroll {
+    padding: 10px 10px 0;
   }
 
-  .agent-item-name {
-    max-width: 80px;
-    font-size: 11px;
+  /* 缩减每个表单项的内边距 */
+  .form-scroll :deep(.el-form-item) {
+    padding: 10px 10px;
   }
 
-  .source-tag {
-    font-size: 9px;
-    padding: 1px 4px;
+  /* Tabs: stretch + sticky header when form scrolls */
+  .form-scroll :deep(.el-tabs__header) {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--el-bg-color);
+    margin-bottom: 8px;
+  }
+
+  /* 减小 tab 文字和水平内边距 */
+  .form-scroll :deep(.el-tabs__item) {
+    font-size: 12px;
+    padding: 0 10px;
   }
 
   .form-footer {
@@ -1598,6 +1662,16 @@ defineExpose({ open })
   .form-footer-right {
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  /* 工具组/MCP/Skills 自定义勾选区：缩小最大高度，避免框内再滚动体验差 */
+  .custom-groups {
+    max-height: 180px;
+  }
+
+  /* dialog header 水平内边距收窄 */
+  .agent-manager-dialog :deep(.el-dialog__header) {
+    padding: 14px 14px 12px;
   }
 }
 </style>
@@ -1691,10 +1765,20 @@ defineExpose({ open })
 @media (max-width: 760px) {
   .agent-manager-dialog .el-dialog {
     width: calc(100vw - 16px) !important;
+    margin: 3vh auto 0 !important;
+  }
+
+  .agent-manager-dialog .el-dialog__header {
+    padding: 14px 14px 12px !important;
   }
 
   .agent-manager-dialog .el-dialog__body {
     height: calc(92dvh - 56px) !important;
+  }
+
+  /* 移动端缩减全局表单项内边距 */
+  .agent-manager-dialog .el-form-item {
+    padding: 10px 10px;
   }
 }
 </style>

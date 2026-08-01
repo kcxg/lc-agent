@@ -672,10 +672,17 @@ const emit = defineEmits<{
     0 8px 20px rgba(15, 23, 42, 0.06) !important;
   overflow: hidden;
   padding: 6px !important;
+  max-height: 65vh;
 }
 
 .agent-select-popper .el-select-dropdown {
-  max-height: 600px !important;
+  max-height: 65vh !important;
+}
+
+/* Override Element Plus internal scrollbar max-height */
+.agent-select-popper .el-select-dropdown__wrap,
+.agent-select-popper .el-scrollbar__wrap {
+  max-height: calc(65vh - 20px) !important;
 }
 
 .agent-select-popper .el-select-dropdown__list {
