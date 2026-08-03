@@ -2,7 +2,7 @@
   <aside class="right-panel">
     <div class="right-panel-fixed">
       <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
-        <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '设置' }}</span>
+        <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '折叠设置' }}</span>
         <span class="collapse-arrow">{{ fixedCollapsed ? '▸' : '▾' }}</span>
       </div>
       <template v-if="!fixedCollapsed">
@@ -131,6 +131,34 @@
           >
             <div class="theme-option-row">
               <span class="theme-option-dot" :style="{ background: option.accent }"></span>
+              <div class="theme-option-copy">
+                <span class="theme-option-name">{{ option.label }}</span>
+                <span class="theme-option-desc">{{ option.description }}</span>
+              </div>
+            </div>
+          </el-option>
+        </el-select>
+      </div>
+
+      <div class="panel-section input-animation-section appearance-section">
+        <div class="section-header compact-section-header">
+          <h4>输入框动画</h4>
+          <span class="theme-current">{{ currentAnimationOption.label }}</span>
+        </div>
+        <el-select
+          v-model="inputAnimation"
+          size="small"
+          class="input-animation-select"
+          @change="(value: InputAnimationType) => setInputAnimation(value)"
+        >
+          <el-option
+            v-for="option in INPUT_ANIMATION_OPTIONS"
+            :key="option.id"
+            :label="option.label"
+            :value="option.id"
+          >
+            <div class="theme-option-row">
+              <span class="theme-option-dot" :style="{ background: option.id === 'marquee' ? 'linear-gradient(90deg,#ff2d95,#2da8ff,#18e6c3)' : option.id === 'transparent-arc' ? 'conic-gradient(transparent 60%, #ff2d95 70%, #2da8ff 80%, transparent 90%)' : 'conic-gradient(#ff2d95,#2da8ff,#18e6c3,#ff2d95)' }"></span>
               <div class="theme-option-copy">
                 <span class="theme-option-name">{{ option.label }}</span>
                 <span class="theme-option-desc">{{ option.description }}</span>
@@ -366,6 +394,7 @@ import { api, fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '@/composables/useMarkdownTheme'
+import { useInputAnimation, INPUT_ANIMATION_OPTIONS, type InputAnimationType } from '@/composables/useInputAnimation'
 import { AnsiUp } from 'ansi_up'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
@@ -401,6 +430,7 @@ const reasoningFromPreset = computed(() =>
   !hasReasoningOverride.value && presetLlmParams.value?.reasoning_effort !== undefined
 )
 const { markdownTheme, currentOption, setMarkdownTheme } = useMarkdownTheme()
+const { inputAnimation, currentOption: currentAnimationOption, setInputAnimation } = useInputAnimation()
 
 const summEnabled = ref(true)
 const summModel = ref('')
@@ -724,6 +754,14 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .markdown-theme-select {
+  width: 100%;
+}
+
+.input-animation-section {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--el-fill-color-extra-light) 90%, var(--el-color-primary) 5%), var(--el-fill-color-extra-light));
+}
+
+.input-animation-select {
   width: 100%;
 }
 

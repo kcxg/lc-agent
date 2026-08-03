@@ -20,7 +20,14 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
     throw new Error('认证已过期，请重新登录')
   }
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`)
+    let detail = `${response.status} ${response.statusText}`
+    try {
+      const body = await response.json()
+      if (body?.detail) {
+        detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+      }
+    } catch {}
+    throw new Error(detail)
   }
   if (response.status === 204) return undefined as T
   return response.json()
@@ -51,6 +58,10 @@ export const api = {
   updateAgent: (id: string, data: object) => fetchApi<any>(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAgent: (id: string) => fetchApi<void>(`/agents/${id}`, { method: 'DELETE' }),
   activateAgent: (id: string) => fetchApi<any>(`/agents/${id}/activate`, { method: 'POST' }),
+  checkPaths: (paths: string[]) => fetchApi<{ path: string; exists: boolean }[]>('/check-paths', {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  }),
 
   getSessions: () => fetchApi<any[]>('/sessions'),
   createSession: (data: { title?: string; agent_id?: string; model?: string }) =>

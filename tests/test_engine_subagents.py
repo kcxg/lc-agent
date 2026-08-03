@@ -129,8 +129,8 @@ def test_build_agent_injects_single_task_tool_and_records_display_map(monkeypatc
     assert task_tools[0].description.startswith("Delegate a task to one configured sub-agent.")
     assert "stateless" in task_tools[0].description
     assert "final and only reply" in task_tools[0].description
-    assert "subagent_type: 研究专家" in task_tools[0].description
-    assert "when_to_use:" in task_tools[0].description
+    assert "<subagent_type>研究专家</subagent_type>" in task_tools[0].description
+    assert "<when_to_use>" in task_tools[0].description
     assert "当你需要深入研究时调用它" in task_tools[0].description
     assert engine.get_subagent_tool_names("parent-agent") == {"task"}
     assert engine.get_subagent_display_name_map("parent-agent") == {"研究专家": "研究专家"}
@@ -207,8 +207,8 @@ def test_build_agent_injects_delegation_prompt_into_subagent(monkeypatch):
     system_prompt = captured.get("system_prompt", "")
     middleware = captured.get("middleware", [])
 
-    # system_prompt は preset のままで、文字列連結されない
-    assert system_prompt == "你是专门做研究的助手。"
+    # system_prompt is wrapped in <instructions> block
+    assert system_prompt == "<instructions>\n你是专门做研究的助手。\n</instructions>"
 
     # SubagentDelegationMiddleware が middleware[0] として prepend=True で注入される
     assert middleware, "middleware list should not be empty"

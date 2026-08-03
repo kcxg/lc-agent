@@ -80,7 +80,27 @@
         aria-label="打开工具和状态面板"
         @click="$emit('openMobileTools')"
       />
-      <span class="model-badge">{{ modelName }}</span>
+      <el-select
+        v-if="!agentsStore.isCodeAgent"
+        class="header-model-select"
+        :model-value="toolsStore.currentModel"
+        size="small"
+        filterable
+        placeholder="选择模型"
+        popper-class="header-model-select-popper"
+        @change="toolsStore.setModel($event)"
+      >
+        <el-option
+          v-for="model in toolsStore.models"
+          :key="model.id"
+          :label="model.id"
+          :value="model.id"
+        >
+          <span>{{ model.id }}</span>
+          <span class="header-model-option-provider">{{ model.provider }}</span>
+        </el-option>
+      </el-select>
+      <span v-else class="model-badge">{{ modelName }}</span>
       <el-button :icon="RefreshRight" circle size="small" title="刷新页面" @click="reloadPage" />
       <el-button :icon="isDark ? Sunny : Moon" circle size="small" @click="toggleDark()" />
     </div>
@@ -305,6 +325,29 @@ const emit = defineEmits<{
   border: 1px solid var(--el-border-color);
   border-radius: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.header-model-select {
+  width: 164px;
+}
+
+.header-model-select :deep(.el-select__wrapper) {
+  min-height: 26px;
+  border-radius: 14px;
+  border: 1px solid var(--el-border-color);
+  background: var(--el-fill-color-light);
+  box-shadow: none;
+}
+
+.header-model-select :deep(.el-select__selected-item) {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.header-model-option-provider {
+  float: right;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
 }
 
 .user-dropdown-trigger {
@@ -605,6 +648,7 @@ const emit = defineEmits<{
 
   .header-btn,
   .model-badge,
+  .header-model-select,
   .status-dot,
   .status-text {
     display: none;

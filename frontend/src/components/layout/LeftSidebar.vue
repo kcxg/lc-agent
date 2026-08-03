@@ -21,7 +21,7 @@
       </button>
     </div>
 
-    <div v-if="!collapsed" class="session-list">
+    <div v-if="!collapsed" ref="sessionListRef" class="session-list">
       <div class="sidebar-search">
         <input
           v-model="searchQuery"
@@ -55,6 +55,7 @@
               :key="session.id"
               class="session-item"
               :class="{ 'is-active': session.id === sessionsStore.currentSessionId }"
+              :data-session-id="session.id"
               @click="handleSessionSelect(session.id)"
             >
               <span class="session-rail" aria-hidden="true"></span>
@@ -64,6 +65,11 @@
                 class="session-streaming-dot"
                 title="正在生成中"
               />
+              <span
+                v-else-if="sessionsStore.isCompletedUnseen(session.id)"
+                class="session-completed-badge"
+                title="已完成，尚未查看"
+              >✓</span>
               <span class="session-item-title">{{ session.title || '新对话' }}</span>
               <div class="session-item-meta">
                 <button
@@ -106,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { useSessionsStore, type Session } from '@/stores/sessions'
 import { useAgentsStore } from '@/stores/agents'
@@ -126,6 +132,7 @@ const SIDEBAR_COLLAPSED_GROUPS_KEY = 'lc-agent:sidebar:collapsed-agent-groups'
 const searchQuery = ref('')
 const openMenuSessionId = ref<string | null>(null)
 const visibleCountByAgent = ref<Record<string, number>>({})
+const sessionListRef = ref<HTMLElement | null>(null)
 
 interface SidebarGroup {
   agentId: string
@@ -242,6 +249,37 @@ watch(renderedGroups, groups => {
     persistCollapsedGroups()
   }
 }, { immediate: true })
+
+watch(() => sessionsStore.currentSessionId, async (sessionId) => {
+  if (!sessionId || props.collapsed) return
+  const session = sessionsStore.sessions.find(item => item.id === sessionId)
+  if (!session) return
+
+  if (normalizedQuery.value) {
+    searchQuery.value = ''
+  }
+
+  const agentName = agentsStore.getAgentName(session.agent_id || 'chat')
+  const nextCollapsedGroups = new Set(collapsedGroups.value)
+  nextCollapsedGroups.delete(agentName)
+  collapsedGroups.value = nextCollapsedGroups
+  persistCollapsedGroups()
+
+  const sortedSessions = sessionsStore.sessions
+    .filter(item => (item.agent_id || 'chat') === (session.agent_id || 'chat'))
+    .sort(compareSessions)
+  const sessionIndex = sortedSessions.findIndex(item => item.id === sessionId)
+  if (sessionIndex >= getVisibleCount(session.agent_id || 'chat')) {
+    visibleCountByAgent.value = {
+      ...visibleCountByAgent.value,
+      [session.agent_id || 'chat']: sessionIndex + 1,
+    }
+  }
+
+  await nextTick()
+  const target = sessionListRef.value?.querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`)
+  target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+})
 
 function toggleGroup(title: string) {
   const next = new Set(collapsedGroups.value)
@@ -610,18 +648,57 @@ onBeforeUnmount(() => {
 }
 
 .session-streaming-dot {
+  position: relative;
   display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--el-color-primary, #409eff);
-  animation: streaming-pulse 1.2s ease-in-out infinite;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--el-color-primary) 75%, transparent);
   flex-shrink: 0;
 }
 
-@keyframes streaming-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+.session-streaming-dot::after {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid var(--el-color-primary);
+  border-radius: 50%;
+  content: '';
+  animation: streaming-status-ring 1.25s ease-out infinite;
+}
+
+.session-completed-badge {
+  display: grid;
+  width: 15px;
+  height: 15px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--el-color-success) 72%, var(--el-border-color));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--el-color-success) 18%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--el-color-success) 56%, transparent);
+  color: var(--el-color-success);
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+  animation: completed-badge-arrival 0.9s ease-out both;
+}
+
+@keyframes streaming-status-ring {
+  0% { transform: scale(0.42); opacity: 0.95; }
+  75%, 100% { transform: scale(1.35); opacity: 0; }
+}
+
+@keyframes completed-badge-arrival {
+  0% { transform: scale(0.35) rotate(-20deg); opacity: 0; }
+  60% { transform: scale(1.18) rotate(4deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-streaming-dot::after,
+  .session-completed-badge {
+    animation: none;
+  }
 }
 
 .session-item-title {

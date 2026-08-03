@@ -1,6 +1,7 @@
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -194,6 +195,52 @@ def _validate_subagent_ids_exist(engine: AgentEngine, subagents: list[SubAgentLi
             )
 
 
+def _path_exists(p: str) -> bool:
+    return Path(p).expanduser().is_dir()
+
+
+def _validate_project_paths_or_raise(
+    project_mode: bool,
+    project_root: str | None,
+    project_extra_dirs: list[str] | None,
+) -> None:
+    """Raise HTTPException(422) if project paths are invalid when project_mode is on."""
+    if not project_mode:
+        return
+    root = project_root.strip() if project_root else None
+    if not root:
+        raise HTTPException(status_code=422, detail="开启项目模式时必须填写项目根目录")
+    paths_to_check: list[str] = [root]
+    if project_extra_dirs:
+        paths_to_check.extend(d.strip() for d in project_extra_dirs if d and d.strip())
+    missing = [p for p in paths_to_check if not _path_exists(p)]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"以下路径不存在或不是目录: {' | '.join(missing)}",
+        )
+
+
+class CheckPathsRequest(BaseModel):
+    paths: list[str] = []
+
+    @field_validator("paths")
+    @classmethod
+    def limit_paths(cls, v: list[str]) -> list[str]:
+        if len(v) > 20:
+            raise ValueError("一次最多检查 20 个路径")
+        return v
+
+
+@router.post("/check-paths")
+async def check_paths(body: CheckPathsRequest):
+    """Check whether filesystem paths exist on the server (no auth required)."""
+    return [
+        {"path": p, "exists": _path_exists(p)}
+        for p in body.paths
+    ]
+
+
 @router.post("/agents", status_code=201)
 async def create_agent(
     body: AgentCreateRequest,
@@ -203,6 +250,7 @@ async def create_agent(
 ):
     """Create a new agent preset (persisted to DB)."""
     _validate_subagent_ids_exist(engine, body.subagents)
+    _validate_project_paths_or_raise(body.project_mode, body.project_root, body.project_extra_dirs)
     preset_db = AgentPresetDB(
         id=str(uuid.uuid4()),
         name=body.name,
@@ -316,6 +364,11 @@ async def update_agent(
     preset_db = result.scalar_one_or_none()
     if preset_db is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    merged_mode = update_data.get("project_mode", preset_db.project_mode)
+    merged_root = update_data.get("project_root", preset_db.project_root)
+    merged_extra = update_data.get("project_extra_dirs", preset_db.project_extra_dirs)
+    _validate_project_paths_or_raise(merged_mode, merged_root, merged_extra)
 
     for key, value in update_data.items():
         setattr(preset_db, key, value)

@@ -51,6 +51,14 @@
               {{ loadingOlder ? '加载中...' : '加载更早的消息' }}
             </el-button>
           </div>
+          <div
+            v-else-if="item.itemType === 'time-separator'"
+            class="chat-time-separator"
+          >
+            <span class="chat-time-line" />
+            <span class="chat-time-label">{{ (item as any).label }}</span>
+            <span class="chat-time-line" />
+          </div>
         </template>
         <template #avatar="{ item }">
           <div
@@ -98,7 +106,13 @@
           </div>
         </template>
         <template #content="{ item }">
-          <div class="bubble-content-wrap" :class="{ 'is-system-delegation': item.isSystem }">
+          <div
+            class="bubble-content-wrap"
+            :class="[
+              { 'is-system-delegation': item.isSystem },
+              (item as any).enterClass || '',
+            ]"
+          >
             <div v-if="item.isSystem" class="system-delegation-msg">
               <div class="markdown-body" v-html="renderMarkdown(item.content || '')" />
             </div>
@@ -109,27 +123,60 @@
                   class="markdown-body"
                   v-html="renderMarkdown(seg.text)"
                 />
-                <details
+                <div
                   v-else-if="seg.type === 'thinking' && seg.text"
                   class="thinking-block"
-                  :open="isThinkingExpanded(item)"
+                  :class="[
+                    { 'is-expanded': isThinkingExpanded(item, segIdx) },
+                    { 'is-overflow': isThinkingOverflow(item, segIdx) },
+                  ]"
                 >
-                  <summary class="thinking-summary">
+                  <button
+                    v-if="isThinkingOverflow(item, segIdx)"
+                    class="thinking-summary"
+                    type="button"
+                    @click="toggleThinkingExpanded(item, segIdx)"
+                  >
                     <el-icon><Cpu /></el-icon>
                     <span>思考过程</span>
-                  </summary>
-                  <div class="markdown-body thinking-body" v-html="renderMarkdown(seg.text)" />
-                </details>
+                  </button>
+                  <div
+                    v-else
+                    class="thinking-summary thinking-summary-static"
+                  >
+                    <el-icon><Cpu /></el-icon>
+                    <span>思考过程</span>
+                  </div>
+                  <div
+                    class="markdown-body thinking-body"
+                    :data-thinking-key="getThinkingSegmentKey(item, segIdx)"
+                    v-html="renderMarkdown(seg.text)"
+                  />
+                </div>
                 <div v-else-if="seg.type === 'tool' && item.toolCalls && seg.toolIndex != null" class="tool-call-inline">
                   <TodoProgressCard
                     v-if="item.toolCalls[seg.toolIndex!]?.name === 'write_todos'"
                     :tool-call="item.toolCalls[seg.toolIndex!]"
                   />
-                  <SubAgentCard
-                    v-else-if="item.toolCalls[seg.toolIndex!]?.is_subagent"
-                    :entry="getSubAgentEntry(item, seg.toolIndex!) || makeFallbackSubAgentEntry(item, seg.toolIndex!)"
-                    @enter="handleEnterSubAgent"
-                  />
+                  <template v-else-if="item.toolCalls[seg.toolIndex!]?.is_subagent">
+                    <div class="subagent-workflow" :class="`is-${getSubAgentStatus(item, seg.toolIndex!)}`">
+                      <div class="subagent-delegation-card">
+                        <div class="subagent-delegation-header">
+                          <span class="subagent-delegation-node">✦</span>
+                          <span class="subagent-delegation-kicker">任务派遣</span>
+                          <span class="subagent-delegation-target">{{ item.toolCalls[seg.toolIndex!]?.name }}</span>
+                        </div>
+                        <div class="subagent-delegation-text">{{ getSubAgentDelegationDescription(item, seg.toolIndex!) }}</div>
+                      </div>
+                      <div class="subagent-workflow-link" aria-hidden="true">
+                        <span class="subagent-workflow-pulse"></span>
+                      </div>
+                      <SubAgentCard
+                        :entry="getSubAgentEntry(item, seg.toolIndex!) || makeFallbackSubAgentEntry(item, seg.toolIndex!)"
+                        @enter="handleEnterSubAgent"
+                      />
+                    </div>
+                  </template>
                   <ToolCallCard
                     v-else
                     :tool-call="item.toolCalls[seg.toolIndex!]"
@@ -300,6 +347,18 @@ type MessageBubbleItem = BubbleListItemProps & {
   httpTraces?: HttpTrace[]
   httpTracesCount?: number
   isStreamingMessage?: boolean
+  timestamp?: number
+  enterClass?: string
+}
+
+type TimeSeparatorItem = MessageBubbleItem & {
+  key: string
+  itemType: 'time-separator'
+  type: 'time-separator'
+  label: string
+  role: 'ai'
+  messageId: string
+  content: string
 }
 
 type LoadOlderBubbleItem = BubbleListItemProps & {
@@ -322,7 +381,7 @@ type LoadOlderBubbleItem = BubbleListItemProps & {
   isStreamingMessage?: boolean
 }
 
-type ChatBubbleItem = MessageBubbleItem | LoadOlderBubbleItem
+type ChatBubbleItem = MessageBubbleItem | LoadOlderBubbleItem | TimeSeparatorItem
 
 const chatStore = useChatStore()
 const sessionsStore = useSessionsStore()
@@ -450,53 +509,93 @@ function createLoadOlderItem(): LoadOlderBubbleItem {
   }
 }
 
+function formatChatSeparatorTime(ts: number): string {
+  const now = new Date()
+  const d = new Date(ts)
+  const sameDay = d.toDateString() === now.toDateString()
+  const yest = new Date(now.getTime() - 86400000).toDateString()
+  const isYesterday = d.toDateString() === yest
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  if (sameDay) return `今天 ${hh}:${mm}`
+  if (isYesterday) return `昨天 ${hh}:${mm}`
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const da = String(d.getDate()).padStart(2, '0')
+  if (d.getFullYear() === now.getFullYear()) return `${mo}-${da} ${hh}:${mm}`
+  return `${d.getFullYear()}-${mo}-${da} ${hh}:${mm}`
+}
+
+function createTimeSeparatorItem(ts: number): TimeSeparatorItem {
+  const key = `__time_sep_${ts}__`
+  return {
+    key,
+    itemType: 'time-separator' as const,
+    type: 'time-separator' as const,
+    label: formatChatSeparatorTime(ts),
+    role: 'ai',
+    messageId: key,
+    content: '',
+  }
+}
+
 const bubbleList = computed((): ChatBubbleItem[] => {
   // When in live sub-session mode, render from SubAgentEntry without touching main SSE
   if (subLiveToolCallId.value !== null) return subLiveBubbleList.value
 
-  const items = messages.value
+  const filtered = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
-    .map((msg, idx, arr): MessageBubbleItem => {
-      const msgContent = typeof msg.content === 'string'
-        ? msg.content
-        : msg.content.find(b => b.type === 'text')?.text || ''
-      const segs = msg.role === 'assistant' && hasStructuredSegments(msgContent, msg.toolCalls)
-        ? parseSegments(msgContent, msg.toolCalls)
-        : undefined
-      const isStreamingMessage =
-        msg.role === 'assistant'
-        && idx === arr.length - 1
-        && isStreaming.value
-      return {
-        key: msg.id,
-        messageId: msg.id,
-        role: msg.role === 'assistant' ? 'ai' : 'user',
-        placement: msg.role === 'user' ? 'end' : 'start',
-        content: msgContent,
-        contentBlocks: msg.role === 'user' && Array.isArray(msg.content) ? msg.content : undefined,
-        shape: 'corner' as const,
-        variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
-        isMarkdown: msg.role !== 'user' && !msg.isSystem,
-        isSystem: msg.isSystem,
-        toolCalls: msg.toolCalls,
-        usage: msg.usage,
-        segments: segs,
-        httpTraces: msg.role === 'assistant' ? msg.httpTraces : undefined,
-        httpTracesCount: msg.role === 'assistant' ? (msg.httpTracesCount || 0) : 0,
-        hasThinking: segs?.some(s => s.type === 'thinking' && s.text?.trim()) ?? false,
-        hasToolCalls: segs?.some(s => s.type === 'tool') ?? false,
-        hasAnswer: segs?.some(s => s.type === 'text' && s.text?.trim()) ?? false,
-        isStreamingMessage,
-        loading:
-          isStreamingMessage
-          && !msgContent,
-        avatarSize: '28px',
-        avatarGap: '8px',
-      }
-    })
 
-  if (hasOlderMessages.value) items.unshift(createLoadOlderItem())
-  return items
+  const out: ChatBubbleItem[] = []
+  let prevTs: number | null = null
+  for (let i = 0; i < filtered.length; i++) {
+    const msg = filtered[i]
+    const ts = msg.timestamp ?? Date.now()
+    if (prevTs != null && ts - prevTs > 3600_000) {
+      out.push(createTimeSeparatorItem(ts))
+    }
+    prevTs = ts
+
+    const msgContent = typeof msg.content === 'string'
+      ? msg.content
+      : msg.content.find(b => b.type === 'text')?.text || ''
+    const segs = msg.role === 'assistant' && hasStructuredSegments(msgContent, msg.toolCalls)
+      ? parseSegments(msgContent, msg.toolCalls)
+      : undefined
+    const isStreamingMessage =
+      msg.role === 'assistant'
+      && i === filtered.length - 1
+      && isStreaming.value
+    const enterClass = msg.role === 'assistant' ? 'bubble-enter-left' : 'bubble-enter-right'
+    out.push({
+      key: msg.id,
+      messageId: msg.id,
+      role: msg.role === 'assistant' ? 'ai' : 'user',
+      placement: msg.role === 'user' ? 'end' : 'start',
+      content: msgContent,
+      contentBlocks: msg.role === 'user' && Array.isArray(msg.content) ? msg.content : undefined,
+      shape: 'corner' as const,
+      variant: (msg.role === 'user' ? 'outlined' : 'filled') as 'outlined' | 'filled',
+      isMarkdown: msg.role !== 'user' && !msg.isSystem,
+      isSystem: msg.isSystem,
+      toolCalls: msg.toolCalls,
+      usage: msg.usage,
+      segments: segs,
+      httpTraces: msg.role === 'assistant' ? msg.httpTraces : undefined,
+      httpTracesCount: msg.role === 'assistant' ? (msg.httpTracesCount || 0) : 0,
+      hasThinking: segs?.some(s => s.type === 'thinking' && s.text?.trim()) ?? false,
+      hasToolCalls: segs?.some(s => s.type === 'tool') ?? false,
+      hasAnswer: segs?.some(s => s.type === 'text' && s.text?.trim()) ?? false,
+      isStreamingMessage,
+      loading: isStreamingMessage && !msgContent,
+      avatarSize: '28px',
+      avatarGap: '8px',
+      timestamp: ts,
+      enterClass,
+    })
+  }
+
+  if (hasOlderMessages.value) out.unshift(createLoadOlderItem())
+  return out
 })
 
 const lastUserMessage = computed(() =>
@@ -582,8 +681,65 @@ function getModelLabel(): string {
   return parts[parts.length - 1] || model
 }
 
-function isThinkingExpanded(item: ChatBubbleItem): boolean {
-  return item.isStreamingMessage === true
+const thinkingExpandedBySegment = ref<Record<string, boolean>>({})
+const thinkingOverflowBySegment = ref<Set<string>>(new Set())
+
+function getThinkingSegmentKey(item: ChatBubbleItem, segmentIndex: number): string {
+  return `${item.messageId || item.id}-${segmentIndex}`
+}
+
+function isThinkingOverflow(item: ChatBubbleItem, segmentIndex: number): boolean {
+  const key = getThinkingSegmentKey(item, segmentIndex)
+  return thinkingOverflowBySegment.value.has(key)
+}
+
+// require more than 2 lines before showing expand control
+// 2 lines at 1.65em/13px => ~43px; use 2.4 lines to avoid borderline cases
+const THINKING_OVERFLOW_MIN_HEIGHT = 52
+
+function updateThinkingOverflowFlags() {
+  const bodies = document.querySelectorAll<HTMLElement>('[data-thinking-key]')
+  const next = new Set<string>()
+  for (const el of Array.from(bodies)) {
+    const key = el.getAttribute('data-thinking-key')
+    if (!key) continue
+    const block = el.closest<HTMLElement>('.thinking-block')
+    if (!block) continue
+    // 测量展开状态下的真实高度，需要临时去掉 max-height 限制
+    const prevMaxHeight = el.style.maxHeight
+    const prevMask = el.style.maskImage
+    const prevWebkitMask = el.style.webkitMaskImage
+    el.style.maxHeight = 'none'
+    el.style.maskImage = 'none'
+    el.style.webkitMaskImage = 'none'
+    const h = el.scrollHeight
+    el.style.maxHeight = prevMaxHeight
+    el.style.maskImage = prevMask || ''
+    el.style.webkitMaskImage = prevWebkitMask || ''
+    if (h > THINKING_OVERFLOW_MIN_HEIGHT) {
+      next.add(key)
+    }
+  }
+  thinkingOverflowBySegment.value = next
+}
+
+function getSubAgentDelegationDescription(item: ChatBubbleItem, toolIndex: number): string {
+  const args = item.toolCalls?.[toolIndex]?.args as Record<string, unknown>
+  return String(args.description)
+}
+
+function getSubAgentStatus(item: ChatBubbleItem, toolIndex: number): string {
+  return (getSubAgentEntry(item, toolIndex) || makeFallbackSubAgentEntry(item, toolIndex)).status
+}
+
+function isThinkingExpanded(item: ChatBubbleItem, segmentIndex: number): boolean {
+  const key = getThinkingSegmentKey(item, segmentIndex)
+  return thinkingExpandedBySegment.value[key] ?? item.isStreamingMessage === true
+}
+
+function toggleThinkingExpanded(item: ChatBubbleItem, segmentIndex: number) {
+  const key = getThinkingSegmentKey(item, segmentIndex)
+  thinkingExpandedBySegment.value[key] = !isThinkingExpanded(item, segmentIndex)
 }
 
 function canEditMessage(item: ChatBubbleItem) {
@@ -990,8 +1146,25 @@ function handleMarkdownClick(event: MouseEvent) {
   })
 }
 
+function applyAlwaysScrollbar() {
+  const listEl = messagesContainerRef.value?.querySelector('.elx-bubble-list__list')
+  if (listEl && !listEl.classList.contains('elx-bubble-list__list--always-scrollbar')) {
+    listEl.classList.add('elx-bubble-list__list--always-scrollbar')
+  }
+}
+
 onMounted(() => {
   document.addEventListener('click', handleMarkdownClick)
+  nextTick(() => {
+    applyAlwaysScrollbar()
+    updateThinkingOverflowFlags()
+  })
+})
+
+watch([messages, bubbleList], async () => {
+  await nextTick()
+  applyAlwaysScrollbar()
+  updateThinkingOverflowFlags()
 })
 
 onBeforeUnmount(() => {
@@ -1080,7 +1253,7 @@ onBeforeUnmount(() => {
 
 .messages-container {
   --chat-assistant-bubble-width: min(85%, 920px);
-  --chat-user-bubble-max-width: min(78%, 720px);
+  --chat-user-bubble-max-width: min(68%, 640px);
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1102,6 +1275,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+  pointer-events: auto !important;
 }
 
 .messages-container :deep(.elx-bubble-list__content) {
@@ -1113,6 +1287,29 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 100%;
   padding: 4px 0 8px;
+}
+
+.chat-time-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 4% 8px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+.chat-time-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--el-border-color-lighter) 50%, transparent);
+}
+.chat-time-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: var(--el-text-color-secondary);
+  background: color-mix(in srgb, var(--el-fill-color-light) 80%, transparent);
+  border: 1px solid var(--el-border-color-lighter);
 }
 
 .messages-container :deep(.elx-bubble) {
@@ -1151,6 +1348,12 @@ onBeforeUnmount(() => {
 .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
   width: fit-content;
   max-width: var(--chat-user-bubble-max-width) !important;
+  padding: 10px 14px;
+  border-radius: 16px 16px 6px 16px;
+  background: var(--el-bg-color-overlay);
+  color: var(--el-text-color-primary);
+  border: 1px solid var(--el-border-color-lighter);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--el-box-shadow) 30%, transparent);
 }
 
 .messages-container :deep(.elx-bubble__content) {
@@ -1164,9 +1367,89 @@ onBeforeUnmount(() => {
   max-width: 100% !important;
 }
 
-.messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper),
+.messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper) {
+  position: relative;
+  padding: 10px 14px 10px 18px;
+  border-radius: 6px 16px 16px 16px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-lighter);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--el-box-shadow) 35%, transparent);
+}
+.messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper)::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 0;
+  width: 3px;
+  height: 24px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to bottom,
+    #ff2d95,
+    #9b5cff,
+    #2da8ff,
+    #18e6c3,
+    #ffe14d,
+    #ff7a2d,
+    #ff2d95
+  );
+  background-size: 100% 220%;
+  z-index: 1;
+}
+
+.messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper)::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 0;
+  width: 3px;
+  height: 24px;
+  border-radius: 3px;
+  background: linear-gradient(to bottom, #4ade80, #16a34a);
+  background-size: 100% 160%;
+  z-index: 1;
+}
+
+.messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
+  position: relative;
+  margin-left: auto;
+}
+
 .messages-container :deep(.elx-bubble--end .elx-bubble__content) {
+  position: relative;
   max-width: 100% !important;
+}
+
+/* ---------- bubble enter animations ---------- */
+.bubble-enter-left {
+  animation: bubble-enter-left 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.bubble-enter-right {
+  animation: bubble-enter-right 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes bubble-enter-left {
+  from {
+    opacity: 0;
+    transform: translateX(-10px) translateY(4px);
+    filter: blur(1px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes bubble-enter-right {
+  from {
+    opacity: 0;
+    transform: translateX(10px) translateY(4px);
+    filter: blur(1px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
 }
 
 .role-avatar {
@@ -1356,10 +1639,141 @@ onBeforeUnmount(() => {
   z-index: 1;
   pointer-events: auto !important;
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
+}
+
+.subagent-workflow {
+  --subagent-flow-color: var(--el-color-primary);
+  --subagent-flow-soft: color-mix(in srgb, var(--el-color-primary) 16%, var(--el-fill-color-light));
+  --subagent-flow-glow: color-mix(in srgb, var(--el-color-primary) 38%, transparent);
+  margin: 8px 0;
+}
+
+.subagent-workflow.is-done {
+  --subagent-flow-color: var(--el-color-success);
+  --subagent-flow-soft: color-mix(in srgb, var(--el-color-success) 16%, var(--el-fill-color-light));
+  --subagent-flow-glow: color-mix(in srgb, var(--el-color-success) 38%, transparent);
+}
+
+.subagent-workflow.is-error,
+.subagent-workflow.is-cancelled,
+.subagent-workflow.is-interrupted {
+  --subagent-flow-color: var(--el-color-danger);
+  --subagent-flow-soft: color-mix(in srgb, var(--el-color-danger) 14%, var(--el-fill-color-light));
+  --subagent-flow-glow: color-mix(in srgb, var(--el-color-danger) 30%, transparent);
+}
+
+.subagent-delegation-card {
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--subagent-flow-color) 44%, var(--el-border-color));
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--subagent-flow-soft), var(--el-fill-color-light) 58%);
+  box-shadow: 0 7px 20px color-mix(in srgb, var(--subagent-flow-glow) 36%, transparent);
+}
+
+.subagent-delegation-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  color: var(--subagent-flow-color);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.subagent-delegation-node {
+  display: grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border: 1px solid var(--subagent-flow-color);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--subagent-flow-color) 17%, transparent);
+  box-shadow: 0 0 12px var(--subagent-flow-glow);
+  font-size: 11px;
+}
+
+.subagent-delegation-target {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--subagent-flow-color) 15%, transparent);
+  color: var(--el-text-color-primary);
+  font-size: 11px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.subagent-delegation-text {
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.subagent-workflow-link {
+  position: relative;
+  width: 2px;
+  height: 28px;
+  margin: 0 0 0 22px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--subagent-flow-color) 26%, transparent);
+}
+
+.subagent-workflow-pulse {
+  position: absolute;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--subagent-flow-color);
+  box-shadow: 0 0 13px 4px var(--subagent-flow-glow);
+  transform: translateX(-50%);
+}
+
+.subagent-workflow.is-running .subagent-workflow-link {
+  background: linear-gradient(to bottom, transparent, var(--subagent-flow-color), transparent);
+  background-size: 100% 180%;
+  animation: subagent-flow-line 0.7s linear infinite;
+}
+
+.subagent-workflow.is-running .subagent-workflow-pulse,
+.subagent-workflow.is-running .subagent-delegation-node {
+  animation: subagent-flow-pulse 0.85s ease-in-out infinite;
+}
+
+.subagent-workflow :deep(.subagent-card) {
+  margin: 0;
+  border-color: color-mix(in srgb, var(--subagent-flow-color) 44%, var(--el-border-color));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--subagent-flow-glow) 27%, transparent);
+}
+
+.subagent-workflow :deep(.subagent-card) {
+  border-left-color: var(--subagent-flow-color);
+}
+
+@keyframes subagent-flow-line {
+  to { background-position: 0 180%; }
+}
+
+@keyframes subagent-flow-pulse {
+  0%, 100% { transform: scale(0.84); opacity: 0.7; }
+  50% { transform: scale(1.35); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-workflow.is-running .subagent-workflow-link,
+  .subagent-workflow.is-running .subagent-workflow-pulse,
+  .subagent-workflow.is-running .subagent-delegation-node {
+    animation: none;
+  }
 }
 
 .thinking-block {
+  position: relative;
   margin: 8px 0 10px;
   border-radius: 12px;
   border: 1px solid rgba(234, 179, 8, 0.22);
@@ -1370,18 +1784,18 @@ onBeforeUnmount(() => {
 
 .thinking-summary {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: 7px;
   padding: 8px 11px;
+  border: 0;
+  background: transparent;
   cursor: pointer;
   user-select: none;
   color: #d69e2e;
   font-size: 12px;
   font-weight: 700;
-}
-
-.thinking-summary::-webkit-details-marker {
-  display: none;
+  text-align: left;
 }
 
 .thinking-summary::after {
@@ -1392,8 +1806,16 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
-.thinking-block[open] .thinking-summary::after {
+.thinking-block.is-expanded .thinking-summary::after {
   content: '收起';
+}
+
+.thinking-summary-static {
+  cursor: default;
+  pointer-events: none;
+}
+.thinking-summary-static::after {
+  display: none;
 }
 
 .thinking-body {
@@ -1401,6 +1823,42 @@ onBeforeUnmount(() => {
   color: #c58f22;
   font-size: 13px;
   opacity: 0.92;
+  position: relative;
+}
+
+.thinking-block.is-overflow:not(.is-expanded) > .thinking-body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  max-height: calc(2 * 1.65em + 10px + 14px);
+  padding-bottom: 26px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+}
+
+.thinking-block.is-overflow:not(.is-expanded) > .thinking-body::after {
+  content: '▾ 点击展开';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #a16207;
+  background: transparent;
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.thinking-block:not([open]) > .thinking-body :deep(p) {
+  margin: 0;
 }
 
 .thinking-unavailable {
@@ -1446,14 +1904,46 @@ onBeforeUnmount(() => {
 
 .messages-container :deep(.markdown-code-block),
 .messages-container :deep(.markdown-body pre),
-.messages-container :deep(.markdown-body table),
-.messages-container :deep(.tool-call-card) {
+.messages-container :deep(.markdown-body table) {
   max-width: 100%;
   overflow-x: auto;
 }
 
 .messages-container :deep(.markdown-body code) {
   overflow-wrap: anywhere;
+}
+
+/* blockquote styling */
+.messages-container :deep(.markdown-body blockquote) {
+  position: relative;
+  margin: 12px 0 !important;
+  padding: 10px 14px 10px 32px !important;
+  border-left: 0 !important;
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--el-color-primary) 10%, transparent),
+      color-mix(in srgb, var(--el-color-info) 8%, transparent));
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, var(--el-border-color-lighter));
+  color: var(--el-text-color-regular) !important;
+}
+.messages-container :deep(.markdown-body blockquote)::before {
+  content: '❝';
+  position: absolute;
+  left: 10px;
+  top: 6px;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 900;
+  color: color-mix(in srgb, var(--el-color-primary) 72%, var(--el-color-info));
+  opacity: 0.85;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--el-color-primary) 22%, transparent);
+}
+.messages-container :deep(.markdown-body blockquote > *:first-child) {
+  margin-top: 0 !important;
+}
+.messages-container :deep(.markdown-body blockquote > *:last-child) {
+  margin-bottom: 0 !important;
 }
 
 .messages-container :deep(.elx-welcome) {

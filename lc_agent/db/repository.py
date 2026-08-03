@@ -66,16 +66,16 @@ class PromptRepository:
             self.session.add(AgentPromptBindingDB(agent_id=agent_id, prompt_id=pid, sort_order=order))
         await self.session.commit()
 
-    async def resolve_extra_prompts(self, agent_id: str) -> list[str]:
-        """Return ordered prompt contents bound to this agent (single JOIN query)."""
+    async def resolve_extra_prompts(self, agent_id: str) -> list[tuple[str, str]]:
+        """Return ordered (name, content) pairs for prompts bound to this agent."""
         stmt = (
-            select(PromptTemplateDB.content)
+            select(PromptTemplateDB.name, PromptTemplateDB.content)
             .join(AgentPromptBindingDB, AgentPromptBindingDB.prompt_id == PromptTemplateDB.id)
             .where(AgentPromptBindingDB.agent_id == agent_id)
             .order_by(AgentPromptBindingDB.sort_order)
         )
         result = await self.session.execute(stmt)
-        return [c for c in result.scalars().all() if c and c.strip()]
+        return [(name, content) for name, content in result.all() if content and content.strip()]
 
 
 class PresetRepository:

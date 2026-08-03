@@ -25,7 +25,7 @@ from lc_agent.core.http_trace_httpx import TracingAsyncClient
 from lc_agent.core.models import AgentPreset, ModelInfo
 from lc_agent.middlewares.inject_current_time_prompt_middleware import inject_current_time_prompt_middleware
 from lc_agent.middlewares.system_prompt import SystemPromptMiddleware
-from lc_agent.prompts.subagent_prompts import GENERAL_PURPOSE_DESCRIPTION, SUBAGENT_DELEGATION_PROMPT, TASK_SYSTEM_PROMPT
+from lc_agent.prompts.subagent_prompts import GENERAL_PURPOSE_DESCRIPTION, SUBAGENT_DELEGATION_PROMPT, TASK_SYSTEM_PROMPT, TASK_TOOL_DESCRIPTION
 from lc_agent.prompts.todo_prompts import TODO_SYSTEM_PROMPT, TODO_TOOL_DESCRIPTION
 from lc_agent.tools.registry import ToolRegistry
 
@@ -256,42 +256,14 @@ class AgentEngine:
                 reset_http_trace_collector(_trace_token)
                 register_subagent_collector(sub_thread_id, _sa_collector)
 
-        description_lines = [
-            "Delegate a task to one configured sub-agent.",
-            "",
-            "Each call is **stateless and one-shot**: the sub-agent only sees what you put in",
-            "the `description` argument. Therefore `description` must be fully self-contained:",
-            "include ALL background, specify exactly what to return in the **final and only reply**",
-            "(sections, format, language, length).",
-            "",
-            "**Good description example**:",
-            "  \"The user is building a Python project using LangChain. Please research LangChain",
-            "  v0.3's checkpointing mechanism, focusing on: (1) InMemorySaver vs SqliteSaver",
-            "  differences, (2) per-user memory configuration. Return a detailed Chinese analysis",
-            "  with code examples, in sections: Overview / Comparison / Recommendation.\"",
-            "**Bad description examples**:",
-            "  ❌ \"Research LangChain memory.\" (no context, no output format)",
-            "  ❌ \"Fix the checkpoint bug we discussed above.\" (sub-agent has no 'above' context)",
-            "",
-            "Use the exact `subagent_type` value from the list below.",
-            "Do not rename it, paraphrase it, translate it, or invent a new value.",
-            "",
-            "Available subagents:",
-            "",
-        ]
-        for descriptor in registry.values():
-            description_lines.extend([
-                "====================",
-                "",
-                f"subagent_type: {descriptor.subagent_type}",
-                "",
-                "when_to_use:",
-                descriptor.description,
-                "",
-            ])
-        if description_lines and description_lines[-1] == "":
-            description_lines.pop()
-        task_description = "\n".join(description_lines)
+        available_agents_str = "\n\n".join(
+            f"<subagent>\n"
+            f"  <subagent_type>{d.subagent_type}</subagent_type>\n"
+            f"  <when_to_use>{d.description}</when_to_use>\n"
+            f"</subagent>"
+            for d in registry.values()
+        )
+        task_description = TASK_TOOL_DESCRIPTION.format(available_agents=available_agents_str)
 
         available_types = sorted(descriptor.subagent_type for descriptor in registry.values())
         subagent_type_field_desc = (
@@ -333,11 +305,7 @@ class AgentEngine:
             preset = self.get_default_preset()
         self._current_preset = preset
 
-        # Combine base prompt with any library prompts bound to this agent
-        if preset.extra_system_prompts:
-            system_prompt = preset.system_prompt + "\n\n" + "\n\n".join(preset.extra_system_prompts)
-        else:
-            system_prompt = preset.system_prompt
+        system_prompt = f"<instructions>\n{preset.system_prompt}\n</instructions>"
         # Subagents need an explicit reminder that only the final message is returned to the caller
         tools = self.tool_registry.get_filtered_tools(preset.allowed_tool_groups)
 
@@ -413,6 +381,17 @@ class AgentEngine:
         if _depth > 0:
             middleware.append(SystemPromptMiddleware(
                 SUBAGENT_DELEGATION_PROMPT, "SubagentDelegationMiddleware", prepend=True
+            ))
+
+        # Prompt library entries: each becomes a separate content block with XML wrapping.
+        # Content body is not XML-escaped so prompt text is readable as-is.
+        import html as _html
+        for _ep_idx, (_ep_name, _ep_content) in enumerate(preset.extra_system_prompts):
+            _safe_name = _html.escape(_ep_name, quote=True) if _ep_name else ""
+            _mw_id = _ep_name if _ep_name else str(_ep_idx)
+            middleware.append(SystemPromptMiddleware(
+                f'<extra_instruction name="{_safe_name}">\n{_ep_content}\n</extra_instruction>',
+                f"ExtraPrompt:{_mw_id}",
             ))
 
         # Project folder mode (all controlled by project_mode master switch)

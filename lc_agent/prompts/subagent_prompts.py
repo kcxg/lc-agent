@@ -9,15 +9,7 @@ lc-agent 子智能体系统提示词
 # Subagent prompts
 # --------------------------------------------------------------------------- #
 
-SUBAGENT_DELEGATION_PROMPT = (
-    "In order to complete the objective that the user asks of you, "
-    "you have access to a number of standard tools.\n\n"
-    "Only your **last assistant message** is returned as the final output — "
-    "every message you produce during tool use (including thoughts between tool calls) is discarded. "
-    "After finishing all tool use, write a single complete answer in your final message. "
-    "Do NOT say 'as shown above' or reference any intermediate tool output — "
-    "your final message must be fully self-contained and contain the complete answer."
-)
+
 
 TASK_SYSTEM_PROMPT = """\
 <subagent_usage_rules>
@@ -63,9 +55,44 @@ TASK_SYSTEM_PROMPT = """\
 </subagent_usage_rules>"""
 
 
+SUBAGENT_DELEGATION_PROMPT = (
+    "In order to complete the objective that the user asks of you, "
+    "you have access to a number of standard tools.\n\n"
+    "Only your **last assistant message** is returned as the final output — "
+    "every message you produce during tool use (including thoughts between tool calls) is discarded. "
+    "After finishing all tool use, write a single complete answer in your final message. "
+    "Do NOT say 'as shown above' or reference any intermediate tool output — "
+    "your final message must be fully self-contained and contain the complete answer."
+)
+
+
 GENERAL_PURPOSE_DESCRIPTION = (
     "General-purpose agent for researching complex questions, searching for files and content, "
     "and executing multi-step tasks. When you are searching for a keyword or file and are not "
     "confident that you will find the right match in the first few tries use this agent to "
     "perform the search for you. This agent has access to all tools as the main agent."
 )
+
+TASK_TOOL_DESCRIPTION = """\
+Delegate a task to one configured sub-agent.
+
+Each call is **stateless and one-shot**: the sub-agent only sees what you put in
+the `description` argument. Therefore `description` must be fully self-contained:
+include ALL background, specify exactly what to return in the **final and only reply**
+(sections, format, language, length).
+
+**Good description example**:
+  "The user is building a Python project using LangChain. Please research LangChain
+  v0.3's checkpointing mechanism, focusing on: (1) InMemorySaver vs SqliteSaver
+  differences, (2) per-user memory configuration. Return a detailed Chinese analysis
+  with code examples, in sections: Overview / Comparison / Recommendation."
+**Bad description examples**:
+  ❌ "Research LangChain memory." (no context, no output format)
+  ❌ "Fix the checkpoint bug we discussed above." (sub-agent has no 'above' context)
+
+Use the exact `subagent_type` value from the list below.
+Do not rename it, paraphrase it, translate it, or invent a new value.
+
+Available subagents:
+
+{available_agents}"""

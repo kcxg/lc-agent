@@ -18,7 +18,7 @@
             class="dialog-mode-tab"
             :class="{ 'is-active': viewMode === 'prompts' }"
             @click="switchToPromptsView"
-          >📚 提示词库</button>
+          >📚 提示词管理</button>
         </div>
         <button class="dialog-close-btn" @click="visible = false">×</button>
       </div>
@@ -245,12 +245,37 @@
                   </el-form-item>
 
                   <el-form-item v-if="form.project_mode && form.project_root" label="额外允许目录" class="project-mode-field">
-                    <el-input
-                      v-model="projectExtraDirsText"
-                      type="textarea"
-                      :autosize="{ minRows: 1, maxRows: 4 }"
-                      placeholder="除项目目录外允许访问的其他路径，每行一个（可选）"
-                    />
+                    <div class="extra-dirs-list">
+                      <div
+                        v-for="(dir, idx) in (form.project_extra_dirs || [])"
+                        :key="idx"
+                        class="extra-dir-row"
+                      >
+                        <el-input
+                          :model-value="dir"
+                          placeholder="如 D:\\other\\path"
+                          clearable
+                          @update:model-value="(val: string) => updateExtraDir(idx, val)"
+                          @clear="removeExtraDir(idx)"
+                        />
+                        <el-button
+                          :icon="Delete"
+                          circle
+                          plain
+                          type="danger"
+                          size="small"
+                          class="extra-dir-delete-btn"
+                          @click="removeExtraDir(idx)"
+                        />
+                      </div>
+                      <el-button
+                        :icon="Plus"
+                        plain
+                        size="small"
+                        class="extra-dirs-add-btn"
+                        @click="addExtraDir"
+                      >添加目录</el-button>
+                    </div>
                     <div class="form-hint">项目模式下文件工具默认只能访问项目目录，此处可追加其他允许路径</div>
                   </el-form-item>
 
@@ -465,7 +490,7 @@
                 <el-tab-pane label="关联提示词" name="prompts_tab">
                   <div class="bound-prompts-section" v-loading="promptBindingLoading">
                     <p class="picker-hint">
-                      勾选要追加注入到此 Agent 系统提示词的提示词模板。提示词在「提示词库」中集中管理，修改后对所有绑定的 Agent 立即生效。
+                      勾选要追加注入到此 Agent 系统提示词的提示词模板。提示词在「提示词管理」中集中管理，修改后对所有绑定的 Agent 立即生效。
                     </p>
                     <template v-if="promptsStore.prompts.length">
                       <div
@@ -486,12 +511,12 @@
                     </template>
                     <div v-else>
                       <el-empty
-                        :description="isMobile ? '暂无提示词，点击顶部「📚 提示词库」tab 创建' : '暂无提示词，请点击弹窗顶部「📚 提示词库」tab 进行创建'"
+                        :description="isMobile ? '暂无提示词，点击顶部「📚 提示词管理」tab 创建' : '暂无提示词，请点击弹窗顶部「📚 提示词管理」tab 进行创建'"
                         :image-size="60"
                       />
                       <div style="text-align:center; margin-top: -8px;">
                         <el-button text type="primary" @click="switchToPromptsView">
-                          前往提示词库
+                          前往提示词管理
                         </el-button>
                       </div>
                     </div>
@@ -555,7 +580,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { InputInstance } from 'element-plus'
-import { QuestionFilled, Folder, Plus } from '@element-plus/icons-vue'
+import { QuestionFilled, Folder, Plus, Delete } from '@element-plus/icons-vue'
 import { useMediaQuery } from '@vueuse/core'
 import { fetchAvailableSubagents, api } from '@/api/http'
 import { useToolsStore } from '@/stores/tools'
@@ -826,13 +851,20 @@ const form = ref({
   project_extra_dirs: null as string[] | null,
 })
 
-const projectExtraDirsText = computed({
-  get: () => (form.value.project_extra_dirs || []).join('\n'),
-  set: (val: string) => {
-    const lines = val.split('\n').map(l => l.trim()).filter(Boolean)
-    form.value.project_extra_dirs = lines.length > 0 ? lines : null
-  },
-})
+function addExtraDir() {
+  form.value.project_extra_dirs = [...(form.value.project_extra_dirs || []), '']
+}
+
+function updateExtraDir(idx: number, value: string) {
+  if (!form.value.project_extra_dirs) return
+  form.value.project_extra_dirs[idx] = value
+}
+
+function removeExtraDir(idx: number) {
+  if (!form.value.project_extra_dirs) return
+  const next = form.value.project_extra_dirs.filter((_, i) => i !== idx)
+  form.value.project_extra_dirs = next.length > 0 ? next : null
+}
 
 // Watch form changes for dirty tracking (skip during load)
 watch(form, () => {
@@ -1189,6 +1221,22 @@ async function handleSave() {
       return
     }
 
+    if (form.value.project_mode && form.value.project_root.trim()) {
+      const pathsToCheck: string[] = [form.value.project_root.trim()]
+      const cleanedExtraDirs = (form.value.project_extra_dirs || []).map(d => d.trim()).filter(Boolean)
+      pathsToCheck.push(...cleanedExtraDirs)
+      try {
+        const results = await api.checkPaths(pathsToCheck)
+        const missingPaths = results.filter(r => !r.exists).map(r => r.path)
+        if (missingPaths.length > 0) {
+          ElMessage.error(`以下路径不存在或不是目录，请检查后重新填写：${missingPaths.join('、')}`)
+          return
+        }
+      } catch {
+        // 路径检查接口失败时不阻断保存，由后端兜底校验
+      }
+    }
+
     if (form.value.project_mode) {
       const FILE_TOOL_GROUPS = ['file_read', 'file_write', 'command']
       if (toolGroupMode.value === 'none') {
@@ -1229,25 +1277,34 @@ async function handleSave() {
       subagents: normalizedSubagents.length > 0 ? normalizedSubagents : null,
       enable_general_purpose_subagent: form.value.enable_general_purpose_subagent,
       project_mode: form.value.project_mode,
-      project_root: form.value.project_mode ? (form.value.project_root || null) : null,
-      project_extra_dirs: form.value.project_mode ? form.value.project_extra_dirs : null,
+      project_root: form.value.project_mode ? (form.value.project_root?.trim() || null) : null,
+      project_extra_dirs: form.value.project_mode
+        ? (() => {
+            const dirs = (form.value.project_extra_dirs || []).map(d => d.trim()).filter(Boolean)
+            return dirs.length > 0 ? dirs : null
+          })()
+        : null,
     }
 
-    if (isPendingNew.value) {
-      const created = await agentsStore.createAgent(data as any)
-      // Save prompt bindings if any were selected
-      if (boundPromptIds.value.length > 0) {
-        await api.setAgentPrompts(created.id, boundPromptIds.value)
+    try {
+      if (isPendingNew.value) {
+        const created = await agentsStore.createAgent(data as any)
+        // Save prompt bindings if any were selected
+        if (boundPromptIds.value.length > 0) {
+          await api.setAgentPrompts(created.id, boundPromptIds.value)
+        }
+        isPendingNew.value = false
+        selectedAgentId.value = created.id
+        isDirty.value = false
+        ElMessage.success('Agent 创建成功')
+      } else if (selectedAgentId.value) {
+        await agentsStore.updateAgent(selectedAgentId.value, data)
+        await api.setAgentPrompts(selectedAgentId.value, boundPromptIds.value)
+        isDirty.value = false
+        ElMessage.success('Agent 已保存')
       }
-      isPendingNew.value = false
-      selectedAgentId.value = created.id
-      isDirty.value = false
-      ElMessage.success('Agent 创建成功')
-    } else if (selectedAgentId.value) {
-      await agentsStore.updateAgent(selectedAgentId.value, data)
-      await api.setAgentPrompts(selectedAgentId.value, boundPromptIds.value)
-      isDirty.value = false
-      ElMessage.success('Agent 已保存')
+    } catch (err: any) {
+      ElMessage.error(err?.message || '保存失败，请重试')
     }
   } finally {
     saving.value = false
@@ -1685,6 +1742,32 @@ defineExpose({ open })
   padding: 4px 6px;
 }
 
+.extra-dirs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.extra-dir-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.extra-dir-row .el-input {
+  flex: 1;
+}
+
+.extra-dir-delete-btn {
+  flex-shrink: 0;
+}
+
+.extra-dirs-add-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
 /* Form hints */
 .form-hint {
   font-size: 12px;
@@ -1729,7 +1812,7 @@ defineExpose({ open })
   background: var(--el-fill-color-light);
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
-  max-height: 300px;
+  max-height: 500px;
   overflow-y: auto;
 }
 

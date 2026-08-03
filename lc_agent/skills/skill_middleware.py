@@ -2,6 +2,7 @@
 from typing import Any
 
 from langchain_agentskills import SkillMiddleware
+from pydantic import BaseModel, ConfigDict, Field
 
 _LOAD_SKILL_DESCRIPTION = (
     "Retrieve the full step-by-step instructions for a skill. "
@@ -11,6 +12,51 @@ _LOAD_SKILL_DESCRIPTION = (
     "Returns the skill's markdown body, available resources, and scripts. "
     "Skill names are listed in the system prompt under '## Available Skills'."
 )
+
+
+# ---------------------------------------------------------------------------
+# args_schema 补齐：langchain_agentskills 的三个工具是 BaseTool 子类，
+# 但都没有定义 args_schema。没有 args_schema 时 BaseTool._parse_input 会
+# 原样透传 tool_input 不做校验，LLM 传错参数名就会漏进 _run(**kwargs) 抛
+# TypeError，而 ToolNode 只把 pydantic ValidationError 反馈给模型重试，
+# TypeError 会直接中断 agent 运行。这里补上 extra="forbid" 的 pydantic
+# schema，让参数名/类型错误走官方自动反馈链路。
+# ---------------------------------------------------------------------------
+
+class _LoadSkillArgs(BaseModel):
+    """Tool arguments for ``load_skill``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str = Field(description="The name of the skill to load.")
+
+
+class _ReadSkillResourceArgs(BaseModel):
+    """Tool arguments for ``read_skill_resource``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str = Field(description="The name of the skill.")
+    resource_name: str = Field(description="The resource filename to read.")
+
+
+class _RunSkillScriptArgs(BaseModel):
+    """Tool arguments for ``run_skill_script``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str = Field(description="The name of the skill.")
+    script_name: str = Field(description="The script filename to run.")
+    script_args: list[str] | None = Field(
+        default=None, description="Optional arguments passed to the script."
+    )
+
+
+_SKILL_TOOL_ARGS_SCHEMAS: dict[str, type[BaseModel]] = {
+    "load_skill": _LoadSkillArgs,
+    "read_skill_resource": _ReadSkillResourceArgs,
+    "run_skill_script": _RunSkillScriptArgs,
+}
 
 
 def _build_skills_prompt(skills: list) -> str:
@@ -72,12 +118,19 @@ class _LcAgentSkillMiddleware(SkillMiddleware):
             executor=executor,
             prompt_builder=_build_skills_prompt,
         )
-        self.tools = [
-            t.model_copy(update={"description": _LOAD_SKILL_DESCRIPTION})
-            if t.name == "load_skill"
-            else t
-            for t in self.tools
-        ]
+        # 先取出父类设置的工具实例（self.tools 之后会被重建），
+        # 再补上父类缺失的 args_schema（见上方 _SKILL_TOOL_ARGS_SCHEMAS 说明），
+        # 并覆盖 load_skill 的 description。
+        original_tools = list(self.tools)
+        self.tools = []
+        for t in original_tools:
+            update: dict[str, Any] = {}
+            if t.name == "load_skill":
+                update["description"] = _LOAD_SKILL_DESCRIPTION
+            schema = _SKILL_TOOL_ARGS_SCHEMAS.get(t.name)
+            if schema is not None:
+                update["args_schema"] = schema
+            self.tools.append(t.model_copy(update=update) if update else t)
 
     @property
     def has_visible_skills(self) -> bool:

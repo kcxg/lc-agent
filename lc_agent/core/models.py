@@ -53,6 +53,6 @@ class AgentPreset(BaseModel):
     project_root: str | None = None
     project_extra_dirs: list[str] | None = None
 
-    # Ordered extra prompts from the prompt library, injected after system_prompt.
+    # Ordered (name, content) pairs from the prompt library, injected after system_prompt.
     # Populated at runtime; not stored in DB.
-    extra_system_prompts: list[str] = []
+    extra_system_prompts: list[tuple[str, str]] = []
