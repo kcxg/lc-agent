@@ -12,19 +12,19 @@
       <span class="logo">⚡ {{ appName }}</span>
     </div>
     <div class="header-center">
+      <div class="agent-select-wrapper">
       <el-select
         class="agent-select"
         :model-value="agentsStore.currentAgentId"
         size="small"
         @change="$emit('changeAgent', $event)"
-        :prefix-icon="MagicStick"
         placeholder="选择智能体"
         popper-class="agent-select-popper"
       >
         <el-option
           v-for="agent in agentsStore.agents"
           :key="agent.id"
-          :label="agent.display_name || agent.name"
+          :label="`${getAgentIcon(agent)} ${agent.display_name || agent.name}`"
           :value="agent.id"
         >
           <div class="agent-option">
@@ -32,20 +32,24 @@
             <div class="agent-option-content">
               <span class="agent-option-name">{{ agent.display_name || agent.name }}</span>
             </div>
-            <span :class="['source-tag', `source-tag--${agent.source || 'user'}`]">
+            <span v-if="agent.project_mode" class="source-tag source-tag--project">项目</span>
+            <span v-else :class="['source-tag', `source-tag--${agent.source || 'user'}`]">
               {{ agent.source === 'builtin' ? '内置' : agent.source === 'code' ? '代码' : '自建' }}
             </span>
           </div>
         </el-option>
       </el-select>
+      </div>
       <div class="header-actions desktop-only">
-        <button class="header-btn btn-edit" @click="$emit('editAgent')" :disabled="agentsStore.isBuiltin">编辑</button>
-        <button class="header-btn btn-new-agent" @click="$emit('newAgent')">+ 新Agent</button>
+        <button class="header-btn btn-manage-agents" @click="$emit('manageAgents')">⚙ Agents管理</button>
         <button class="header-btn btn-new-chat" @click="$emit('newChat')">+ 新对话</button>
         <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
       </div>
     </div>
     <div class="header-right">
+      <button class="header-btn mobile-agents-btn" @click="$emit('manageAgents')" aria-label="Agents管理">
+        <el-icon><Briefcase /></el-icon>
+      </button>
       <button class="header-btn mobile-new-chat-btn" @click="$emit('newChat')">
         <el-icon class="mobile-btn-icon"><Plus /></el-icon>
         <span class="mobile-btn-text">新对话</span>
@@ -61,6 +65,7 @@
         </span>
         <template #dropdown>
           <el-dropdown-menu>
+            <el-dropdown-item command="manage-agents" class="mobile-manage-agents-item">⚙ Agents管理</el-dropdown-item>
             <el-dropdown-item command="change-password">修改密码</el-dropdown-item>
             <el-dropdown-item v-if="authStore.isAdmin" command="admin">管理后台</el-dropdown-item>
             <el-dropdown-item divided command="logout">登出</el-dropdown-item>
@@ -75,7 +80,27 @@
         aria-label="打开工具和状态面板"
         @click="$emit('openMobileTools')"
       />
-      <span class="model-badge">{{ modelName }}</span>
+      <el-select
+        v-if="!agentsStore.isCodeAgent"
+        class="header-model-select"
+        :model-value="toolsStore.currentModel"
+        size="small"
+        filterable
+        placeholder="选择模型"
+        popper-class="header-model-select-popper"
+        @change="toolsStore.setModel($event)"
+      >
+        <el-option
+          v-for="model in toolsStore.models"
+          :key="model.id"
+          :label="model.id"
+          :value="model.id"
+        >
+          <span>{{ model.id }}</span>
+          <span class="header-model-option-provider">{{ model.provider }}</span>
+        </el-option>
+      </el-select>
+      <span v-else class="model-badge">{{ modelName }}</span>
       <el-button :icon="RefreshRight" circle size="small" title="刷新页面" @click="reloadPage" />
       <el-button :icon="isDark ? Sunny : Moon" circle size="small" @click="toggleDark()" />
     </div>
@@ -92,7 +117,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon, Menu, Setting, RefreshRight, MagicStick, UserFilled, ArrowDown, Plus } from '@element-plus/icons-vue'
+import { Sunny, Moon, Menu, Setting, RefreshRight, UserFilled, ArrowDown, Plus, Briefcase } from '@element-plus/icons-vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
 import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
 
@@ -105,7 +130,9 @@ const { isDark, toggleDark } = useTheme()
 const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
 
 function handleUserCommand(command: string) {
-  if (command === 'change-password') {
+  if (command === 'manage-agents') {
+    emit('manageAgents')
+  } else if (command === 'change-password') {
     changePasswordRef.value?.open()
   } else if (command === 'admin') {
     router.push('/admin')
@@ -120,6 +147,7 @@ function reloadPage() {
 }
 
 function getAgentIcon(agent: any): string {
+  if (agent.project_mode) return '📁'
   if (agent.source === 'code') return '⚙️'
   if (agent.id === 'chat') return '💬'
   if (agent.id === 'empty') return '🧩'
@@ -141,9 +169,8 @@ defineProps<{
   modelName: string
 }>()
 
-defineEmits<{
-  editAgent: []
-  newAgent: []
+const emit = defineEmits<{
+  manageAgents: []
   newChat: []
   changeAgent: [id: string]
   openMobileSidebar: []
@@ -209,6 +236,13 @@ defineEmits<{
   min-width: 0;
   flex-wrap: nowrap;
 }
+
+.agent-select-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 
 .agent-select {
   width: 260px;
@@ -291,6 +325,29 @@ defineEmits<{
   border: 1px solid var(--el-border-color);
   border-radius: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.header-model-select {
+  width: 164px;
+}
+
+.header-model-select :deep(.el-select__wrapper) {
+  min-height: 26px;
+  border-radius: 14px;
+  border: 1px solid var(--el-border-color);
+  background: var(--el-fill-color-light);
+  box-shadow: none;
+}
+
+.header-model-select :deep(.el-select__selected-item) {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.header-model-option-provider {
+  float: right;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
 }
 
 .user-dropdown-trigger {
@@ -381,6 +438,12 @@ defineEmits<{
   border: 1px solid rgba(217, 119, 6, 0.2);
 }
 
+.source-tag--project {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(6, 182, 212, 0.1));
+  color: #0284c7;
+  border: 1px solid rgba(2, 132, 199, 0.2);
+}
+
 :global(html.dark) .source-tag--builtin {
   background: rgba(124, 58, 237, 0.15);
   color: #a78bfa;
@@ -397,6 +460,12 @@ defineEmits<{
   background: rgba(245, 158, 11, 0.15);
   color: #fbbf24;
   border-color: rgba(251, 191, 36, 0.25);
+}
+
+:global(html.dark) .source-tag--project {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.25);
 }
 
 .header-btn {
@@ -427,31 +496,15 @@ defineEmits<{
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent), 0 8px 20px rgba(15, 23, 42, 0.12);
 }
 
-.btn-edit {
+.btn-manage-agents {
   color: #f5f3ff;
-  background: linear-gradient(135deg, #5b4b8a, #475569);
-  border-color: rgba(109, 91, 163, 0.42);
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  border-color: rgba(99, 102, 241, 0.42);
 }
 
-.btn-edit:hover:not(:disabled) {
-  background: linear-gradient(135deg, #6d5fa8, #52627a);
-  border-color: rgba(129, 111, 181, 0.5);
-}
-
-.btn-edit:disabled {
-  opacity: 0.48;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-.btn-new-agent {
-  color: #ffffff;
-  background: linear-gradient(135deg, #2563eb, #3b82f6);
-  border-color: rgba(37, 99, 235, 0.42);
-}
-
-.btn-new-agent:hover {
-  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+.btn-manage-agents:hover {
+  background: linear-gradient(135deg, #4338ca, #4f46e5);
+  border-color: rgba(99, 102, 241, 0.55);
 }
 
 .btn-new-chat,
@@ -491,15 +544,41 @@ defineEmits<{
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.34);
 }
 
-:global(html.dark) .btn-edit {
-  color: #f5f3ff;
-  background: linear-gradient(135deg, rgba(88, 70, 139, 0.98), rgba(51, 65, 85, 0.96));
-  border-color: rgba(129, 111, 181, 0.3);
+:global(html.dark) .btn-manage-agents {
+  color: #ede9fe;
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.9), rgba(99, 102, 241, 0.85));
+  border-color: rgba(129, 140, 248, 0.3);
 }
 
-:global(html.dark) .btn-edit:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(109, 95, 168, 0.98), rgba(71, 85, 105, 0.98));
-  border-color: rgba(167, 139, 250, 0.42);
+:global(html.dark) .btn-manage-agents:hover {
+  background: linear-gradient(135deg, rgba(67, 56, 202, 0.95), rgba(79, 70, 229, 0.95));
+  border-color: rgba(165, 180, 252, 0.42);
+}
+
+/* Hide "Agents管理" dropdown item everywhere (dedicated buttons on both desktop and mobile) */
+:global(.mobile-manage-agents-item) {
+  display: none !important;
+}
+
+/* Mobile Agents管理 icon button — hidden on desktop */
+.mobile-agents-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 16px;
+  color: var(--el-text-color-regular);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+.mobile-agents-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-color-primary);
 }
 
 @keyframes pulse {
@@ -508,6 +587,11 @@ defineEmits<{
 }
 
 @media (max-width: 900px) {
+  /* Show Agents管理 icon button on mobile */
+  .mobile-agents-btn {
+    display: flex;
+  }
+
   .app-header {
     padding: 8px 10px;
     gap: 6px;
@@ -542,10 +626,16 @@ defineEmits<{
     gap: 0;
   }
 
+  /* agent 选择器行全宽填充 */
+  .agent-select-wrapper {
+    width: 100%;
+    flex: 1;
+  }
+
   .agent-select {
     display: inline-flex;
     flex: 1;
-    width: auto;
+    width: 100%;
     min-width: 0;
     max-width: none;
   }
@@ -558,9 +648,15 @@ defineEmits<{
 
   .header-btn,
   .model-badge,
+  .header-model-select,
   .status-dot,
   .status-text {
     display: none;
+  }
+
+  /* mobile-agents-btn 也有 header-btn class，需在 header-btn 规则之后重新显示 */
+  .mobile-agents-btn {
+    display: flex;
   }
 
   .mobile-new-chat-btn {
@@ -619,6 +715,7 @@ defineEmits<{
     justify-content: center;
     border-radius: 50%;
   }
+
 }
 </style>
 
@@ -631,10 +728,17 @@ defineEmits<{
     0 8px 20px rgba(15, 23, 42, 0.06) !important;
   overflow: hidden;
   padding: 6px !important;
+  max-height: 65vh;
 }
 
 .agent-select-popper .el-select-dropdown {
-  max-height: 600px !important;
+  max-height: 65vh !important;
+}
+
+/* Override Element Plus internal scrollbar max-height */
+.agent-select-popper .el-select-dropdown__wrap,
+.agent-select-popper .el-scrollbar__wrap {
+  max-height: calc(65vh - 20px) !important;
 }
 
 .agent-select-popper .el-select-dropdown__list {

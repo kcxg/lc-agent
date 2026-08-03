@@ -24,6 +24,7 @@ from lc_agent.server.routes.admin import router as admin_router
 from lc_agent.server.routes.permissions import router as permissions_router
 from lc_agent.server.routes.auth import router as auth_router
 from lc_agent.server.routes.admin import router as admin_router
+from lc_agent.server.routes.prompts import router as prompts_router
 from lc_agent.server.sse import router as sse_router
 
 
@@ -60,6 +61,7 @@ def create_app(config: dict, lifespan=None) -> FastAPI:
     app.include_router(permissions_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
+    app.include_router(prompts_router, prefix="/api")
     app.include_router(sse_router)
 
     return app

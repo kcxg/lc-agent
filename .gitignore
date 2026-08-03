@@ -244,10 +244,12 @@ nul
 .tmp_pytest_run/
 .tmp/bfzs-runlogs
 .tmp/*
-
 # Local tool state
 .codegraph/
 .nezha/
 .zread/
 .serena/
 openspec/
+
+# (kept from main) test artifact
+gitigonre_file1.txt

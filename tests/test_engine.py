@@ -122,7 +122,8 @@ class TestAgentEngine:
         assert captured["context_schema"] is AgentRuntimeContext
 
     def test_build_agent_adds_memory_tools_when_store_enabled(self, sample_config, monkeypatch):
-        from lc_agent.core.engine import AgentEngine, _SystemBlockMiddleware
+        from lc_agent.core.engine import AgentEngine
+        from lc_agent.middlewares import SystemPromptMiddleware
         from lc_agent.core.memory import MEMORY_SYSTEM_PROMPT
 
         captured = {}
@@ -169,7 +170,7 @@ class TestAgentEngine:
             None,
         )
         assert memory_mw is not None, "MemoryPromptMiddleware not found in middleware list"
-        assert isinstance(memory_mw, _SystemBlockMiddleware)
+        assert isinstance(memory_mw, SystemPromptMiddleware)
         assert memory_mw._text == MEMORY_SYSTEM_PROMPT
 
         # Middleware order: memory before TodoListMiddleware

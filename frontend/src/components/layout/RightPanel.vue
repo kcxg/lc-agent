@@ -12,7 +12,7 @@
     <div v-if="!collapsed" class="panel-body">
     <div class="right-panel-fixed">
       <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
-        <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '设置' }}</span>
+        <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '折叠设置' }}</span>
         <span class="collapse-arrow">{{ fixedCollapsed ? '▸' : '▾' }}</span>
       </div>
       <template v-if="!fixedCollapsed">
@@ -122,7 +122,7 @@
         </div>
       </template>
 
-      <div class="panel-section markdown-theme-section">
+        <div class="panel-section markdown-theme-section appearance-section">
         <div class="section-header compact-section-header">
           <h4>Markdown 风格</h4>
           <span class="theme-current">{{ currentOption.label }}</span>
@@ -141,6 +141,34 @@
           >
             <div class="theme-option-row">
               <span class="theme-option-dot" :style="{ background: option.accent }"></span>
+              <div class="theme-option-copy">
+                <span class="theme-option-name">{{ option.label }}</span>
+                <span class="theme-option-desc">{{ option.description }}</span>
+              </div>
+            </div>
+          </el-option>
+        </el-select>
+      </div>
+
+      <div class="panel-section input-animation-section appearance-section">
+        <div class="section-header compact-section-header">
+          <h4>输入框动画</h4>
+          <span class="theme-current">{{ currentAnimationOption.label }}</span>
+        </div>
+        <el-select
+          v-model="inputAnimation"
+          size="small"
+          class="input-animation-select"
+          @change="(value: InputAnimationType) => setInputAnimation(value)"
+        >
+          <el-option
+            v-for="option in INPUT_ANIMATION_OPTIONS"
+            :key="option.id"
+            :label="option.label"
+            :value="option.id"
+          >
+            <div class="theme-option-row">
+              <span class="theme-option-dot" :style="{ background: option.id === 'marquee' ? 'linear-gradient(90deg,#ff2d95,#2da8ff,#18e6c3)' : option.id === 'transparent-arc' ? 'conic-gradient(transparent 60%, #ff2d95 70%, #2da8ff 80%, transparent 90%)' : 'conic-gradient(#ff2d95,#2da8ff,#18e6c3,#ff2d95)' }"></span>
               <div class="theme-option-copy">
                 <span class="theme-option-name">{{ option.label }}</span>
                 <span class="theme-option-desc">{{ option.description }}</span>
@@ -219,8 +247,11 @@
           </div>
         </teleport>
 
-        <div class="panel-section">
-          <h4>工具</h4>
+        <div class="panel-section tools-section">
+          <div class="section-header tools-section-header">
+            <h4>工具</h4>
+            <span class="section-summary">{{ toolsStore.filteredGroups.length }} 组</span>
+          </div>
           <ToolGroupPanel
             :groups="toolsStore.filteredGroups"
             @toggle="toolsStore.toggleGroup"
@@ -374,6 +405,7 @@ import { api, fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '@/composables/useMarkdownTheme'
+import { useInputAnimation, INPUT_ANIMATION_OPTIONS, type InputAnimationType } from '@/composables/useInputAnimation'
 import { AnsiUp } from 'ansi_up'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
@@ -411,6 +443,7 @@ const reasoningFromPreset = computed(() =>
   !hasReasoningOverride.value && presetLlmParams.value?.reasoning_effort !== undefined
 )
 const { markdownTheme, currentOption, setMarkdownTheme } = useMarkdownTheme()
+const { inputAnimation, currentOption: currentAnimationOption, setInputAnimation } = useInputAnimation()
 
 const summEnabled = ref(true)
 const summModel = ref('')
@@ -610,16 +643,18 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 
 .right-panel-fixed {
   flex-shrink: 0;
-  padding: 16px 16px 0;
+  padding: 14px 16px 0;
 }
 
 .panel-collapse-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 8px;
-  margin-bottom: 10px;
-  border-radius: 6px;
+  padding: 6px 9px;
+  margin-bottom: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
   cursor: pointer;
   user-select: none;
   transition: background 0.15s;
@@ -630,11 +665,10 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .collapse-label {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+  font-weight: 700;
+  letter-spacing: 0.3px;
 }
 
 .collapse-arrow {
@@ -659,15 +693,15 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .panel-section {
-  margin-bottom: 16px;
-  padding: 12px;
-  background: var(--el-fill-color-light);
+  margin-bottom: 14px;
+  padding: 13px;
+  background: var(--el-fill-color-extra-light);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
 }
 
 .markdown-theme-section {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--el-fill-color-light) 88%, var(--el-color-primary) 4%), var(--el-fill-color-light));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--el-fill-color-extra-light) 90%, var(--el-color-primary) 5%), var(--el-fill-color-extra-light));
 }
 
 .window-trim-section,
@@ -703,8 +737,9 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .param-label {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -808,6 +843,14 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   width: 100%;
 }
 
+.input-animation-section {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--el-fill-color-extra-light) 90%, var(--el-color-primary) 5%), var(--el-fill-color-extra-light));
+}
+
+.input-animation-select {
+  width: 100%;
+}
+
 .theme-option-row {
   display: flex;
   align-items: center;
@@ -845,12 +888,28 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .panel-section h4 {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
   margin: 0;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.7px;
-  font-weight: 600;
+  padding: 0 9px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 999px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+}
+
+.panel-section h4::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
 }
 
 .section-header {
@@ -858,9 +917,19 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--el-border-color);
+  margin-bottom: 12px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.section-summary {
+  padding: 3px 7px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
+  color: var(--el-color-primary);
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .refresh-btn {
@@ -915,6 +984,14 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   background: var(--el-color-primary-light-8);
   color: var(--el-color-primary);
   font-weight: 700;
+}
+
+.tools-section {
+  padding-bottom: 10px;
+}
+
+.tools-section-header {
+  margin-bottom: 10px;
 }
 
 .process-item {

@@ -1,20 +1,19 @@
 # lc_agent/core/engine.py
 import logging
-from dataclasses import dataclass
 from typing import Annotated, Any, AsyncIterator, Literal
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
-from langchain.agents.middleware.todo import WRITE_TODOS_SYSTEM_PROMPT, WRITE_TODOS_TOOL_DESCRIPTION
-try:
-    from langchain.agents.middleware.types import AgentMiddleware as _AgentMiddlewareBase
-    from langchain_core.messages import SystemMessage
-    _HAS_MIDDLEWARE_BASE = True
-except ImportError:
-    _AgentMiddlewareBase = object  # type: ignore[misc,assignment]
-    _HAS_MIDDLEWARE_BASE = False
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolCallId
+from langchain_core.tools import tool as lc_tool
+from pydantic import Field as _PydanticField
 
+from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, _convert_text_file_blocks
+from lc_agent.core.engine_helpers.project_context import _build_project_context_text
+from lc_agent.skills.skill_middleware import _LcAgentSkillMiddleware
+from lc_agent.core.engine_helpers.subagent_helpers import SubAgentDescriptor, _extract_subagent_result
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
     bind_http_trace_collector,
@@ -24,196 +23,13 @@ from lc_agent.core.http_trace import (
 )
 from lc_agent.core.http_trace_httpx import TracingAsyncClient
 from lc_agent.core.models import AgentPreset, ModelInfo
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool as lc_tool
-from pydantic import Field as _PydanticField
-
+from lc_agent.middlewares.inject_current_time_prompt_middleware import inject_current_time_prompt_middleware
+from lc_agent.middlewares.system_prompt import SystemPromptMiddleware
+from lc_agent.prompts.subagent_prompts import GENERAL_PURPOSE_DESCRIPTION, SUBAGENT_DELEGATION_PROMPT, TASK_SYSTEM_PROMPT, TASK_TOOL_DESCRIPTION
+from lc_agent.prompts.todo_prompts import TODO_SYSTEM_PROMPT, TODO_TOOL_DESCRIPTION
 from lc_agent.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
-
-
-def _convert_text_file_blocks(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert text_file blocks to native text blocks for LangChain consumption."""
-    converted = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "text_file":
-            name = block.get("name", "")
-            text_content = block.get("textContent", "")
-            lang = block.get("lang", "")
-            converted.append(
-                {
-                    "type": "text",
-                    "text": f"📎 `{name}`:\n```{lang}\n{text_content}\n```",
-                }
-            )
-        else:
-            converted.append(block)
-    return converted
-
-
-def _convert_history_item(item: dict[str, Any]) -> dict[str, Any]:
-    """Convert text_file blocks in a history message's content."""
-    content = item.get("content")
-    if isinstance(content, list):
-        return {**item, "content": _convert_text_file_blocks(content)}
-    return item
-
-
-TODO_FINAL_ANSWER_GUARD = """## Final Answer Guard for `write_todos`
-
-- Do not create todo items whose only purpose is to write, organize, summarize, or deliver the final answer.
-- Before writing the substantive final answer to the user, make your last necessary `write_todos` call.
-- After you start writing the substantive final answer, do not call `write_todos` again in the same turn.
-- If the only remaining todo is about producing the final answer, do not call `write_todos` just to mark it complete. Deliver the final answer directly.
-"""
-
-TODO_SYSTEM_PROMPT = f"{WRITE_TODOS_SYSTEM_PROMPT}\n\n{TODO_FINAL_ANSWER_GUARD}"
-TODO_TOOL_DESCRIPTION = f"{WRITE_TODOS_TOOL_DESCRIPTION}\n\n{TODO_FINAL_ANSWER_GUARD}"
-
-_LOAD_SKILL_DESCRIPTION = (
-    "Retrieve the full step-by-step instructions for a skill. "
-    "This MUST be called before executing any task that matches a skill — "
-    "the brief description in the system prompt is only a trigger hint, "
-    "not the actual procedure. "
-    "Returns the skill's markdown body, available resources, and scripts. "
-    "Skill names are listed in the system prompt under '## Available Skills'."
-)
-
-
-class _SystemBlockMiddleware(_AgentMiddlewareBase):  # type: ignore[misc]
-    """Injects a text block as a separate system message content block."""
-
-    def __init__(self, text: str, middleware_name: str, *, prepend: bool = False) -> None:
-        super().__init__()
-        self._text = text
-        self._middleware_name = middleware_name
-        self._prepend = prepend
-
-    @property
-    def name(self) -> str:  # type: ignore[override]
-        return self._middleware_name
-
-    def _patched_system(self, existing: Any) -> Any:
-        if self._prepend:
-            new_block = {"type": "text", "text": self._text}
-            new_content = [new_block, *(existing.content_blocks if existing is not None else [])]
-        else:
-            new_block = {"type": "text", "text": f"\n\n{self._text}"}
-            new_content = [*(existing.content_blocks if existing is not None else []), new_block]
-        return SystemMessage(content_blocks=new_content)  # type: ignore[call-arg]
-
-    def wrap_model_call(self, request: Any, handler: Any) -> Any:
-        return handler(request.override(system_message=self._patched_system(request.system_message)))
-
-    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
-        return await handler(request.override(system_message=self._patched_system(request.system_message)))
-
-
-# Keep old name as alias for backwards compatibility
-_SkillsPromptMiddleware = _SystemBlockMiddleware
-
-# --------------------------------------------------------------------------- #
-# Subagent prompts
-# --------------------------------------------------------------------------- #
-
-SUBAGENT_DELEGATION_PROMPT = (
-    "In order to complete the objective that the user asks of you, "
-    "you have access to a number of standard tools.\n\n"
-    "You receive a single task message and cannot ask for clarification or send follow-up messages. "
-    "Complete the task entirely within this one invocation.\n\n"
-    "Only your **last assistant message** is returned as the final output — "
-    "every message you produce during tool use (including thoughts between tool calls) is discarded. "
-    "After finishing all tool use, write a single complete answer in your final message. "
-    "Do NOT say 'as shown above' or reference any intermediate tool output — "
-    "your final message must be fully self-contained and contain the complete answer."
-)
-
-TASK_SYSTEM_PROMPT = """\
-## task（子智能体调度器）
-
-你拥有 `task` 工具，可以将独立任务委派给专用子智能体完成。\
-这些子智能体是一次性的，仅在任务期间存在，完成后返回单一结果。
-
-**每次子智能体调用都是无状态且单次往返（stateless, one-shot）**：子智能体看不到你的对话历史、记忆或上下文，\
-你也无法向它追加消息。它只会收到你在 `description` 参数里写的内容，并在唯一一次回复中返回结果。\
-因此，`description` 必须包含子智能体**独立完成任务**所需的全部背景和上下文，\
-并明确说明它需要在唯一回复中返回什么内容（格式、语言、字数等）。
-
-`description` 错误示例（子智能体无法访问你的对话历史）：
-- ❌ "帮我查一下" （无背景、无上下文、无输出要求）
-- ❌ "修复上面讨论的 bug" （子智能体没有"上面"的对话上下文）
-
-**子智能体的返回结果对用户不可见**——它只返回给你。你有责任将结果整合后再呈现给用户，而不是直接转发原文。
-
-子智能体的完整生命周期：
-1. **派遣** → 在 `description` 里写明角色、任务、期望输出格式和语言
-2. **执行** → 子智能体自主完成任务
-3. **返回** → 子智能体以单条消息返回结果给你
-4. **整合** → 你将结果融合到当前对话，呈现给用户
-
-**重要：若有多个独立任务，必须在同一条消息中同时发起多个 `task` 调用并行执行，而不是逐一等待。**\
-并行调用能显著减少用户等待时间，请务必利用：
-- ❌ 错误：先调用 `task(A)`，等 A 返回后再调用 `task(B)`
-- ✅ 正确：在同一条 assistant 消息里同时发出 `task(A)` 和 `task(B)` 两个工具调用
-- ⚠️ 例外：若 B 依赖 A 的结果，则必须等 A 返回后才能发起 B
-
-何时使用 `task`：
-- 任务复杂、多步骤，且可以完整委派，不需要你参与中间过程
-- 任务相互独立，可以并行启动以节省时间（例如：同时研究 A 话题和 B 话题）
-- 任务需要大量工具调用或 token，委派可以避免你的上下文窗口被污染
-- 你只关心子智能体的最终输出，不需要中间步骤
-
-何时**不**使用 `task`：
-- 任务简单（几次工具调用或快速查询即可）
-- 你需要看到中间推理过程（task 工具会隐藏中间步骤）
-- 委派的子任务过于简短，拆分只会增加延迟而没有收益
-- 任务依赖你的当前上下文，无法独立表达为完整的委派描述"""
-
-
-@dataclass(frozen=True)
-class SubAgentDescriptor:
-    subagent_type: str
-    preset_id: str
-    display_name: str
-    description: str
-
-
-_GENERAL_PURPOSE_DESCRIPTION = (
-    "当你需要一个与当前智能体能力相近、但在隔离上下文中并行处理复杂任务的工作线程时调用它。"
-)
-
-
-def _extract_subagent_result(messages: list[Any]) -> str:
-    """Extract the last non-empty AI message text from a subagent's message list.
-
-    Iterates in reverse to skip any trailing empty messages that some providers
-    (e.g. Anthropic Claude) may append after the final tool call.
-    Returns the first non-empty AI text found — the subagent's conclusive answer.
-    """
-    for msg in reversed(messages):
-        if getattr(msg, "type", None) != "ai":
-            continue
-        content = getattr(msg, "content", "")
-        if isinstance(content, str):
-            text = content.strip()
-        elif isinstance(content, list):
-            text = "".join(
-                part.get("text", "") if isinstance(part, dict) else str(part)
-                for part in content
-            ).strip()
-        else:
-            text = str(content).strip()
-        if text:
-            return text
-    return ""
-
-try:
-    from langchain_core.tools import InjectedToolCallId
-    _HAS_INJECTED_TOOL_CALL_ID = True
-except ImportError:
-    InjectedToolCallId = None  # type: ignore[assignment,misc]
-    _HAS_INJECTED_TOOL_CALL_ID = False
 
 
 class AgentEngine:
@@ -234,6 +50,9 @@ class AgentEngine:
         self._agent_mcp_gen: dict[str, int] = {}
         self._mcp_generation: int = 0
         self.recursion_limit: int = config.get("agent", {}).get("recursion_limit", 100)
+        # Cache for project git/OS context text, keyed by resolved project_root.
+        # Populated asynchronously in chat_stream; cleared on agent cache invalidation.
+        self._project_ctx_text_cache: dict[str, str] = {}
 
     def _memory_enabled(self) -> bool:
         memory_conf = self.config.get("memory", {})
@@ -381,7 +200,7 @@ class AgentEngine:
                 subagent_type="general-purpose",
                 preset_id=gp_id,
                 display_name="通用助手",
-                description=_GENERAL_PURPOSE_DESCRIPTION,
+                description=GENERAL_PURPOSE_DESCRIPTION,
             )
 
         return registry
@@ -437,42 +256,14 @@ class AgentEngine:
                 reset_http_trace_collector(_trace_token)
                 register_subagent_collector(sub_thread_id, _sa_collector)
 
-        description_lines = [
-            "Delegate a task to one configured sub-agent.",
-            "",
-            "Each call is **stateless and one-shot**: the sub-agent only sees what you put in",
-            "the `description` argument. Therefore `description` must be fully self-contained:",
-            "include ALL background, specify exactly what to return in the **final and only reply**",
-            "(sections, format, language, length).",
-            "",
-            "**Good description example**:",
-            "  \"The user is building a Python project using LangChain. Please research LangChain",
-            "  v0.3's checkpointing mechanism, focusing on: (1) InMemorySaver vs SqliteSaver",
-            "  differences, (2) per-user memory configuration. Return a detailed Chinese analysis",
-            "  with code examples, in sections: Overview / Comparison / Recommendation.\"",
-            "**Bad description examples**:",
-            "  ❌ \"Research LangChain memory.\" (no context, no output format)",
-            "  ❌ \"Fix the checkpoint bug we discussed above.\" (sub-agent has no 'above' context)",
-            "",
-            "Use the exact `subagent_type` value from the list below.",
-            "Do not rename it, paraphrase it, translate it, or invent a new value.",
-            "",
-            "Available subagents:",
-            "",
-        ]
-        for descriptor in registry.values():
-            description_lines.extend([
-                "====================",
-                "",
-                f"subagent_type: {descriptor.subagent_type}",
-                "",
-                "when_to_use:",
-                descriptor.description,
-                "",
-            ])
-        if description_lines and description_lines[-1] == "":
-            description_lines.pop()
-        task_description = "\n".join(description_lines)
+        available_agents_str = "\n\n".join(
+            f"<subagent>\n"
+            f"  <subagent_type>{d.subagent_type}</subagent_type>\n"
+            f"  <when_to_use>{d.description}</when_to_use>\n"
+            f"</subagent>"
+            for d in registry.values()
+        )
+        task_description = TASK_TOOL_DESCRIPTION.format(available_agents=available_agents_str)
 
         available_types = sorted(descriptor.subagent_type for descriptor in registry.values())
         subagent_type_field_desc = (
@@ -488,32 +279,19 @@ class AgentEngine:
             "(sections, format, language, length)."
         )
 
-        if _HAS_INJECTED_TOOL_CALL_ID:
-            @lc_tool("task", description=task_description)
-            async def task(
-                subagent_type: Annotated[Literal[*available_types], _PydanticField(  # type: ignore[valid-type]
-                    description=subagent_type_field_desc,
-                )],
-                description: Annotated[str, _PydanticField(description=description_field_desc)],
-                tool_call_id: Annotated[str, InjectedToolCallId],
-                config: RunnableConfig,
-            ) -> str:
-                return await _run_subagent(subagent_type, description, config, tool_call_id)
-        else:
-            @lc_tool("task", description=task_description)
-            async def task(
-                subagent_type: Annotated[Literal[*available_types], _PydanticField(  # type: ignore[valid-type]
-                    description=subagent_type_field_desc,
-                )],
-                description: Annotated[str, _PydanticField(description=description_field_desc)],
-                config: RunnableConfig,
-            ) -> str:
-                import uuid
-
-                tool_call_id = ((config or {}).get("configurable") or {}).get("tool_call_id") or uuid.uuid4().hex
-                return await _run_subagent(subagent_type, description, config, tool_call_id)
+        @lc_tool("task", description=task_description)
+        async def task(
+            subagent_type: Annotated[Literal[*available_types], _PydanticField(  # type: ignore[valid-type]
+                description=subagent_type_field_desc,
+            )],
+            description: Annotated[str, _PydanticField(description=description_field_desc)],
+            tool_call_id: Annotated[str, InjectedToolCallId],
+            config: RunnableConfig,
+        ) -> str:
+            return await _run_subagent(subagent_type, description, config, tool_call_id)
 
         return task
+
     def build_agent(
         self,
         preset: AgentPreset | None = None,
@@ -527,61 +305,41 @@ class AgentEngine:
             preset = self.get_default_preset()
         self._current_preset = preset
 
-        system_prompt = preset.system_prompt
+        system_prompt = f"<instructions>\n{preset.system_prompt}\n</instructions>"
         # Subagents need an explicit reminder that only the final message is returned to the caller
-        if _depth > 0 and not _HAS_MIDDLEWARE_BASE:
-            system_prompt = f"{system_prompt}\n\n{SUBAGENT_DELEGATION_PROMPT}"
         tools = self.tool_registry.get_filtered_tools(preset.allowed_tool_groups)
 
-        _memory_middleware: _SystemBlockMiddleware | None = None
-        _skills_middleware: _SystemBlockMiddleware | None = None
+        # Set project skills overlay (only top-level; subagents inherit parent's overlay)
+        # project_mode is the master switch: without it, project_root is ignored entirely.
+        # Normalize to resolved path so it matches the cache key from chat_stream/chat.
+        _effective_project_root: str | None = None
+        if preset.project_mode and preset.project_root:
+            from pathlib import Path as _PRoot
+            _effective_project_root = str(_PRoot(preset.project_root).expanduser().resolve())
+        if _depth == 0 and hasattr(self, '_skills_toolkit') and self._skills_toolkit:
+            loader = getattr(self._skills_toolkit, '_resolved_loader', None)
+            if loader and hasattr(loader, 'set_project_overlay'):
+                if _effective_project_root:
+                    from pathlib import Path as _Path
+                    project_skills_dir = str(_Path(_effective_project_root) / ".agents" / "skills")
+                    loader.set_project_overlay(project_skills_dir)
+                else:
+                    loader.set_project_overlay(None)
+
+        _memory_middleware: SystemPromptMiddleware | None = None
+        _skills_middleware: _LcAgentSkillMiddleware | None = None
         if hasattr(self, '_skills_toolkit') and self._skills_toolkit:
             allowed = preset.allowed_skills
             if allowed is None or allowed:
-                skill_tools = []
-                for _t in self._skills_toolkit.get_tools():
-                    if _t.name == "list_skills":
-                        continue
-                    if _t.name == "load_skill":
-                        try:
-                            _t = _t.model_copy(update={"description": _LOAD_SKILL_DESCRIPTION})
-                        except Exception:
-                            pass
-                    skill_tools.append(_t)
-                tools = tools + skill_tools
                 loader = self._skills_toolkit._resolved_loader
                 if loader:
-                    all_skills = loader.list_skills()
-                    if allowed is not None:
-                        all_skills = [s for s in all_skills if s.name in allowed]
-                    if all_skills and _HAS_MIDDLEWARE_BASE:
-                        import json as _json
-                        skill_entries = [
-                            {
-                                "skill_name": s.name,
-                                "description": s.description.splitlines()[0],
-                            }
-                            for s in all_skills
-                        ]
-                        lines = [
-                            "## Available Skills",
-                            "",
-                            "The descriptions below are **triggers** — they tell you WHEN a skill applies.",
-                            "The actual step-by-step instructions, required tools, and constraints are INSIDE the skill.",
-                            "",
-                            "**MANDATORY RULE**: When the user's request matches a skill's description,",
-                            "you MUST call `load_skill(skill_name=\"<skill_name>\")` FIRST to retrieve",
-                            "the full instructions, then follow them exactly.",
-                            "Do NOT skip this step and proceed with your default approach.",
-                            "",
-                            "```json",
-                            _json.dumps(skill_entries, ensure_ascii=False, indent=2),
-                            "```",
-                            "",
-                            "After loading a skill, you may also call `read_skill_resource` to fetch",
-                            "its reference files or `run_skill_script` to execute its scripts.",
-                        ]
-                        _skills_middleware = _SystemBlockMiddleware("\n".join(lines), "SkillsPromptMiddleware")
+                    _candidate = _LcAgentSkillMiddleware(
+                        loader,
+                        allowed_skills=allowed,
+                        executor=self._skills_toolkit._executor,
+                    )
+                    if _candidate.has_visible_skills:
+                        _skills_middleware = _candidate
 
         if hasattr(self, '_mcp_manager') and self._mcp_manager:
             mcp_tools = self._mcp_manager.get_filtered_langchain_tools(preset.allowed_mcp_servers)
@@ -599,10 +357,7 @@ class AgentEngine:
             )
 
             tools = tools + build_memory_tools()
-            if _HAS_MIDDLEWARE_BASE:
-                _memory_middleware = _SystemBlockMiddleware(MEMORY_SYSTEM_PROMPT, "MemoryPromptMiddleware")
-            else:
-                system_prompt = f"{system_prompt}\n\n{MEMORY_SYSTEM_PROMPT}"
+            _memory_middleware = SystemPromptMiddleware(MEMORY_SYSTEM_PROMPT, "MemoryPromptMiddleware")
             kwargs["store"] = self._store
             kwargs["context_schema"] = AgentRuntimeContext
 
@@ -623,35 +378,72 @@ class AgentEngine:
         llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
 
         middleware = []
-        if _depth > 0 and _HAS_MIDDLEWARE_BASE:
-            middleware.append(_SystemBlockMiddleware(
+        if _depth > 0:
+            middleware.append(SystemPromptMiddleware(
                 SUBAGENT_DELEGATION_PROMPT, "SubagentDelegationMiddleware", prepend=True
             ))
+
+        # Prompt library entries: each becomes a separate content block with XML wrapping.
+        # Content body is not XML-escaped so prompt text is readable as-is.
+        import html as _html
+        for _ep_idx, (_ep_name, _ep_content) in enumerate(preset.extra_system_prompts):
+            _safe_name = _html.escape(_ep_name, quote=True) if _ep_name else ""
+            _mw_id = _ep_name if _ep_name else str(_ep_idx)
+            middleware.append(SystemPromptMiddleware(
+                f'<extra_instruction name="{_safe_name}">\n{_ep_content}\n</extra_instruction>',
+                f"ExtraPrompt:{_mw_id}",
+            ))
+
+        # Project folder mode (all controlled by project_mode master switch)
+        if _depth == 0 and _effective_project_root:
+            # 1. AGENTS.md rules injection
+            _agents_md = self._read_project_agents_md(_effective_project_root)
+            if _agents_md:
+                middleware.append(SystemPromptMiddleware(
+                    f"<project_rules>\n## Project Rules (AGENTS.md)\n\n{_agents_md}\n</project_rules>",
+                    "ProjectAgentsMdMiddleware",
+                ))
+            # 2. Git status + OS context snapshot injection
+            # Use cached text pre-computed async in chat_stream; fall back to sync if missing.
+            _ctx_text = self._project_ctx_text_cache.get(_effective_project_root) or _build_project_context_text(_effective_project_root)
+            middleware.append(SystemPromptMiddleware(_ctx_text, "ProjectContextMiddleware"))
+            # 3. Per-tool-group usage guidelines (injected only for enabled groups)
+            from lc_agent.prompts.builtin_agent_prompts import TOOL_GROUP_GUIDELINES
+            _tg = preset.allowed_tool_groups  # None=all, []=none, [...]=specific
+            for _group_id, _group_prompt in TOOL_GROUP_GUIDELINES.items():
+                if _tg is None or _group_id in _tg:
+                    middleware.append(SystemPromptMiddleware(_group_prompt, f"{_group_id}GuidelinesMiddleware"))
+
         if _memory_middleware is not None:
             middleware.append(_memory_middleware)
         if _skills_middleware is not None:
             middleware.append(_skills_middleware)
         if _depth == 0 and subagent_registry:
-            if _HAS_MIDDLEWARE_BASE:
-                middleware.append(_SystemBlockMiddleware(TASK_SYSTEM_PROMPT, "TaskSystemPromptMiddleware"))
-            else:
-                system_prompt = f"{system_prompt}\n\n{TASK_SYSTEM_PROMPT}"
+            middleware.append(SystemPromptMiddleware(TASK_SYSTEM_PROMPT, "TaskSystemPromptMiddleware"))
         if _depth == 0:
             middleware.append(TodoListMiddleware(
                 system_prompt=TODO_SYSTEM_PROMPT,
                 tool_description=TODO_TOOL_DESCRIPTION,
             ))
         middleware.extend(self._build_summarization_middleware(preset))
+        if _depth == 0:
+            from lc_agent.middlewares import AskUserMiddleware
+            middleware.append(AskUserMiddleware())
+        middleware.append(inject_current_time_prompt_middleware)
 
         # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
         if hasattr(self, '_permissions_service') and self._permissions_service and _depth == 0:
             from langchain.agents.middleware import HumanInTheLoopMiddleware
+            # Include skill middleware tools so they're subject to permission checks
+            hitl_tools = list(tools)
+            if _skills_middleware is not None:
+                hitl_tools.extend(_skills_middleware.tools)
             interrupt_on = {
                 tool.name: {
                     "allowed_decisions": ["approve", "reject"],
                     "when": self._permissions_service.should_interrupt,
                 }
-                for tool in tools
+                for tool in hitl_tools
                 if tool.name != "ask_user"
             }
             if interrupt_on:
@@ -670,6 +462,44 @@ class AgentEngine:
         self._agent_subagent_tools[resolved_cache_key] = subagent_tool_names
         self._agent_subagent_display_map[resolved_cache_key] = subagent_display_map
         return agent
+
+    @staticmethod
+    def _read_project_agents_md(project_root: str) -> str | None:
+        """Read AGENTS.md from project root. Returns content or None."""
+        from pathlib import Path
+        p = Path(project_root) / "AGENTS.md"
+        if not p.is_file():
+            return None
+        try:
+            return p.read_text(encoding="utf-8")
+        except Exception:
+            return None
+
+    async def _ensure_project_mcp(self, project_root: str | None) -> None:
+        """Load project-level MCP servers from .agents/mcp.json.
+
+        Clears previous project servers first to handle preset switching.
+        """
+        await self._mcp_manager.clear_project_servers()
+
+        if not project_root:
+            return
+
+        from pathlib import Path
+        import json
+        mcp_file = Path(project_root) / ".agents" / "mcp.json"
+        if not mcp_file.is_file():
+            return
+        try:
+            config = json.loads(mcp_file.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if not isinstance(config, dict) or not config:
+            return
+        # Support both flat {name: conf} and the industry-standard {mcpServers: {name: conf}} wrapper
+        if "mcpServers" in config and isinstance(config["mcpServers"], dict):
+            config = config["mcpServers"]
+        await self._mcp_manager.merge_project_servers(config)
 
     def _build_tracing_async_client(self, model_info: ModelInfo | None, model_id: str):
         provider = model_info.provider if model_info else None
@@ -855,6 +685,8 @@ class AgentEngine:
             self._agent_mcp_gen.pop(key, None)
             self._agent_subagent_tools.pop(key, None)
             self._agent_subagent_display_map.pop(key, None)
+        # Clear project context cache so a re-edited preset gets a fresh git snapshot.
+        self._project_ctx_text_cache.clear()
 
     def invalidate_all_agents(self) -> None:
         """Remove all cached agents, forcing rebuild on next use."""
@@ -862,6 +694,7 @@ class AgentEngine:
         self._agent_mcp_gen.clear()
         self._agent_subagent_tools.clear()
         self._agent_subagent_display_map.clear()
+        self._project_ctx_text_cache.clear()
 
     def _resolve_preset_for_model(self, preset_id: str, model_id: str = "") -> AgentPreset:
         preset = self._resolve_preset(preset_id)
@@ -910,6 +743,22 @@ class AgentEngine:
         user_id: str = "anonymous",
     ) -> str:
         """Send a message and get a response (non-streaming)."""
+        preset = self._resolve_preset(preset_id)
+        _eff_root = preset.project_root if preset.project_mode else None
+        if _eff_root:
+            from pathlib import Path as _PPath
+            if not _PPath(_eff_root).is_dir():
+                raise ValueError(f"项目根目录不存在或不可访问: {_eff_root}")
+            _eff_root = str(_PPath(_eff_root).expanduser().resolve())
+        from lc_agent.tools.system_tools._config import set_active_project
+        set_active_project(_eff_root, preset.project_extra_dirs if preset.project_mode else None)
+        if hasattr(self, '_mcp_manager') and self._mcp_manager:
+            await self._ensure_project_mcp(_eff_root)
+        if _eff_root and _eff_root not in self._project_ctx_text_cache:
+            import asyncio as _asyncio
+            self._project_ctx_text_cache[_eff_root] = await _asyncio.to_thread(
+                _build_project_context_text, _eff_root
+            )
         agent = self._get_or_build_agent(preset_id, model_id)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
@@ -938,6 +787,37 @@ class AgentEngine:
 
         message: LangChain content blocks list, e.g. [{"type":"text","text":"..."}, {"type":"image_url","image_url":{"url":"data:..."}}]
         """
+        # Validate and activate project context (project_mode is the master switch)
+        preset = self._resolve_preset(preset_id)
+        _eff_project_root = preset.project_root if preset.project_mode else None
+        if preset.project_mode and not _eff_project_root:
+            raise ValueError("项目模式已开启，但 project_root 未设置，请编辑 Agent 并填写项目根目录。")
+        if _eff_project_root:
+            from pathlib import Path as _PPath
+            if not _PPath(_eff_project_root).is_dir():
+                raise ValueError(
+                    f"项目根目录不存在或不可访问: {_eff_project_root}\n"
+                    f"请检查 Preset 的 project_root 配置是否正确。"
+                )
+            # Normalize to resolved path for consistent cache key (matches ContextVar in _config.py)
+            _eff_project_root = str(_PPath(_eff_project_root).expanduser().resolve())
+
+        from lc_agent.tools.system_tools._config import set_active_project
+        _eff_extra_dirs = preset.project_extra_dirs if preset.project_mode else None
+        set_active_project(_eff_project_root, _eff_extra_dirs)
+
+        # Load project MCP servers (or clear previous project's servers on switch)
+        if hasattr(self, '_mcp_manager') and self._mcp_manager:
+            await self._ensure_project_mcp(_eff_project_root)
+
+        # Pre-compute git/OS context text asynchronously (avoids blocking event loop).
+        # Cached per resolved project_root; cleared when agent cache is invalidated.
+        if _eff_project_root and _eff_project_root not in self._project_ctx_text_cache:
+            import asyncio as _asyncio
+            self._project_ctx_text_cache[_eff_project_root] = await _asyncio.to_thread(
+                _build_project_context_text, _eff_project_root
+            )
+
         agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}

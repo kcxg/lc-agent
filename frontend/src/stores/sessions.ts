@@ -20,6 +20,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   const sessions = ref<Session[]>([])
   const currentSessionId = ref<string | null>(null)
   const localSessionIds = ref<Set<string>>(new Set())
+  const completedUnseenSessionIds = ref<Set<string>>(new Set())
 
   const currentSession = computed(() =>
     sessions.value.find(s => s.id === currentSessionId.value)
@@ -48,6 +49,21 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   function isLocalSession(id: string): boolean {
     return localSessionIds.value.has(id)
+  }
+
+  function markCompletedUnseen(id: string) {
+    completedUnseenSessionIds.value = new Set(completedUnseenSessionIds.value).add(id)
+  }
+
+  function markSessionViewed(id: string) {
+    if (!completedUnseenSessionIds.value.has(id)) return
+    const next = new Set(completedUnseenSessionIds.value)
+    next.delete(id)
+    completedUnseenSessionIds.value = next
+  }
+
+  function isCompletedUnseen(id: string): boolean {
+    return completedUnseenSessionIds.value.has(id)
   }
 
   async function init() {
@@ -230,7 +246,8 @@ export const useSessionsStore = defineStore('sessions', () => {
   function selectSession(id: string) {
     sessionNavStack.value = []
     currentSessionId.value = id
+    markSessionViewed(id)
   }
 
-  return { sessions, currentSessionId, currentSession, sessionNavStack, effectiveThreadId, pushSubSession, popSubSession, popToRoot, groupedByAgent, init, createSession, createLocalSession, ensureLocalSession, persistSession, isLocalSession, deleteSession, updateTitle, updateTitleLocal, refreshSessionTitle, updateModel, updateModelLocal, setPinned, selectSession }
+  return { sessions, currentSessionId, currentSession, sessionNavStack, effectiveThreadId, pushSubSession, popSubSession, popToRoot, groupedByAgent, init, createSession, createLocalSession, ensureLocalSession, persistSession, isLocalSession, markCompletedUnseen, markSessionViewed, isCompletedUnseen, deleteSession, updateTitle, updateTitleLocal, refreshSessionTitle, updateModel, updateModelLocal, setPinned, selectSession }
 })

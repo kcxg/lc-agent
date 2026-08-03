@@ -6,10 +6,24 @@
     </div>
     <div
       class="textarea-shell"
-      :class="{ 'is-disabled': isStreamingState }"
+      :class="{
+        'is-disabled': isStreamingState,
+        'is-streaming': isStreamingState,
+        'effect-rainbow-rod': isStreamingState && inputAnimation === 'rainbow-rod',
+        'effect-transparent-arc': isStreamingState && inputAnimation === 'transparent-arc',
+        'effect-marquee': isStreamingState && inputAnimation === 'marquee',
+      }"
       @drop="handleDrop"
       @dragover="handleDragover"
     >
+      <template v-if="isStreamingState && inputAnimation === 'marquee'">
+        <span
+          v-for="(color, i) in marqueeColors"
+          :key="i"
+          class="marquee-dot"
+          :style="{ '--dot-color': color, '--dot-delay': `${(i / marqueeColors.length) * -4}s` }"
+        />
+      </template>
       <div v-if="attachments.length > 0" class="attachments-preview">
         <div
           v-for="att in attachments"
@@ -104,6 +118,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
+import { useInputAnimation } from '@/composables/useInputAnimation'
 import {
   type Attachment,
   type ContentBlock,
@@ -129,11 +144,17 @@ const emit = defineEmits<{
 
 const chatStore = useChatStore()
 const { isStreaming } = storeToRefs(chatStore)
+const { inputAnimation } = useInputAnimation()
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const messageText = ref('')
 const attachments = ref<Attachment[]>([])
 const isStreamingState = computed(() => props.isStreaming ?? isStreaming.value)
+const marqueeColors = [
+  '#ff2d95', '#9b5cff', '#2da8ff', '#18e6c3', '#ffe14d', '#ff7a2d',
+  '#ff2d95', '#9b5cff', '#2da8ff', '#18e6c3', '#ffe14d', '#ff7a2d',
+  '#ff2d95', '#9b5cff', '#2da8ff', '#18e6c3', '#ffe14d', '#ff7a2d',
+]
 const canSend = computed(() =>
   (Boolean(messageText.value.trim()) || attachments.value.length > 0) && !isStreamingState.value,
 )
@@ -270,6 +291,7 @@ function handleCancelEdit() {
 }
 
 .textarea-shell {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -290,6 +312,99 @@ function handleCancelEdit() {
 
 .textarea-shell.is-disabled {
   border-color: var(--el-border-color-lighter);
+}
+
+.textarea-shell.is-streaming::before {
+  position: absolute;
+  z-index: 0;
+  inset: -2px;
+  border-radius: 10px;
+  content: '';
+}
+
+.textarea-shell.is-streaming.effect-rainbow-rod::before {
+  background: conic-gradient(
+    from 0deg,
+    #ff2d95,
+    #9b5cff,
+    #2da8ff,
+    #18e6c3,
+    #ffe14d,
+    #ff7a2d,
+    #ff2d95
+  );
+  animation: input-conic-spin 2.4s linear infinite;
+}
+
+.textarea-shell.is-streaming.effect-transparent-arc::before {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    #ff2d95 8deg,
+    #9b5cff 22deg,
+    #2da8ff 36deg,
+    #18e6c3 50deg,
+    #ffe14d 64deg,
+    #ff7a2d 78deg,
+    transparent 92deg,
+    transparent 360deg
+  );
+  animation: input-conic-spin 2.4s linear infinite;
+}
+
+.textarea-shell.is-streaming.effect-marquee::before {
+  background: none;
+}
+
+.textarea-shell.is-streaming.effect-marquee::after {
+  background: none;
+}
+
+.textarea-shell.is-streaming::after {
+  position: absolute;
+  z-index: 0;
+  inset: 1px;
+  border-radius: 7px;
+  background: var(--el-bg-color-overlay);
+  content: '';
+}
+
+.textarea-shell.is-streaming > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes input-conic-spin {
+  to { transform: rotate(360deg); }
+}
+
+.textarea-shell .marquee-dot {
+  position: absolute;
+  z-index: 2;
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+  border-radius: 50%;
+  background: var(--dot-color);
+  box-shadow: 0 0 6px var(--dot-color), 0 0 12px var(--dot-color);
+  pointer-events: none;
+  offset-path: inset(-3px round 10px);
+  animation: dot-path 4s linear infinite;
+  animation-delay: var(--dot-delay);
+}
+
+@keyframes dot-path {
+  0%   { offset-distance: 0%;   }
+  100% { offset-distance: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .textarea-shell.is-streaming::before {
+    animation: none;
+  }
+  .textarea-shell .marquee-dot {
+    animation: none;
+  }
 }
 
 .chat-textarea {

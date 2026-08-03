@@ -41,6 +41,7 @@ export interface Skill {
   source?: string
   metadata?: Record<string, any>
   enabled: boolean
+  scope?: 'global' | 'project'
 }
 
 export interface ModelInfo {

@@ -5,8 +5,7 @@
     <AppHeader
       :app-name="appName"
       :model-name="agentsStore.isCodeAgent ? '代码内定义' : (toolsStore.currentModel || agentsStore.currentAgent?.default_model || 'N/A')"
-      @edit-agent="editCurrentAgent"
-      @new-agent="createNewAgent"
+      @manage-agents="openAgentManager"
       @new-chat="handleNewChat"
       @change-agent="handleAgentChange"
       @open-mobile-sidebar="openMobileLeft"
@@ -47,7 +46,7 @@
       />
     </div>
 
-    <AgentEditorDialog ref="agentEditorRef" />
+    <AgentManagerDialog ref="agentManagerRef" />
     </div>
   </ConfigProvider>
 </template>
@@ -65,7 +64,7 @@ import { useSessionsStore } from '@/stores/sessions'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import LeftSidebar from '@/components/layout/LeftSidebar.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'
-import AgentEditorDialog from '@/components/dialogs/AgentEditorDialog.vue'
+import AgentManagerDialog from '@/components/dialogs/AgentManagerDialog.vue'
 
 const { isDark } = useTheme()
 
@@ -75,7 +74,7 @@ const chatStore = useChatStore()
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
 const sessionsStore = useSessionsStore()
-const agentEditorRef = ref<InstanceType<typeof AgentEditorDialog>>()
+const agentManagerRef = ref<InstanceType<typeof AgentManagerDialog>>()
 const sidebarCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
@@ -249,12 +248,8 @@ async function handleAgentChange(agentId: string) {
   closeMobileDrawers()
 }
 
-function editCurrentAgent() {
-  agentEditorRef.value?.open(agentsStore.currentAgent)
-}
-
-function createNewAgent() {
-  agentEditorRef.value?.open()
+function openAgentManager() {
+  agentManagerRef.value?.open(agentsStore.currentAgentId)
 }
 
 function openMobileLeft() {

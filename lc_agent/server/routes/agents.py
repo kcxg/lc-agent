@@ -1,6 +1,7 @@
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -11,6 +12,7 @@ from lc_agent.core.models import AgentPreset, SubAgentLink
 from lc_agent.db.engine import get_async_session as _get_db_session
 from lc_agent.db.models import AgentPresetDB
 from lc_agent.db.models_auth import User, UserAgentAccess
+from lc_agent.db.repository import PromptRepository
 from lc_agent.server.auth_middleware import get_current_user, require_admin
 from lc_agent.server.dependencies import get_engine
 
@@ -46,6 +48,9 @@ class AgentCreateRequest(BaseModel):
     llm_params: dict | None = None
     subagents: list[SubAgentLink] | None = None
     enable_general_purpose_subagent: bool = False
+    project_mode: bool = False
+    project_root: str | None = None
+    project_extra_dirs: list[str] | None = None
 
     @field_validator("name")
     @classmethod
@@ -82,6 +87,9 @@ class AgentUpdateRequest(BaseModel):
     llm_params: dict | None = None
     subagents: list[SubAgentLink] | None = None
     enable_general_purpose_subagent: bool | None = None
+    project_mode: bool | None = None
+    project_root: str | None = None
+    project_extra_dirs: list[str] | None = None
 
     @field_validator("name")
     @classmethod
@@ -161,6 +169,9 @@ async def list_agents(
             "default_enabled": True,
             "subagents": row.subagents,
             "enable_general_purpose_subagent": row.enable_general_purpose_subagent,
+            "project_mode": row.project_mode,
+            "project_root": row.project_root,
+            "project_extra_dirs": row.project_extra_dirs,
         })
 
     if user.role != "admin":
@@ -184,6 +195,52 @@ def _validate_subagent_ids_exist(engine: AgentEngine, subagents: list[SubAgentLi
             )
 
 
+def _path_exists(p: str) -> bool:
+    return Path(p).expanduser().is_dir()
+
+
+def _validate_project_paths_or_raise(
+    project_mode: bool,
+    project_root: str | None,
+    project_extra_dirs: list[str] | None,
+) -> None:
+    """Raise HTTPException(422) if project paths are invalid when project_mode is on."""
+    if not project_mode:
+        return
+    root = project_root.strip() if project_root else None
+    if not root:
+        raise HTTPException(status_code=422, detail="开启项目模式时必须填写项目根目录")
+    paths_to_check: list[str] = [root]
+    if project_extra_dirs:
+        paths_to_check.extend(d.strip() for d in project_extra_dirs if d and d.strip())
+    missing = [p for p in paths_to_check if not _path_exists(p)]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"以下路径不存在或不是目录: {' | '.join(missing)}",
+        )
+
+
+class CheckPathsRequest(BaseModel):
+    paths: list[str] = []
+
+    @field_validator("paths")
+    @classmethod
+    def limit_paths(cls, v: list[str]) -> list[str]:
+        if len(v) > 20:
+            raise ValueError("一次最多检查 20 个路径")
+        return v
+
+
+@router.post("/check-paths")
+async def check_paths(body: CheckPathsRequest):
+    """Check whether filesystem paths exist on the server (no auth required)."""
+    return [
+        {"path": p, "exists": _path_exists(p)}
+        for p in body.paths
+    ]
+
+
 @router.post("/agents", status_code=201)
 async def create_agent(
     body: AgentCreateRequest,
@@ -193,6 +250,7 @@ async def create_agent(
 ):
     """Create a new agent preset (persisted to DB)."""
     _validate_subagent_ids_exist(engine, body.subagents)
+    _validate_project_paths_or_raise(body.project_mode, body.project_root, body.project_extra_dirs)
     preset_db = AgentPresetDB(
         id=str(uuid.uuid4()),
         name=body.name,
@@ -205,6 +263,9 @@ async def create_agent(
         llm_params=body.llm_params,
         subagents=[item.model_dump() for item in body.subagents] if body.subagents else None,
         enable_general_purpose_subagent=body.enable_general_purpose_subagent,
+        project_mode=body.project_mode,
+        project_root=body.project_root,
+        project_extra_dirs=body.project_extra_dirs,
     )
     db.add(preset_db)
     await db.commit()
@@ -222,6 +283,9 @@ async def create_agent(
         llm_params=preset_db.llm_params,
         subagents=[SubAgentLink.model_validate(item) for item in preset_db.subagents] if preset_db.subagents else None,
         enable_general_purpose_subagent=preset_db.enable_general_purpose_subagent,
+        project_mode=preset_db.project_mode,
+        project_root=preset_db.project_root,
+        project_extra_dirs=preset_db.project_extra_dirs,
     )
     engine._presets[preset.id] = preset
 
@@ -301,12 +365,18 @@ async def update_agent(
     if preset_db is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    merged_mode = update_data.get("project_mode", preset_db.project_mode)
+    merged_root = update_data.get("project_root", preset_db.project_root)
+    merged_extra = update_data.get("project_extra_dirs", preset_db.project_extra_dirs)
+    _validate_project_paths_or_raise(merged_mode, merged_root, merged_extra)
+
     for key, value in update_data.items():
         setattr(preset_db, key, value)
     preset_db.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(preset_db)
 
+    extra = await PromptRepository(db).resolve_extra_prompts(preset_db.id)
     preset = AgentPreset(
         id=preset_db.id,
         name=preset_db.name,
@@ -319,6 +389,10 @@ async def update_agent(
         llm_params=preset_db.llm_params,
         subagents=[SubAgentLink.model_validate(item) for item in preset_db.subagents] if preset_db.subagents else None,
         enable_general_purpose_subagent=preset_db.enable_general_purpose_subagent,
+        project_mode=preset_db.project_mode,
+        project_root=preset_db.project_root,
+        project_extra_dirs=preset_db.project_extra_dirs,
+        extra_system_prompts=extra,
     )
     engine._presets[preset.id] = preset
     engine.invalidate_agent_cache(agent_id)
@@ -345,6 +419,8 @@ async def delete_agent(
     if preset_db is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    # Clean up prompt bindings before deleting the agent
+    await PromptRepository(db).set_bindings_for_agent(agent_id, [])
     await db.delete(preset_db)
     await db.commit()
 

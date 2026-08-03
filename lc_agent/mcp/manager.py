@@ -38,6 +38,7 @@ class McpManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._refresh_locks: dict[str, asyncio.Lock] = {}
         self._server_contexts: dict[str, tuple[Any, Any]] = {}
+        self._project_server_names: set[str] = set()
 
         for name, conf in config.items():
             enabled = conf.get("enabled", True)
@@ -147,6 +148,52 @@ class McpManager:
             tasks.append(self._connect_server(name, conf))
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def merge_project_servers(self, project_config: dict[str, dict]) -> list[str]:
+        """Add project-level MCP servers (from .agents/mcp.json).
+
+        Project servers override global servers with the same name.
+        Returns list of added/updated server names.
+        """
+        added: list[str] = []
+        for name, conf in project_config.items():
+            if name in self._servers and name not in self._project_server_names:
+                await self._cleanup_server(name)
+            self._project_server_names.add(name)
+            self._config[name] = conf
+            server_type = _resolve_server_type(conf)
+            command = conf.get("command", "")
+            if isinstance(command, list):
+                command = " ".join(command)
+            self._servers[name] = McpServerStatus(
+                name=name,
+                type=server_type,
+                command=command,
+                url=conf.get("url", ""),
+                enabled=conf.get("enabled", True),
+            )
+            added.append(name)
+
+        tasks = [
+            self._connect_server(n, self._config[n])
+            for n in added
+            if self._servers[n].enabled
+        ]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        if added:
+            self._notify_state_change()
+        return added
+
+    async def clear_project_servers(self) -> None:
+        """Remove all project-level MCP servers and disconnect them."""
+        for name in list(self._project_server_names):
+            await self._cleanup_server(name)
+            self._servers.pop(name, None)
+            self._config.pop(name, None)
+        if self._project_server_names:
+            self._notify_state_change()
+        self._project_server_names.clear()
 
     async def _connect_server(self, name: str, conf: dict, *, notify_connecting: bool = True):
         """Establish a persistent connection to a single MCP server."""

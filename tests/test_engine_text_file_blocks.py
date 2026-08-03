@@ -1,4 +1,4 @@
-from lc_agent.core.engine import _convert_history_item, _convert_text_file_blocks
+from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, _convert_text_file_blocks
 
 
 def test_convert_text_file_block_to_text():

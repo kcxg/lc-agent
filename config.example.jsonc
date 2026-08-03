@@ -117,7 +117,7 @@
 
     // ----- MCP 服务器 -----
     // 支持 local（stdio）、sse、http 三种传输方式
-    "mcp_servers": {
+    "mcpServers": {
         // --- 示例：stdio 本地进程 ---
         // "filesystem": {
         //     "type": "local",

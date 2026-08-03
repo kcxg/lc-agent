@@ -19,7 +19,7 @@
       <el-tag size="small" :type="statusType">{{ statusLabel }}</el-tag>
       <span class="tool-meta" v-if="toolCall.status === 'done'">
         <span v-if="toolCall.duration" class="meta-item">⏱ {{ formatDuration(toolCall.duration) }}</span>
-        <span v-if="toolCall.resultLength" class="meta-item">📦 {{ formatSize(toolCall.resultLength) }}</span>
+        <span v-if="toolCall.resultLength" class="meta-item">📦 {{ formatSize(toolCall.resultLength) }}<template v-if="tokenCount !== null"> | {{ formatTokenCount(tokenCount) }} tokens</template></span>
       </span>
       <span v-if="toolCall.pid && !processKilled && (toolCall.bgProcessRunning || toolCall.status === 'running')" class="process-info">
         <span class="pid-badge">PID {{ toolCall.pid }}</span>
@@ -35,13 +35,13 @@
         @click.stop="isDismissed = true"
       >✕</button>
     </div>
-    <template v-if="!isCollapsed">
     <div v-if="toolCall.args && Object.keys(toolCall.args).length > 0" class="tool-args">
       <div v-for="arg in formatArgs(toolCall.name, toolCall.args)" :key="arg.key" class="arg-row">
         <span class="arg-key">{{ arg.key }}:</span>
         <span class="arg-value">{{ arg.value }}</span>
       </div>
     </div>
+    <template v-if="!isCollapsed">
     <div v-if="(toolCall.status === 'running' || toolCall.bgProcessRunning) && toolCall.streamingOutput" class="tool-result streaming">
       <div class="tool-result-rendered" v-html="renderedStreamingOutput" />
       <button class="fullscreen-btn" @click.stop="showModal = true" title="查看完整内容">⛶</button>
@@ -125,6 +125,15 @@ import { Loading, Check, Tools, CircleCloseFilled } from '@element-plus/icons-vu
 import { AnsiUp } from 'ansi_up'
 import type { ToolCall, FileDiffData, FilePreviewData } from '@/stores/chat'
 import { fetchApi } from '@/api/http'
+
+// lazy-load js-tiktoken only when the first tool result arrives
+let _encPromise: Promise<{ encode: (text: string) => ArrayLike<number> }> | null = null
+function getTiktokenEnc() {
+  if (!_encPromise) {
+    _encPromise = import('js-tiktoken').then(({ getEncoding }) => getEncoding('cl100k_base'))
+  }
+  return _encPromise
+}
 
 const ansiUp = new AnsiUp()
 
@@ -432,8 +441,16 @@ function formatSize(len: number): string {
 function formatArgs(name: string, args: Record<string, unknown>): { key: string; value: string }[] {
   return Object.entries(args).map(([key, value]) => {
     let formatted: string
-    if (name.endsWith('ask_user') && key === 'options' && Array.isArray(value)) {
-      formatted = value.map((item, index) => `${String.fromCharCode(65 + index)}. ${String(item)}`).join('\n')
+    if (name.endsWith('ask_user') && key === 'questions' && Array.isArray(value)) {
+      formatted = (value as any[]).map((q: any, idx: number) => {
+        if (!q || typeof q !== 'object') return `${idx + 1}. ${String(q)}`
+        const header = `${idx + 1}. ${q.question ?? '?'}`
+        if (q.type === 'multiple_choice' && Array.isArray(q.choices)) {
+          const choiceLines = q.choices.map((c: string, ci: number) => `  ${String.fromCharCode(65 + ci)}. ${c}`).join('\n')
+          return `${header}\n${choiceLines}`
+        }
+        return header
+      }).join('\n\n')
     } else if (typeof value === 'string') {
       formatted = value
     } else {
@@ -465,26 +482,75 @@ const statusLabel = computed(() => {
     default: return '等待'
   }
 })
+
+const tokenCount = ref<number | null>(null)
+
+watch(
+  [() => props.toolCall.result, () => props.toolCall.status],
+  async ([result, status]) => {
+    if (!result || status !== 'done' || result.length > 500_000) {
+      tokenCount.value = null
+      return
+    }
+    try {
+      const enc = await getTiktokenEnc()
+      tokenCount.value = enc.encode(result).length
+    } catch {
+      tokenCount.value = null
+    }
+  },
+  { immediate: true }
+)
+
+function formatTokenCount(count: number): string {
+  if (count < 1000) return `~${count}`
+  return `~${(count / 1000).toFixed(1)}K`
+}
 </script>
 
 <style scoped>
 .tool-call-card {
+  position: relative;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
   padding: 10px 14px;
   margin: 6px 0;
   background: var(--el-fill-color-light);
   border-left: 3px solid var(--el-text-color-secondary);
+  overflow: hidden;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .tool-call-card.running {
   border-left-color: var(--el-color-primary);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--el-color-primary) 8%, transparent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
+}
+
+.tool-call-card.running::before {
+  position: absolute;
+  inset: 0 auto auto -42%;
+  width: 36%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--el-color-primary), transparent);
+  box-shadow: 0 0 12px var(--el-color-primary);
+  content: '';
+  animation: tool-energy-flow 1s linear infinite;
 }
 
 .tool-call-card.done {
   border-left-color: var(--el-color-success);
+  animation: tool-complete-glow 0.8s ease-out both;
+}
+
+.tool-call-card.done::after {
+  position: absolute;
+  inset: 0 auto 0 -45%;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--el-color-success) 32%, transparent), transparent);
+  content: '';
+  pointer-events: none;
+  transform: skewX(-18deg);
+  animation: tool-complete-sweep 0.8s ease-out both;
 }
 
 .tool-call-card.error {
@@ -492,6 +558,8 @@ const statusLabel = computed(() => {
 }
 
 .tool-header {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -560,6 +628,8 @@ const statusLabel = computed(() => {
 }
 
 .tool-args {
+  position: relative;
+  z-index: 1;
   margin-top: 6px;
   padding: 5px 8px;
   background: var(--el-fill-color);
@@ -588,6 +658,7 @@ const statusLabel = computed(() => {
 }
 
 .tool-result {
+  z-index: 1;
   margin-top: 8px;
   padding: 8px 10px;
   background: #0d1117;
@@ -597,6 +668,49 @@ const statusLabel = computed(() => {
   overflow-y: auto;
   border: 1px solid var(--el-border-color);
   position: relative;
+}
+
+@keyframes tool-energy-flow {
+  to { transform: translateX(430%); }
+}
+
+@keyframes tool-complete-sweep {
+  0% { transform: translateX(0) skewX(-18deg); opacity: 0; }
+  18% { opacity: 1; }
+  100% { transform: translateX(390%) skewX(-18deg); opacity: 0; }
+}
+
+@keyframes tool-complete-glow {
+  0% { box-shadow: 0 0 0 color-mix(in srgb, var(--el-color-success) 0%, transparent); }
+  35% { box-shadow: 0 0 24px color-mix(in srgb, var(--el-color-success) 34%, transparent); }
+  100% { box-shadow: 0 0 0 color-mix(in srgb, var(--el-color-success) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-call-card.running::before,
+  .tool-call-card.done,
+  .tool-call-card.done::after {
+    animation: none;
+  }
+}
+
+.tool-result,
+.diff-body,
+.tool-result :deep(pre.hljs) {
+  scrollbar-width: thin;
+}
+
+.tool-result::-webkit-scrollbar,
+.diff-body::-webkit-scrollbar,
+.tool-result :deep(pre.hljs::-webkit-scrollbar) {
+  width: 4px;
+  height: 4px;
+}
+
+.tool-result::-webkit-scrollbar-thumb,
+.diff-body::-webkit-scrollbar-thumb,
+.tool-result :deep(pre.hljs::-webkit-scrollbar-thumb) {
+  border-radius: 2px;
 }
 
 .diff-result {

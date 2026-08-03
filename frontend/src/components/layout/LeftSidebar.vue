@@ -21,7 +21,7 @@
       </button>
     </div>
 
-    <div v-if="!collapsed" class="session-list">
+    <div v-if="!collapsed" ref="sessionListRef" class="session-list">
       <div class="sidebar-search">
         <input
           v-model="searchQuery"
@@ -36,7 +36,7 @@
           v-for="group in renderedGroups"
           :key="group.agentId"
           class="agent-section"
-          :class="{ 'is-active-agent': group.agentName === activeAgentName }"
+          :class="[`agent-src-${group.agentSource}`, { 'is-active-agent': group.agentId === activeAgentId }]"
         >
           <button
             type="button"
@@ -44,6 +44,7 @@
             @click="toggleGroup(group.agentName)"
           >
             <span class="agent-group-arrow" :class="{ collapsed: collapsedGroups.has(group.agentName) }">▶</span>
+            <span class="agent-group-icon">{{ group.agentIcon }}</span>
             <span class="agent-group-name">{{ group.agentName }}</span>
             <span class="agent-card-count">{{ group.badgeText }}</span>
           </button>
@@ -54,6 +55,7 @@
               :key="session.id"
               class="session-item"
               :class="{ 'is-active': session.id === sessionsStore.currentSessionId }"
+              :data-session-id="session.id"
               @click="handleSessionSelect(session.id)"
             >
               <span class="session-rail" aria-hidden="true"></span>
@@ -63,6 +65,11 @@
                 class="session-streaming-dot"
                 title="正在生成中"
               />
+              <span
+                v-else-if="sessionsStore.isCompletedUnseen(session.id)"
+                class="session-completed-badge"
+                title="已完成，尚未查看"
+              >✓</span>
               <span class="session-item-title">{{ session.title || '新对话' }}</span>
               <div class="session-item-meta">
                 <button
@@ -89,8 +96,9 @@
               class="show-more-btn"
               @click="showMore(group.agentId)"
             >
+              <span class="show-more-icon">↓</span>
               <span>显示更多</span>
-              <span class="show-more-hint">每次显示更多 20 条</span>
+              <span class="show-more-hint">还有 {{ group.hiddenCount }} 条</span>
             </button>
           </div>
         </section>
@@ -148,13 +156,27 @@ const SIDEBAR_COLLAPSED_GROUPS_KEY = 'lc-agent:sidebar:collapsed-agent-groups'
 const searchQuery = ref('')
 const openMenuSessionId = ref<string | null>(null)
 const visibleCountByAgent = ref<Record<string, number>>({})
+const sessionListRef = ref<HTMLElement | null>(null)
 
 interface SidebarGroup {
   agentId: string
   agentName: string
+  agentIcon: string
+  agentSource: 'builtin' | 'code' | 'user' | 'deleted'
+  isProjectMode: boolean
   badgeText: string
   visibleSessions: Session[]
   hiddenCount: number
+}
+
+function getAgentIcon(agent: { id: string; source: string; project_mode?: boolean } | null): string {
+  if (!agent) return '🤖'
+  if (agent.project_mode) return '📁'
+  if (agent.source === 'code') return '⚙️'
+  if (agent.id === 'chat') return '💬'
+  if (agent.id === 'empty') return '🧩'
+  if (agent.source === 'builtin') return '✨'
+  return '🤖'
 }
 
 function loadCollapsedGroups() {
@@ -173,9 +195,9 @@ function persistCollapsedGroups() {
 
 const collapsedGroups = ref<Set<string>>(loadCollapsedGroups())
 
-const activeAgentName = computed(() => {
+const activeAgentId = computed(() => {
   const session = sessionsStore.sessions.find(s => s.id === sessionsStore.currentSessionId)
-  return agentsStore.getAgentName(session?.agent_id || 'chat')
+  return session?.agent_id || 'chat'
 })
 
 const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
@@ -214,6 +236,7 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
 
   return [...buckets.entries()]
     .map(([agentId, sessions]) => {
+      const agentInfo = agentsStore.agents.find(a => a.id === agentId)
       const agentName = agentsStore.getAgentName(agentId)
       const sorted = sessions.slice().sort(compareSessions)
       const visibleCount = getVisibleCount(agentId)
@@ -221,6 +244,9 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
       return {
         agentId,
         agentName,
+        agentIcon: getAgentIcon(agentInfo ?? null),
+        agentSource: (agentInfo?.source ?? 'deleted') as SidebarGroup['agentSource'],
+        isProjectMode: agentInfo?.project_mode ?? false,
         badgeText: normalizedQuery.value ? `${sorted.length}/${totalCount}` : String(sorted.length),
         visibleSessions: sorted.slice(0, visibleCount),
         hiddenCount: Math.max(sorted.length - visibleCount, 0),
@@ -247,6 +273,37 @@ watch(renderedGroups, groups => {
     persistCollapsedGroups()
   }
 }, { immediate: true })
+
+watch(() => sessionsStore.currentSessionId, async (sessionId) => {
+  if (!sessionId || props.collapsed) return
+  const session = sessionsStore.sessions.find(item => item.id === sessionId)
+  if (!session) return
+
+  if (normalizedQuery.value) {
+    searchQuery.value = ''
+  }
+
+  const agentName = agentsStore.getAgentName(session.agent_id || 'chat')
+  const nextCollapsedGroups = new Set(collapsedGroups.value)
+  nextCollapsedGroups.delete(agentName)
+  collapsedGroups.value = nextCollapsedGroups
+  persistCollapsedGroups()
+
+  const sortedSessions = sessionsStore.sessions
+    .filter(item => (item.agent_id || 'chat') === (session.agent_id || 'chat'))
+    .sort(compareSessions)
+  const sessionIndex = sortedSessions.findIndex(item => item.id === sessionId)
+  if (sessionIndex >= getVisibleCount(session.agent_id || 'chat')) {
+    visibleCountByAgent.value = {
+      ...visibleCountByAgent.value,
+      [session.agent_id || 'chat']: sessionIndex + 1,
+    }
+  }
+
+  await nextTick()
+  const target = sessionListRef.value?.querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`)
+  target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+})
 
 function toggleGroup(title: string) {
   const next = new Set(collapsedGroups.value)
@@ -478,15 +535,24 @@ onBeforeUnmount(() => {
 
 .agent-section {
   border: 1px solid var(--sidebar-agent-card-border);
+  border-left: 3px solid var(--sidebar-agent-card-border);
   border-radius: 10px;
   background: var(--sidebar-agent-card-bg);
   overflow: visible;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
+/* Source-based left accent color */
+.agent-src-user    { border-left-color: var(--el-color-primary-light-4); }
+.agent-src-code    { border-left-color: var(--el-color-warning-light-3); }
+.agent-src-builtin { border-left-color: var(--el-color-success-light-4); }
+.agent-src-deleted { border-left-color: var(--el-text-color-placeholder); opacity: 0.8; }
+
 .agent-section.is-active-agent {
   border-color: var(--sidebar-agent-card-active-border);
+  border-left-color: var(--el-color-primary);
   box-shadow: 0 0 0 1px var(--sidebar-agent-card-active-ring);
+  background: var(--sidebar-agent-card-active-bg);
 }
 
 .agent-section-header {
@@ -494,17 +560,27 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   border: none;
+  border-radius: 8px 8px 0 0;
   background: transparent;
   cursor: pointer;
   font-weight: 700;
   color: var(--el-text-color-primary);
   text-align: left;
+  transition: background 0.13s;
 }
 
 .agent-section-header:hover {
-  background: var(--el-fill-color-lighter);
+  background: color-mix(in srgb, var(--el-fill-color-light) 60%, transparent);
+}
+
+.is-active-agent .agent-section-header {
+  color: var(--el-color-primary);
+}
+
+.is-active-agent .agent-group-name {
+  color: var(--el-color-primary);
 }
 
 .agent-group-arrow {
@@ -519,6 +595,12 @@ onBeforeUnmount(() => {
   transform: rotate(0deg);
 }
 
+.agent-group-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
 .agent-group-name {
   font-size: 12px;
   font-weight: 700;
@@ -529,6 +611,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 
 .agent-card-count {
   font-size: 10px;
@@ -570,6 +653,18 @@ onBeforeUnmount(() => {
 .session-item.is-active {
   background: var(--sidebar-agent-card-active-bg);
   color: var(--el-color-primary);
+  font-weight: 600;
+}
+
+.session-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--el-color-primary);
 }
 
 .session-rail {
@@ -585,18 +680,57 @@ onBeforeUnmount(() => {
 }
 
 .session-streaming-dot {
+  position: relative;
   display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--el-color-primary, #409eff);
-  animation: streaming-pulse 1.2s ease-in-out infinite;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--el-color-primary) 75%, transparent);
   flex-shrink: 0;
 }
 
-@keyframes streaming-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+.session-streaming-dot::after {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid var(--el-color-primary);
+  border-radius: 50%;
+  content: '';
+  animation: streaming-status-ring 1.25s ease-out infinite;
+}
+
+.session-completed-badge {
+  display: grid;
+  width: 15px;
+  height: 15px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--el-color-success) 72%, var(--el-border-color));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--el-color-success) 18%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--el-color-success) 56%, transparent);
+  color: var(--el-color-success);
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+  animation: completed-badge-arrival 0.9s ease-out both;
+}
+
+@keyframes streaming-status-ring {
+  0% { transform: scale(0.42); opacity: 0.95; }
+  75%, 100% { transform: scale(1.35); opacity: 0; }
+}
+
+@keyframes completed-badge-arrival {
+  0% { transform: scale(0.35) rotate(-20deg); opacity: 0; }
+  60% { transform: scale(1.18) rotate(4deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-streaming-dot::after,
+  .session-completed-badge {
+    animation: none;
+  }
 }
 
 .session-item-title {
@@ -657,24 +791,35 @@ onBeforeUnmount(() => {
 
 .show-more-btn {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  margin-top: 2px;
-  padding: 8px 8px 4px;
-  border: none;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 5px 10px;
+  border: 1px dashed var(--el-border-color-lighter);
+  border-radius: 6px;
   background: transparent;
   color: var(--el-text-color-secondary);
   cursor: pointer;
+  font-size: 12px;
+  width: 100%;
+  transition: all 0.15s;
 }
 
 .show-more-btn:hover {
+  background: var(--el-fill-color-light);
   color: var(--el-text-color-primary);
+  border-color: var(--el-border-color-light);
+}
+
+.show-more-icon {
+  font-size: 11px;
+  opacity: 0.7;
 }
 
 .show-more-hint {
   font-size: 11px;
-  opacity: 0.72;
+  color: var(--el-text-color-placeholder);
+  margin-left: auto;
 }
 
 .empty-state {

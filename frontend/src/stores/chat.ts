@@ -942,6 +942,7 @@ export const useChatStore = defineStore('chat', () => {
       }, 3000)
       // Auto-cleanup: if this session is no longer the active one, release resources
       if (sessionId !== activeSessionId.value) {
+        useSessionsStore().markCompletedUnseen(sessionId)
         _releaseBackgroundSession(sessionId, state)
       }
     })
@@ -1022,6 +1023,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     activeSessionId.value = sessionId
+    useSessionsStore().markSessionViewed(sessionId)
 
     // Arriving session: already in registry means it was streaming in background
     if (activeSessions.has(sessionId)) return

@@ -35,10 +35,6 @@
 
     <!-- Body: always 200px scrollable window -->
     <div ref="bodyRef" class="sa-body">
-      <div v-if="entry.query?.trim()" class="sa-query-block">
-        <div class="sa-query-header">对子 Agent 的提问</div>
-        <div class="sa-query-text">{{ entry.query }}</div>
-      </div>
       <!-- Thinking block (only while running) -->
       <div v-if="entry.status === 'running' && entry.thinking?.trim()" class="sa-thinking-block">
         <div class="sa-thinking-header">
@@ -136,15 +132,68 @@ watch(() => props.entry.status, (newStatus) => {
 
 <style scoped>
 .subagent-card {
+  position: relative;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
   overflow: hidden;
   margin: 6px 0;
   border-left: 3px solid var(--el-color-primary);
 }
-.sa-running { border-left-color: var(--el-color-primary); }
-.sa-done { border-left-color: var(--el-color-success); }
+.sa-running {
+  border-left-color: var(--el-color-primary);
+  box-shadow: 0 0 17px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+}
+.sa-running::before {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto auto -42%;
+  width: 36%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--el-color-primary), transparent);
+  box-shadow: 0 0 12px var(--el-color-primary);
+  content: '';
+  animation: subagent-energy-flow 1s linear infinite;
+}
+.sa-done {
+  border-left-color: var(--el-color-success);
+  animation: subagent-complete-glow 0.8s ease-out both;
+}
+.sa-done::after {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 -45%;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--el-color-success) 32%, transparent), transparent);
+  content: '';
+  pointer-events: none;
+  transform: skewX(-18deg);
+  animation: subagent-complete-sweep 0.8s ease-out both;
+}
 .sa-error { border-left-color: var(--el-color-danger); }
+
+@keyframes subagent-energy-flow {
+  to { transform: translateX(430%); }
+}
+
+@keyframes subagent-complete-sweep {
+  0% { transform: translateX(0) skewX(-18deg); opacity: 0; }
+  18% { opacity: 1; }
+  100% { transform: translateX(390%) skewX(-18deg); opacity: 0; }
+}
+
+@keyframes subagent-complete-glow {
+  0% { box-shadow: 0 0 0 color-mix(in srgb, var(--el-color-success) 0%, transparent); }
+  35% { box-shadow: 0 0 24px color-mix(in srgb, var(--el-color-success) 34%, transparent); }
+  100% { box-shadow: 0 0 0 color-mix(in srgb, var(--el-color-success) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-running::before,
+  .sa-done,
+  .sa-done::after {
+    animation: none;
+  }
+}
 
 .sa-header {
   background: var(--el-color-primary-light-9);
@@ -196,30 +245,6 @@ watch(() => props.entry.status, (newStatus) => {
   overflow-y: auto;
   scroll-behavior: smooth;
   box-sizing: border-box;
-}
-
-/* Query block */
-.sa-query-block {
-  margin-bottom: 8px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-  background: var(--el-fill-color-light);
-}
-
-.sa-query-header {
-  padding: 6px 8px 4px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--el-text-color-secondary);
-}
-
-.sa-query-text {
-  padding: 0 8px 8px;
-  color: var(--el-text-color-regular);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
 }
 
 /* Thinking block */

@@ -1,9 +1,81 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from lc_agent.db.models import AgentPresetDB, ChatUiMessage, SessionMeta
+from lc_agent.db.models import AgentPresetDB, AgentPromptBindingDB, ChatUiMessage, PromptTemplateDB, SessionMeta
+
+
+class PromptRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def list_all(self) -> list[PromptTemplateDB]:
+        result = await self.session.execute(select(PromptTemplateDB).order_by(PromptTemplateDB.created_at))
+        return list(result.scalars().all())
+
+    async def get_by_id(self, prompt_id: str) -> PromptTemplateDB | None:
+        return await self.session.get(PromptTemplateDB, prompt_id)
+
+    async def create(self, name: str, content: str) -> PromptTemplateDB:
+        pt = PromptTemplateDB(name=name, content=content)
+        self.session.add(pt)
+        await self.session.commit()
+        await self.session.refresh(pt)
+        return pt
+
+    async def update(self, prompt_id: str, **kwargs) -> PromptTemplateDB | None:
+        pt = await self.get_by_id(prompt_id)
+        if pt is None:
+            return None
+        for key, value in kwargs.items():
+            if hasattr(pt, key):
+                setattr(pt, key, value)
+        pt.updated_at = datetime.now(timezone.utc)
+        await self.session.commit()
+        await self.session.refresh(pt)
+        return pt
+
+    async def delete(self, prompt_id: str) -> bool:
+        pt = await self.get_by_id(prompt_id)
+        if pt is None:
+            return False
+        await self.session.delete(pt)
+        await self.session.commit()
+        return True
+
+    async def get_agent_ids_using_prompt(self, prompt_id: str) -> list[str]:
+        result = await self.session.execute(
+            select(AgentPromptBindingDB.agent_id).where(AgentPromptBindingDB.prompt_id == prompt_id)
+        )
+        return list(result.scalars().all())
+
+    async def get_bindings_for_agent(self, agent_id: str) -> list[AgentPromptBindingDB]:
+        result = await self.session.execute(
+            select(AgentPromptBindingDB)
+            .where(AgentPromptBindingDB.agent_id == agent_id)
+            .order_by(AgentPromptBindingDB.sort_order)
+        )
+        return list(result.scalars().all())
+
+    async def set_bindings_for_agent(self, agent_id: str, prompt_ids: list[str]) -> None:
+        await self.session.execute(
+            delete(AgentPromptBindingDB).where(AgentPromptBindingDB.agent_id == agent_id)
+        )
+        for order, pid in enumerate(prompt_ids):
+            self.session.add(AgentPromptBindingDB(agent_id=agent_id, prompt_id=pid, sort_order=order))
+        await self.session.commit()
+
+    async def resolve_extra_prompts(self, agent_id: str) -> list[tuple[str, str]]:
+        """Return ordered (name, content) pairs for prompts bound to this agent."""
+        stmt = (
+            select(PromptTemplateDB.name, PromptTemplateDB.content)
+            .join(AgentPromptBindingDB, AgentPromptBindingDB.prompt_id == PromptTemplateDB.id)
+            .where(AgentPromptBindingDB.agent_id == agent_id)
+            .order_by(AgentPromptBindingDB.sort_order)
+        )
+        result = await self.session.execute(stmt)
+        return [(name, content) for name, content in result.all() if content and content.strip()]
 
 
 class PresetRepository:

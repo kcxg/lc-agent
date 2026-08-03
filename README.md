@@ -60,6 +60,9 @@
 
 ![HTTP追踪与Token面板](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc02.png)
 
+**智能体管理**
+![智能体管理](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/agent_management.png)
+
 **工具调用详情**
 
 ![工具调用卡片](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc03.png)
@@ -149,7 +152,7 @@ app.run()
 - `provider`：模型提供商与模型列表
 - `agent.default_model`：默认模型
 - `skills`：Skills 目录
-- `mcp_servers`：MCP 服务器配置
+- `mcpServers`：MCP 服务器配置
 - `database`：会话与 checkpoint 存储
 - `auth`：登录认证与管理员配置
 
@@ -171,6 +174,79 @@ app.run()
 - **MCP**：外部工具服务器，适合跨项目复用和进程隔离
 - **Skills**：面向 Agent 的能力说明与工作流知识，适合渐进式触发
 - **[nbrag](https://github.com/ydf0509/nbrag) / RAG**：作为 MCP 工具接入，保持知识库与 Agent 框架低耦合
+
+## 项目文件夹模式
+
+为 Agent 配置 `project_root` 路径后，lc-agent 会以该目录为上下文中心运行：
+
+| 能力 | 说明 |
+| --- | --- |
+| AGENTS.md 注入 | 自动读取 `{project_root}/AGENTS.md` 作为系统指令 |
+| 项目 Skills | 扫描 `{project_root}/.agents/skills/`，与全局 Skills 合并，同名时项目优先 |
+| 项目 MCP | 读取 `{project_root}/.agents/mcp.json`，与全局 MCP 合并，同名时项目覆盖 |
+| 文件访问范围 | `file_read` / `file_write` 工具默认只能访问项目目录 |
+| 命令工作目录 | `run_command` 默认 CWD 为项目根目录 |
+
+### `.agents/mcp.json` 格式
+
+遵循与 Cursor / Claude Desktop 兼容的 `mcpServers` 格式（`command` + `args` 分开）：
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./"],
+      "env": {}
+    },
+    "my-http-server": {
+      "url": "http://localhost:3001/sse",
+      "enabled": true
+    },
+    "disabled-server": {
+      "command": "npx",
+      "args": ["-y", "@my/server"],
+      "enabled": false
+    }
+  }
+}
+```
+
+字段说明：
+- `command`：可执行文件名（如 `npx`、`node`、`python`）
+- `args`：参数数组
+- `env`：额外环境变量（可选），会与系统环境合并
+- `url`：SSE/HTTP 型服务器直接填 URL，无需 `command`/`args`
+- `enabled`：默认 `true`，设为 `false` 可临时禁用
+
+### `.agents/skills/` 格式
+
+每个子目录为一个 Skill，包含 `SKILL.md`：
+
+```
+{project_root}/
+└── .agents/
+    ├── mcp.json          # 项目级 MCP 配置
+    └── skills/
+        └── my-skill/
+            └── SKILL.md  # frontmatter: name + description
+```
+
+`SKILL.md` frontmatter 支持的字段：
+
+```yaml
+---
+name: my-skill           # 必填，小写字母+连字符，唯一标识
+description: 一句话描述  # 必填，LLM 用于判断何时调用
+license: MIT             # 可选
+metadata:                # 可选，dict 格式的自定义元数据
+  group: "工具类"
+---
+
+# Skill 主体内容（Markdown 格式）
+```
+
+> **注意**：`compatibility` 字段若填写，必须是 `dict` 格式（如 `{python: "3.12+"}`），不可为字符串，否则该 Skill 会被跳过。其他未知字段会被忽略。
 
 ## Human-in-the-top
 
@@ -294,14 +370,14 @@ npm run test:code-agent
 答： 你购买apikey后，模型厂商是不会自动送你联网功能的，联网实际是通过工具调用。
 所以你可以配置mcp，市面上能联网的mcp有很多
 
-例如配置 Open Web Search MCP，你在docker里面启动mcp服务，然后配置到config.jsonc里面的mcp_servers，agent可以勾选启用这个mcp，这样`agent`就能联网查询新闻了，而且可以启用web-search这个skill，引导ai何时联网，怎么高效使用这个mcp的各个工具。
+例如配置 Open Web Search MCP，你在docker里面启动mcp服务，然后配置到config.jsonc里面的mcpServers，agent可以勾选启用这个mcp，这样`agent`就能联网查询新闻了，而且可以启用web-search这个skill，引导ai何时联网，怎么高效使用这个mcp的各个工具。
 
 除了 `openwebsearch` mcp另外推荐一个更好更稳定更适合agent联网的mcp，`anysearch`，每天免费1000次，我在联网搜索某些技术文档时候，实测比deepseek 豆包官网的联网搜索更强。
 
 ```jsonc
 {
     ...其他配置...
-  "mcp_servers": {
+  "mcpServers": {
 
     // Web 搜索 MCP
      // 实时网页搜索 MCP（SSE 方式）
@@ -316,7 +392,7 @@ npm run test:code-agent
 }
 ```
 
-## lc-agent 能不能作为aicoding 工具来使用？
+### lc-agent 能不能作为aicoding 工具来使用？
 
 答：完全可以，而且编程效果和体验都很好。
 
@@ -330,6 +406,16 @@ lc-agent前端对代码改动和代码执行的渲染，达到了 traework codex
 
 lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以作为 通用agent来使用，ai coding只是能力之一。
 
+### agent 设置项目模式后有什么区别？
+
+答：相当于 Cursor / Codex 打开某个项目的效果。绑定本地目录后，AI 自动识别并遵守该项目的 `AGENTS.md` 规则，同时加载项目专属的 Skills（技能），加载项目级mcp配置文件，无需每次手动告知 AI 当前在哪个项目。
+相当于你为cursor codex创建的项目级别的 AGENTS.md 和 .agents 文件夹的skills和mcp配置，能被`lc-agent`自动复用。
+
+### 质疑lc-agent是不是装逼重复造轮子，为什么不直接用codex traework？
+
+lc-agent既是产品又是框架， 是给希望开发agent人员用的，或者对agent开发感兴趣，或者对ai为什么能编程写代码有兴趣的人员用的。是给希望自定义开发agent的，尤其是使用langchain开发agent的人 用的。 里面的很多功能都是对观测llm行为有巨大帮助的，看下lc-agent的前端界面就知道了，里面有大量的功能是帮助看清和llm交互的详细过程，而不是简单的像`openwebui`那样给普通非码农用的普通聊天网页。从lc-agent前端就能很清楚知道到底和llm是怎么交互的，codex traework qoder是黑盒的，不方便你看到底层交互原理。
+
+codex是给普通码农编程用的，如果你对开发自己的agent毫无兴需求和兴趣，对和llm交互毫无兴趣，对ai原理毫无兴趣，只是希望用ai来完成写普通业务项目代码，那当然直接用codex就可以了。
 
 ## License
 

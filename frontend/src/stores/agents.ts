@@ -21,6 +21,9 @@ export interface AgentPreset {
   enable_general_purpose_subagent: boolean
   source: 'builtin' | 'code' | 'user'
   default_enabled: boolean
+  project_mode?: boolean
+  project_root?: string | null
+  project_extra_dirs?: string[] | null
 }
 
 const BUILTIN_IDS = new Set(['chat', 'empty', 'power'])

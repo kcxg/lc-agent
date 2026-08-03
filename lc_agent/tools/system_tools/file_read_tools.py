@@ -18,18 +18,21 @@ _MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 
 @tool(group="file_read", group_description="文件读取")
 def read_file(
-    path: Annotated[str, "要读取的文件路径（绝对路径或相对于工作目录的相对路径）"],
+    path: Annotated[str, "Path to the file; absolute or relative to the working directory"],
     offset: Annotated[
         int,
-        "起始行号。0 表示从头开始；正数为从第 N 行开始（0-indexed）；"
-        "负数表示 tail 模式，读取最后 |offset| 行。",
+        "Start line (0-indexed). 0 = from the beginning; positive N = start at line N; negative N = tail mode, read the last |N| lines.",
     ] = 0,
     length: Annotated[
         int,
-        "读取的最大行数（默认 1000）。设 -1 表示读取全部。",
+        "Maximum number of lines to read (default 1000). Set -1 to read the entire file.",
     ] = _DEFAULT_LINE_LIMIT,
 ) -> str:
-    """读取文件内容。支持文本文件分页读取和图片文件 base64 返回。"""
+    """Read a file and return its content. Supports text files (with optional line-range paging) and images (returned as base64).
+
+    Paths resolve relative to the project root (project mode) or server working directory; absolute paths are also accepted.
+    Files larger than 10 MB return an error — use offset/length to page through large files (default: 1000 lines per call).
+    """
     resolved = validate_read_path(path)
     file_path = Path(resolved)
 
@@ -98,9 +101,9 @@ def _read_text(file_path: Path, offset: int, length: int) -> str:
 
 @tool(group="file_read", group_description="文件读取")
 def read_multiple_files(
-    paths: Annotated[list[str], "要读取的文件路径列表"],
+    paths: Annotated[list[str], "List of file paths to read"],
 ) -> str:
-    """批量读取多个文件。单个文件失败不影响整体。"""
+    """Read multiple files in one call. Prefer this over sequential read_file calls when you need to read multiple known paths — it's faster and reduces round-trips. A single file failure does not affect the others; each result is prefixed with its path."""
     results: list[str] = []
     for p in paths:
         try:
@@ -129,10 +132,10 @@ def read_multiple_files(
 
 @tool(group="file_read", group_description="文件读取")
 def list_directory(
-    path: Annotated[str, "目录路径"],
-    depth: Annotated[int, "递归深度（默认 2，0 表示只列当前层）"] = 2,
+    path: Annotated[str, "Directory path to list"],
+    depth: Annotated[int, "Recursion depth (default 2; 0 = current level only)"] = 2,
 ) -> str:
-    """列出目录内容，递归显示子目录结构。"""
+    """List directory contents recursively up to a specified depth; shows subdirectory structure with file sizes."""
     resolved = validate_read_path(path)
     dir_path = Path(resolved)
 
@@ -144,6 +147,9 @@ def list_directory(
     lines: list[str] = []
     _walk_dir(dir_path, lines, depth, current_depth=0, max_items=200)
     return "\n".join(lines)
+
+
+_ALWAYS_IGNORE = frozenset({".git"})
 
 
 def _walk_dir(
@@ -160,6 +166,10 @@ def _walk_dir(
         if len(lines) >= max_items:
             lines.append(f"{indent}... [truncated, {max_items} items limit reached]")
             return
+
+        if entry.name in _ALWAYS_IGNORE:
+            continue
+
         if entry.is_dir():
             lines.append(f"{indent}[DIR] {entry.name}/")
             if current_depth < max_depth:
@@ -179,9 +189,9 @@ def _format_size(size: int) -> str:
 
 @tool(group="file_read", group_description="文件读取")
 def get_file_info(
-    path: Annotated[str, "文件或目录路径"],
+    path: Annotated[str, "File or directory path"],
 ) -> str:
-    """获取文件或目录的详细元信息。"""
+    """Get detailed metadata for a file or directory: path, type, size, timestamps, and line count. Use this instead of read_file when you only need metadata (e.g. to check size or line count before deciding whether to page through the file)."""
     resolved = validate_read_path(path)
     file_path = Path(resolved)
 
@@ -213,21 +223,21 @@ def get_file_info(
 
 @tool(group="file_read", group_description="文件读取")
 def search_files(
-    path: Annotated[str, "搜索的根目录路径"],
-    pattern: Annotated[str, "搜索模式。content 模式为正则/文本；files 模式为 glob 模式（如 *.py）"],
+    path: Annotated[str, "Root directory to search in"],
+    pattern: Annotated[str, "Search pattern; regex/text for content search, glob pattern (e.g. '*.py') for file search"],
     search_type: Annotated[
         str,
-        "搜索类型：'content' 在文件内容中搜索文本；'files' 按文件名模式搜索文件",
+        "Search mode: 'content' searches inside file contents; 'files' matches filenames by glob pattern",
     ] = "content",
-    max_results: Annotated[int, "最大返回结果数"] = 50,
-    ignore_case: Annotated[bool, "是否忽略大小写"] = True,
+    max_results: Annotated[int, "Maximum number of results to return"] = 50,
+    ignore_case: Annotated[bool, "Case-insensitive matching"] = True,
     file_pattern: Annotated[
         str | None,
-        "文件名过滤 glob（仅 content 模式有效），如 '*.py' 只搜索 Python 文件",
+        "Filename glob filter for content searches (e.g. '*.py' to search only Python files)",
     ] = None,
-    context_lines: Annotated[int, "上下文行数（仅 content 模式有效）"] = 2,
+    context_lines: Annotated[int, "Context lines to include around each content match"] = 2,
 ) -> str:
-    """搜索文件名或文件内容。内部调用 ripgrep 实现高性能搜索。"""
+    """Search file names by glob pattern or file contents by regex/text (powered by ripgrep). Use search_type='files' for filename lookup, 'content' for full-text search."""
     resolved = validate_read_path(path)
 
     rg_path = shutil.which("rg")

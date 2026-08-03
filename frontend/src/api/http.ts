@@ -20,7 +20,14 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
     throw new Error('认证已过期，请重新登录')
   }
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`)
+    let detail = `${response.status} ${response.statusText}`
+    try {
+      const body = await response.json()
+      if (body?.detail) {
+        detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+      }
+    } catch {}
+    throw new Error(detail)
   }
   if (response.status === 204) return undefined as T
   return response.json()
@@ -39,7 +46,10 @@ export const api = {
   refreshMcpServers: () => fetchApi<any[]>('/mcp/refresh', { method: 'POST' }),
   refreshMcpServer: (name: string) => fetchApi<any>(`/mcp/${name}/refresh`, { method: 'POST' }),
   toggleMcpServer: (name: string) => fetchApi<{ name: string; enabled: boolean }>(`/mcp/${name}/toggle`, { method: 'POST' }),
-  getSkills: () => fetchApi<any[]>('/skills'),
+  getSkills: (projectRoot?: string) => {
+    const qs = projectRoot ? `?project_root=${encodeURIComponent(projectRoot)}` : ''
+    return fetchApi<any[]>(`/skills${qs}`)
+  },
   getSkillDetail: (name: string) => fetchApi<any>(`/skills/${name}`),
   toggleSkill: (name: string) => fetchApi<{ name: string; enabled: boolean }>(`/skills/${name}/toggle`, { method: 'POST' }),
 
@@ -48,6 +58,10 @@ export const api = {
   updateAgent: (id: string, data: object) => fetchApi<any>(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAgent: (id: string) => fetchApi<void>(`/agents/${id}`, { method: 'DELETE' }),
   activateAgent: (id: string) => fetchApi<any>(`/agents/${id}/activate`, { method: 'POST' }),
+  checkPaths: (paths: string[]) => fetchApi<{ path: string; exists: boolean }[]>('/check-paths', {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  }),
 
   getSessions: () => fetchApi<any[]>('/sessions'),
   createSession: (data: { title?: string; agent_id?: string; model?: string }) =>
@@ -71,6 +85,19 @@ export const api = {
   getSummarization: () => fetchApi<{ enabled: boolean; default_model: string; trigger: any; keep: any }>('/settings/summarization'),
   updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>
     fetchApi<any>('/settings/summarization', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Prompt library
+  getPrompts: () => fetchApi<any[]>('/prompts'),
+  createPrompt: (data: { name: string; content: string }) =>
+    fetchApi<any>('/prompts', { method: 'POST', body: JSON.stringify(data) }),
+  updatePrompt: (id: string, data: { name?: string; content?: string }) =>
+    fetchApi<any>(`/prompts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePrompt: (id: string) => fetchApi<void>(`/prompts/${id}`, { method: 'DELETE' }),
+
+  // Agent ↔ prompt bindings
+  getAgentPrompts: (agentId: string) => fetchApi<string[]>(`/agents/${agentId}/prompts`),
+  setAgentPrompts: (agentId: string, promptIds: string[]) =>
+    fetchApi<string[]>(`/agents/${agentId}/prompts`, { method: 'PUT', body: JSON.stringify({ prompt_ids: promptIds }) }),
 }
 
 export async function fetchAvailableSubagents(): Promise<Array<{

@@ -2,7 +2,8 @@
 from unittest.mock import MagicMock
 
 from lc_agent.core.models import AgentPreset, SubAgentLink
-from lc_agent.core.engine import AgentEngine, SubAgentDescriptor
+from lc_agent.core.engine import AgentEngine
+from lc_agent.core.engine_helpers.subagent_helpers import SubAgentDescriptor
 
 
 MINIMAL_CONFIG = {
@@ -128,8 +129,8 @@ def test_build_agent_injects_single_task_tool_and_records_display_map(monkeypatc
     assert task_tools[0].description.startswith("Delegate a task to one configured sub-agent.")
     assert "stateless" in task_tools[0].description
     assert "final and only reply" in task_tools[0].description
-    assert "subagent_type: 研究专家" in task_tools[0].description
-    assert "when_to_use:" in task_tools[0].description
+    assert "<subagent_type>研究专家</subagent_type>" in task_tools[0].description
+    assert "<when_to_use>" in task_tools[0].description
     assert "当你需要深入研究时调用它" in task_tools[0].description
     assert engine.get_subagent_tool_names("parent-agent") == {"task"}
     assert engine.get_subagent_display_name_map("parent-agent") == {"研究专家": "研究专家"}
@@ -152,7 +153,7 @@ def test_build_subagent_registry_injects_general_purpose():
     gp = registry["general-purpose"]
     assert gp.preset_id == "__gp__:parent-agent"
     assert gp.display_name == "通用助手"
-    assert "隔离上下文" in gp.description
+    assert "all tools as the main agent" in gp.description
 
     # The cloned general-purpose preset must not have subagents or gp flag
     gp_preset = engine._presets["__gp__:parent-agent"]
@@ -179,7 +180,7 @@ def test_build_subagent_registry_no_general_purpose_when_disabled():
 
 def test_build_agent_injects_delegation_prompt_into_subagent(monkeypatch):
     """_depth > 0 时，SubagentDelegationMiddleware 应作为 middleware[0] (prepend=True)，system_prompt 保持不变。"""
-    from lc_agent.core.engine import SUBAGENT_DELEGATION_PROMPT
+    from lc_agent.prompts.subagent_prompts import SUBAGENT_DELEGATION_PROMPT
 
     engine = AgentEngine(MINIMAL_CONFIG)
     child = AgentPreset(
@@ -206,8 +207,8 @@ def test_build_agent_injects_delegation_prompt_into_subagent(monkeypatch):
     system_prompt = captured.get("system_prompt", "")
     middleware = captured.get("middleware", [])
 
-    # system_prompt は preset のままで、文字列連結されない
-    assert system_prompt == "你是专门做研究的助手。"
+    # system_prompt is wrapped in <instructions> block
+    assert system_prompt == "<instructions>\n你是专门做研究的助手。\n</instructions>"
 
     # SubagentDelegationMiddleware が middleware[0] として prepend=True で注入される
     assert middleware, "middleware list should not be empty"
@@ -287,3 +288,57 @@ def test_build_agent_no_task_middleware_when_no_subagents(monkeypatch):
     middleware = captured.get("middleware", [])
     mw_names = [getattr(m, "name", type(m).__name__) for m in middleware]
     assert "TaskSystemPromptMiddleware" not in mw_names
+
+
+def test_build_agent_includes_ask_user_middleware_at_depth_0(monkeypatch):
+    """顶层 agent (_depth=0) 应注入 AskUserMiddleware。"""
+    engine = AgentEngine(MINIMAL_CONFIG)
+    preset = AgentPreset(
+        id="top-agent",
+        name="top-agent",
+        system_prompt="顶层助手",
+        default_model="test-model",
+    )
+    engine._presets = {preset.id: preset}
+
+    captured = {}
+    monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id, llm_params=None: object())
+    monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+
+    def fake_create_agent(**kwargs):
+        captured.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
+    engine.build_agent(preset, cache_key="top-agent", _depth=0)
+
+    middleware = captured.get("middleware", [])
+    mw_names = [getattr(m, "name", type(m).__name__) for m in middleware]
+    assert "AskUserMiddleware" in mw_names
+
+
+def test_build_agent_excludes_ask_user_middleware_at_depth_gt_0(monkeypatch):
+    """子 agent (_depth>0) 不应注入 AskUserMiddleware，防止前端无法响应的死锁。"""
+    engine = AgentEngine(MINIMAL_CONFIG)
+    child = AgentPreset(
+        id="worker",
+        name="worker",
+        system_prompt="子任务执行者",
+        default_model="test-model",
+    )
+    engine._presets = {child.id: child}
+
+    captured = {}
+    monkeypatch.setattr(engine, "_create_llm", lambda model_info, model_id, llm_params=None: object())
+    monkeypatch.setattr(engine, "_build_summarization_middleware", lambda preset: [])
+
+    def fake_create_agent(**kwargs):
+        captured.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr("lc_agent.core.engine.create_agent", fake_create_agent)
+    engine.build_agent(child, cache_key="worker", _depth=1)
+
+    middleware = captured.get("middleware", [])
+    mw_names = [getattr(m, "name", type(m).__name__) for m in middleware]
+    assert "AskUserMiddleware" not in mw_names
