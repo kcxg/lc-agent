@@ -345,6 +345,19 @@ npm run test:session-route
 npm run test:code-agent
 ```
 
+## 启动gui客户端
+
+参考下面这个例子,可以启动一个独立的客户端，而不是在浏览器中使用lc-aegnt
+
+```python
+from lc_agent.desktop import launch_desktop
+
+launch_desktop(host='127.0.0.1', port=8001, title="心有灵犀") # host port title 按需改动。
+```
+
+[启动gui客户端](https://github.com/ydf0509/lc-agent-bfzs/blob/6cf03fe2db265021cf82964851fb84af625744b3/bfzs/start_desktop.py)
+
+
 ## FAQ
 
 ### lc-agent 是否内置 RAG 知识库？

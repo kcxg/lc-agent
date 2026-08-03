@@ -570,15 +570,18 @@ const emit = defineEmits<{
   padding: 0;
   border-radius: 50%;
   font-size: 16px;
-  color: var(--el-text-color-regular);
-  background: transparent;
-  border: 1px solid transparent;
+  color: #ffffff;
+  background: linear-gradient(135deg, #4f46e5, #8b5cf6);
+  border: 1px solid rgba(99, 102, 241, 0.55);
   cursor: pointer;
-  transition: background 0.18s, color 0.18s;
+  box-shadow: 0 3px 8px rgba(79, 70, 229, 0.28);
+  transition: background 0.18s, border-color 0.18s, box-shadow 0.18s, color 0.18s;
 }
 .mobile-agents-btn:hover {
-  background: var(--el-fill-color-light);
-  color: var(--el-color-primary);
+  background: linear-gradient(135deg, #4338ca, #7c3aed);
+  border-color: rgba(129, 140, 248, 0.78);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.38);
 }
 
 @keyframes pulse {

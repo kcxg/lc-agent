@@ -158,7 +158,7 @@
             :value="option.id"
           >
             <div class="theme-option-row">
-              <span class="theme-option-dot" :style="{ background: option.id === 'marquee' ? 'linear-gradient(90deg,#ff2d95,#2da8ff,#18e6c3)' : option.id === 'transparent-arc' ? 'conic-gradient(transparent 60%, #ff2d95 70%, #2da8ff 80%, transparent 90%)' : 'conic-gradient(#ff2d95,#2da8ff,#18e6c3,#ff2d95)' }"></span>
+              <span class="theme-option-dot" :style="{ background: option.id === 'marquee' || option.id === 'rainbow-gradient' ? 'linear-gradient(90deg,#ff2d95,#9b5cff,#2da8ff,#18e6c3,#ffe14d,#ff7a2d)' : option.id === 'transparent-arc' ? 'conic-gradient(transparent 60%, #ff2d95 70%, #2da8ff 80%, transparent 90%)' : 'conic-gradient(#ff2d95,#2da8ff,#18e6c3,#ff2d95)' }"></span>
               <div class="theme-option-copy">
                 <span class="theme-option-name">{{ option.label }}</span>
                 <span class="theme-option-desc">{{ option.description }}</span>

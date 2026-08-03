@@ -1,6 +1,6 @@
 import { computed, readonly, ref, watch } from 'vue'
 
-export type InputAnimationType = 'rainbow-rod' | 'transparent-arc' | 'marquee'
+export type InputAnimationType = 'rainbow-rod' | 'transparent-arc' | 'marquee' | 'rainbow-gradient'
 
 export interface InputAnimationOption {
   id: InputAnimationType
@@ -12,6 +12,7 @@ export const INPUT_ANIMATION_OPTIONS: InputAnimationOption[] = [
   { id: 'rainbow-rod', label: '彩虹金箍棒', description: '满圈彩虹锥形渐变旋转' },
   { id: 'transparent-arc', label: '透明小光弧', description: '一小段彩色光弧绕圈旋转' },
   { id: 'marquee', label: '跑马灯', description: '围绕输入框上下左右流动的彩色灯带' },
+  { id: 'rainbow-gradient', label: '彩虹渐变边框', description: '连续彩虹渐变线条平滑变色' },
 ]
 
 const STORAGE_KEY = 'lc-agent:input-animation'
