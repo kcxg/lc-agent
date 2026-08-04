@@ -12,6 +12,7 @@
         'effect-rainbow-rod': isStreamingState && inputAnimation === 'rainbow-rod',
         'effect-transparent-arc': isStreamingState && inputAnimation === 'transparent-arc',
         'effect-marquee': isStreamingState && inputAnimation === 'marquee',
+        'effect-rainbow-gradient': isStreamingState && inputAnimation === 'rainbow-gradient',
       }"
       @drop="handleDrop"
       @dragover="handleDragover"
@@ -352,6 +353,21 @@ function handleCancelEdit() {
   animation: input-conic-spin 2.4s linear infinite;
 }
 
+.textarea-shell.is-streaming.effect-rainbow-gradient::before {
+  background: linear-gradient(
+    90deg,
+    #ff2d95,
+    #9b5cff,
+    #2da8ff,
+    #18e6c3,
+    #ffe14d,
+    #ff7a2d,
+    #ff2d95
+  );
+  background-size: 300% 100%;
+  animation: input-rainbow-gradient 3.6s linear infinite;
+}
+
 .textarea-shell.is-streaming.effect-marquee::before {
   background: none;
 }
@@ -376,6 +392,10 @@ function handleCancelEdit() {
 
 @keyframes input-conic-spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes input-rainbow-gradient {
+  to { background-position: 300% 0; }
 }
 
 .textarea-shell .marquee-dot {

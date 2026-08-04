@@ -439,6 +439,7 @@ const subLiveBubbleList = computed((): ChatBubbleItem[] => {
       loading: false,
       avatarSize: '28px',
       avatarGap: '8px',
+      maxWidth: '100%',
     })
   }
 
@@ -487,6 +488,7 @@ const subLiveBubbleList = computed((): ChatBubbleItem[] => {
     hasAnswer: !!entry.tokens?.trim(),
     avatarSize: '28px',
     avatarGap: '8px',
+    maxWidth: '100%',
     httpTraces: entry.httpTraces?.length ? entry.httpTraces : undefined,
     httpTracesCount: entry.httpTraces?.length || 0,
   })
@@ -592,6 +594,7 @@ const bubbleList = computed((): ChatBubbleItem[] => {
       loading: isStreamingMessage && !msgContent,
       avatarSize: '28px',
       avatarGap: '8px',
+      maxWidth: '100%',
       timestamp: ts,
       enterClass,
     })
@@ -1349,14 +1352,20 @@ onBeforeUnmount(() => {
 }
 
 .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
+  flex: 0 1 auto;
   width: fit-content;
   max-width: var(--chat-user-bubble-max-width) !important;
   padding: 10px 14px;
   border-radius: 16px 16px 6px 16px;
   background: var(--el-bg-color-overlay);
   color: var(--el-text-color-primary);
-  border: 1px solid var(--el-border-color-lighter);
+  border: none;
   box-shadow: 0 4px 12px color-mix(in srgb, var(--el-box-shadow) 30%, transparent);
+}
+
+.messages-container :deep(.elx-bubble--end .elx-bubble__content) {
+  border: none !important;
+  background: transparent !important;
 }
 
 .messages-container :deep(.elx-bubble__content) {
@@ -1375,8 +1384,13 @@ onBeforeUnmount(() => {
   padding: 10px 14px 10px 18px;
   border-radius: 6px 16px 16px 16px;
   background: var(--el-bg-color-overlay);
-  border: 1px solid var(--el-border-color-lighter);
+  border: none;
   box-shadow: 0 4px 16px color-mix(in srgb, var(--el-box-shadow) 35%, transparent);
+}
+
+.messages-container :deep(.elx-bubble--start .elx-bubble__content) {
+  border: none !important;
+  background: transparent !important;
 }
 .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper)::before {
   content: '';
@@ -2044,7 +2058,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 960px) {
   .messages-container {
-    padding: 6px 0;
+    padding: 6px 10px;
     overscroll-behavior-y: contain;
   }
 
@@ -2057,11 +2071,36 @@ onBeforeUnmount(() => {
 
   .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper),
   .messages-container :deep(.elx-bubble--start .elx-bubble__content),
-  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper),
-  .messages-container :deep(.elx-bubble--end .elx-bubble__content),
   .messages-container :deep(.elx-bubble__content) {
     width: 100%;
     max-width: 100% !important;
+  }
+
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
+    flex: 0 1 auto;
+    width: fit-content;
+    max-width: min(82%, 640px) !important;
+  }
+
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content) {
+    width: auto;
+    max-width: 100% !important;
+  }
+
+  .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper) {
+    padding-left: 14px;
+    padding-right: 12px;
+  }
+
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
+    padding-left: 12px;
+    padding-right: 14px;
+  }
+
+  .messages-container :deep(.elx-bubble--start .elx-bubble__content),
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content) {
+    border: none !important;
+    background: transparent !important;
   }
 
   .messages-container :deep(.markdown-body),
@@ -2091,10 +2130,6 @@ onBeforeUnmount(() => {
     padding: 8px 8px;
   }
 
-  .messages-container :deep(.elx-bubble__avatar) {
-    display: none !important;
-  }
-
   .role-header {
     gap: 6px;
     margin-bottom: 5px;
@@ -2111,7 +2146,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 560px) {
   .messages-container {
-    padding: 4px 0;
+    padding: 4px 8px;
   }
 
   .messages-container :deep(.elx-bubble-list__content) {
@@ -2124,23 +2159,27 @@ onBeforeUnmount(() => {
 
   .messages-container :deep(.elx-bubble--start),
   .messages-container :deep(.elx-bubble--end) {
+    width: 100% !important;
+    max-width: 100% !important;
     padding-inline: 0 !important;
     margin-inline: 0 !important;
   }
 
   .messages-container :deep(.elx-bubble__content) {
-    padding-left: 6px !important;
-    padding-right: 6px !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
   }
 
   .messages-container :deep(.elx-bubble) {
     gap: 0 !important;
   }
 
+  .messages-container :deep(.elx-bubble--start .elx-bubble__avatar) {
+    display: none !important;
+  }
+
   .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper),
   .messages-container :deep(.elx-bubble--start .elx-bubble__content),
-  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper),
-  .messages-container :deep(.elx-bubble--end .elx-bubble__content),
   .messages-container :deep(.elx-bubble__content),
   .messages-container :deep(.markdown-body),
   .messages-container :deep(.tool-call-card) {
@@ -2148,6 +2187,31 @@ onBeforeUnmount(() => {
     max-width: 100% !important;
     margin-left: 0 !important;
     margin-right: 0 !important;
+  }
+
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
+    flex: 0 1 auto;
+    width: fit-content;
+    max-width: 88% !important;
+  }
+
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content) {
+    width: auto;
+    max-width: 100% !important;
+  }
+
+  .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper) {
+    padding: 0;
+  }
+
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
+    padding: 0;
+  }
+
+  .messages-container :deep(.elx-bubble--start .elx-bubble__content),
+  .messages-container :deep(.elx-bubble--end .elx-bubble__content) {
+    border: none !important;
+    background: transparent !important;
   }
 
   .messages-container :deep(.markdown-code-block),
