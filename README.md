@@ -48,6 +48,8 @@
 | Context Management | 内置 SummarizationMiddleware，长对话自动压缩摘要，避免上下文溢出 |
 | Streaming & Diff | 命令执行实时流式输出、文件编辑 diff 预览、写入预览，过程全程可视 |
 
+### 完整功能清单请阅读 [FEATURES.md](https://github.com/ydf0509/lc-agent/blob/main/FEATURES.md)
+
 ## 截图
 
 说明：产品界面与实际有差异，实际界面更加美观，功能更加强大，截图时间太早了，后来持续增加了功能，以实际运行界面为准。
@@ -410,7 +412,8 @@ launch_desktop(host='127.0.0.1', port=8001, title="心有灵犀") # host port ti
 答：完全可以，而且编程效果和体验都很好。
 
 方案A:
-可以，你可以搭配serena mcp全套来编程。但是这个因为是第三方mcp，对于edit文件 和 执行命令，lc-agent的前端界面没有精细化适配，例如文件变更diff、执行命令的流式打字机效果等，对serena没支持。
+可以，你可以搭配serena mcp全套来编程。但是这个因为是第三方mcp，对于edit文件 和 执行命令，lc-agent的前端界面没有精细化适配，例如文件变更diff、执行命令的流式打字机效果等，对serena没支持。不推荐用serena mcp全套工具。
+方案A不好，和lc-agent的前端ui没有深度融合。
 
 方案B：
 开启lc-agent 内置赠送的工具组， 用户开启`file_read` `file_write` `command` 三个工具组，大约20个工具，足以编程了。另外你还可以搭配 nbrag 或者codegraph mcp，使代码语义和符号检索更强大。

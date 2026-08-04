@@ -1,6 +1,8 @@
 # tests/test_tools.py
 import pytest
 
+import lc_agent.tools.system_tools.file_read_tools as file_read_tools
+
 from lc_agent.tools.registry import ToolRegistry, tool
 
 
@@ -100,3 +102,46 @@ class TestToolDecorator:
         groups = registry.get_group_names()
         assert "alpha" in groups
         assert "beta" in groups
+
+
+class TestListDirectory:
+    def test_depth_one_lists_only_direct_children(self, tmp_path, monkeypatch):
+        (tmp_path / "root.txt").write_text("root")
+        child = tmp_path / "child"
+        child.mkdir()
+        (child / "nested.txt").write_text("nested")
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+
+        result = file_read_tools.list_directory("ignored", depth=1)
+
+        assert "[FILE] root.txt" in result
+        assert "[DIR] child/" in result
+        assert "nested.txt" not in result
+
+    def test_depth_two_lists_nested_children(self, tmp_path, monkeypatch):
+        child = tmp_path / "child"
+        child.mkdir()
+        (child / "nested.txt").write_text("nested")
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+
+        result = file_read_tools.list_directory("ignored", depth=2)
+
+        assert "  [FILE] nested.txt" in result
+
+    def test_rejects_depth_below_one(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+
+        assert file_read_tools.list_directory("ignored", depth=0) == "Error: depth must be at least 1"
+
+    def test_truncation_uses_global_limit_and_guidance(self, tmp_path, monkeypatch):
+        for index in range(3):
+            (tmp_path / f"file-{index}.txt").write_text("")
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+        monkeypatch.setattr(file_read_tools, "_MAX_DIRECTORY_ITEMS", 2)
+
+        result = file_read_tools.list_directory("ignored", depth=1)
+
+        assert result.count("[FILE]") == 2
+        assert "showing the first 2 entries" in result
+        assert "Reduce depth" in result
+        assert "individual subdirectories" in result

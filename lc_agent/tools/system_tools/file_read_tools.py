@@ -14,6 +14,7 @@ _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
 _DEFAULT_LINE_LIMIT = 1000
 _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 _MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
+_MAX_DIRECTORY_ITEMS = 10_000
 
 
 @tool(group="file_read", group_description="文件读取")
@@ -133,9 +134,12 @@ def read_multiple_files(
 @tool(group="file_read", group_description="文件读取")
 def list_directory(
     path: Annotated[str, "Directory path to list"],
-    depth: Annotated[int, "Recursion depth (default 2; 0 = current level only)"] = 2,
+    depth: Annotated[int, "Maximum number of directory levels to list; minimum 1, default 2"] = 2,
 ) -> str:
-    """List directory contents recursively up to a specified depth; shows subdirectory structure with file sizes."""
+    """List directory contents up to the specified depth; depth=1 lists only direct children. Results are capped at 10,000 entries; if truncated, reduce depth and inspect subdirectories individually."""
+    if depth < 1:
+        return "Error: depth must be at least 1"
+
     resolved = validate_read_path(path)
     dir_path = Path(resolved)
 
@@ -145,7 +149,12 @@ def list_directory(
         return f"Error: '{path}' is not a directory"
 
     lines: list[str] = []
-    _walk_dir(dir_path, lines, depth, current_depth=0, max_items=200)
+    truncated = _walk_dir(dir_path, lines, depth, current_depth=1)
+    if truncated:
+        lines.append(f"... [truncated: showing the first {_MAX_DIRECTORY_ITEMS} entries]")
+        lines.append(
+            "The directory listing is incomplete. Reduce depth and call list_directory on individual subdirectories to inspect their contents."
+        )
     return "\n".join(lines)
 
 
@@ -153,30 +162,32 @@ _ALWAYS_IGNORE = frozenset({".git"})
 
 
 def _walk_dir(
-    dir_path: Path, lines: list[str], max_depth: int, current_depth: int, max_items: int
-) -> None:
-    indent = "  " * current_depth
+    dir_path: Path, lines: list[str], max_depth: int, current_depth: int
+) -> bool:
     try:
         entries = sorted(dir_path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
     except PermissionError:
-        lines.append(f"{indent}[Permission denied]")
-        return
+        lines.append(f"{'  ' * (current_depth - 1)}[Permission denied]")
+        return False
 
     for entry in entries:
-        if len(lines) >= max_items:
-            lines.append(f"{indent}... [truncated, {max_items} items limit reached]")
-            return
-
         if entry.name in _ALWAYS_IGNORE:
             continue
+        if len(lines) >= _MAX_DIRECTORY_ITEMS:
+            return True
 
+        indent = "  " * (current_depth - 1)
         if entry.is_dir():
             lines.append(f"{indent}[DIR] {entry.name}/")
-            if current_depth < max_depth:
-                _walk_dir(entry, lines, max_depth, current_depth + 1, max_items)
+            if current_depth < max_depth and _walk_dir(
+                entry, lines, max_depth, current_depth + 1
+            ):
+                return True
         else:
             size = entry.stat().st_size
             lines.append(f"{indent}[FILE] {entry.name} ({_format_size(size)})")
+
+    return False
 
 
 def _format_size(size: int) -> str:

@@ -8,6 +8,19 @@ from pydantic import ValidationError
 
 from lc_agent.config.loader import load_config_from_file, substitute_env_vars
 from lc_agent.config.schema import AppConfig
+from lc_agent.tools.system_tools._config import (
+    set_active_project,
+    validate_path_access,
+    validate_read_path,
+    validate_write_path,
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset_active_project():
+    """Ensure ContextVar is cleared after each test to prevent state leakage."""
+    yield
+    set_active_project(None)
 
 
 class TestSubstituteEnvVars:
@@ -138,9 +151,87 @@ class TestAppConfig:
         assert config.agent["default_model"] == "m1"
 
     def test_mcp_server_url_defaults_to_http(self):
-        config = AppConfig(mcp_servers={"remote": {"url": "http://localhost:3000/mcp"}})
-        assert config.mcp_servers["remote"].type == "http"
+        config = AppConfig(mcpServers={"remote": {"url": "http://localhost:3000/mcp"}})
+        assert config.mcpServers["remote"].type == "http"
 
     def test_rejects_missing_agent_section(self):
         with pytest.raises(ValidationError):
             AppConfig(agent="not a dict")
+
+
+class TestValidatePathAccess:
+    def test_relative_path_resolves_to_active_project_root(self, tmp_path):
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        subdir = project_root / "src"
+        subdir.mkdir()
+
+        set_active_project(str(project_root))
+        resolved = validate_path_access("src", allowed_directories=[str(project_root)])
+
+        assert resolved == str(subdir)
+
+    def test_dot_path_resolves_to_active_project_root(self, tmp_path):
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        set_active_project(str(project_root))
+        resolved = validate_path_access(".", allowed_directories=[str(project_root)])
+
+        assert resolved == str(project_root)
+
+    def test_absolute_path_still_allowed(self, tmp_path):
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        other = tmp_path / "other"
+        other.mkdir()
+
+        set_active_project(str(project_root))
+        resolved = validate_path_access(str(other), allowed_directories=[str(tmp_path)])
+
+        assert resolved == str(other)
+
+    def test_no_active_project_falls_back_to_cwd_resolution(self, tmp_path):
+        target = tmp_path / "fallback"
+        target.mkdir()
+
+        set_active_project(None)
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            resolved = validate_path_access("fallback", allowed_directories=[str(tmp_path)])
+            assert resolved == str(target)
+        finally:
+            os.chdir(original_cwd)
+
+    def test_outside_allowed_directories_raises(self, tmp_path):
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+
+        set_active_project(str(project_root))
+        with pytest.raises(PermissionError):
+            validate_path_access(str(outside), allowed_directories=[str(project_root)])
+
+
+class TestValidateReadWritePath:
+    def test_validate_read_path_uses_active_project_root(self, tmp_path):
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        file_path = project_root / "readme.txt"
+        file_path.write_text("hello")
+
+        set_active_project(str(project_root))
+        resolved = validate_read_path("readme.txt")
+
+        assert resolved == str(file_path)
+
+    def test_validate_write_path_uses_active_project_root(self, tmp_path):
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        set_active_project(str(project_root))
+        resolved = validate_write_path("new_file.py")
+
+        assert resolved == str(project_root / "new_file.py")
