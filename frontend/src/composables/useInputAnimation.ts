@@ -16,7 +16,7 @@ export const INPUT_ANIMATION_OPTIONS: InputAnimationOption[] = [
 ]
 
 const STORAGE_KEY = 'lc-agent:input-animation'
-const DEFAULT_ANIMATION: InputAnimationType = 'marquee'
+const DEFAULT_ANIMATION: InputAnimationType = 'rainbow-gradient'
 const validAnimationIds = new Set<InputAnimationType>(INPUT_ANIMATION_OPTIONS.map(option => option.id))
 const inputAnimation = ref<InputAnimationType>(loadInitialAnimation())
 
