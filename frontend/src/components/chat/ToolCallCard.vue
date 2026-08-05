@@ -51,7 +51,7 @@
       </div>
     </div>
     <div v-else-if="toolCall.fileDiff" class="tool-result diff-result">
-      <div class="diff-header">{{ toolCall.fileDiff.file }}</div>
+      <div class="diff-header clickable-path" @click.stop="openFileModal(toolCall.fileDiff!.file)" title="点击查看完整文件">{{ toolCall.fileDiff.file }}</div>
       <div class="diff-body" :class="{ collapsed: diffCollapsed && diffTotalLines > 30 }">
         <div v-for="(line, i) in diffLines" :key="i" class="diff-line" :class="line.type">
           <span class="diff-linenum">{{ line.num }}</span>
@@ -64,17 +64,17 @@
       </button>
     </div>
     <div v-else-if="toolCall.filePreview && !toolCall.fileDiff" class="tool-result diff-result">
-      <div class="diff-header">{{ toolCall.filePreview.file }} ({{ toolCall.filePreview.mode === 'append' ? '追加' : '写入' }})</div>
+      <div class="diff-header clickable-path" @click.stop="openFileModal(toolCall.filePreview!.file)" title="点击查看完整文件">{{ toolCall.filePreview.file }} ({{ toolCall.filePreview.mode === 'append' ? '追加' : '写入' }})</div>
       <div class="diff-body" :class="{ collapsed: diffCollapsed && toolCall.filePreview.total_lines > 30 }">
-        <div v-for="(line, i) in previewLines" :key="i" class="diff-line added">
+        <div v-for="(line, i) in displayPreviewLines" :key="i" class="diff-line added">
           <span class="diff-linenum">{{ (toolCall.filePreview.start_line || 1) + i }}</span>
           <span class="diff-prefix">+</span>
           <span class="diff-content">{{ line }}</span>
         </div>
-        <div v-if="toolCall.filePreview.total_lines > previewLines.length" class="diff-line context">
+        <div v-if="hasMorePreviewLines && !previewExpanded" class="diff-line context clickable-more" @click.stop="expandPreview">
           <span class="diff-linenum"></span>
           <span class="diff-prefix"></span>
-          <span class="diff-content">... {{ toolCall.filePreview.total_lines - previewLines.length }} more lines</span>
+          <span class="diff-content">{{ previewLoading ? '加载中...' : `... ${toolCall.filePreview.total_lines - previewLines.length} more lines (点击展开)` }}</span>
         </div>
       </div>
     </div>
@@ -116,6 +116,15 @@
         </div>
       </div>
     </teleport>
+
+    <CodeBlockModal
+      :visible="showFileModal"
+      :code="fileModalCode"
+      :language="fileModalLang"
+      :title="fileModalPath"
+      kicker="文件内容"
+      @close="showFileModal = false"
+    />
   </div>
 </template>
 
@@ -125,6 +134,17 @@ import { Loading, Check, Tools, CircleCloseFilled } from '@element-plus/icons-vu
 import { AnsiUp } from 'ansi_up'
 import type { ToolCall, FileDiffData, FilePreviewData } from '@/stores/chat'
 import { fetchApi } from '@/api/http'
+import CodeBlockModal from './CodeBlockModal.vue'
+
+const EXT_LANG_MAP: Record<string, string> = {
+  py: 'python', ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+  vue: 'xml', yml: 'yaml', md: 'markdown', sh: 'bash', zsh: 'bash', ps1: 'powershell',
+  rs: 'rust', rb: 'ruby', kt: 'kotlin', cs: 'csharp', h: 'c', hpp: 'cpp', cc: 'cpp',
+}
+function langFromPath(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  return EXT_LANG_MAP[ext] || ext
+}
 
 // lazy-load js-tiktoken only when the first tool result arrives
 let _encPromise: Promise<{ encode: (text: string) => ArrayLike<number> }> | null = null
@@ -181,6 +201,67 @@ const diffTotalLines = computed(() => diffLines.value.length)
 const previewLines = computed<string[]>(() => {
   return props.toolCall.filePreview?.preview_lines || []
 })
+
+const previewExpanded = ref(false)
+const previewExpandedLines = ref<string[]>([])
+const previewLoading = ref(false)
+
+const hasMorePreviewLines = computed(() => {
+  const fp = props.toolCall.filePreview
+  return fp && fp.total_lines > previewLines.value.length
+})
+
+const displayPreviewLines = computed(() => {
+  return previewExpanded.value ? previewExpandedLines.value : previewLines.value
+})
+
+async function expandPreview() {
+  const fp = props.toolCall.filePreview
+  if (!fp || previewLoading.value) return
+  previewLoading.value = true
+  try {
+    const data = await fetchApi<{ lines: string[]; error?: string }>(`/tools/file/read?path=${encodeURIComponent(fp.file)}&max_lines=500`)
+    if (data.error) {
+      console.warn('Failed to expand preview:', data.error)
+      return
+    }
+    previewExpandedLines.value = data.lines
+    previewExpanded.value = true
+  } catch (e) {
+    console.error('Failed to expand preview:', e)
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+const showFileModal = ref(false)
+const fileModalCode = ref('')
+const fileModalLang = ref('')
+const fileModalPath = ref('')
+
+async function openFileModal(filePath: string) {
+  try {
+    const data = await fetchApi<{ lines: string[]; truncated?: boolean; error?: string }>(
+      `/tools/file/read?path=${encodeURIComponent(filePath)}&max_lines=2000`,
+    )
+    fileModalPath.value = filePath
+    fileModalLang.value = langFromPath(filePath)
+    if (data.error) {
+      fileModalCode.value = `Error: ${data.error}`
+      fileModalLang.value = 'text'
+    } else {
+      let code = data.lines.join('\n')
+      if (data.truncated) code += '\n\n// … 文件过大，仅显示前 2000 行'
+      fileModalCode.value = code
+    }
+    showFileModal.value = true
+  } catch (e) {
+    fileModalPath.value = filePath
+    fileModalCode.value = `Failed to load file: ${e}`
+    fileModalLang.value = 'text'
+    showFileModal.value = true
+  }
+}
 
 function toggleCollapse() {
   userToggled.value = true
@@ -728,6 +809,26 @@ function formatTokenCount(count: number): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.diff-header.clickable-path {
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.diff-header.clickable-path:hover {
+  color: #58a6ff;
+  text-decoration: underline;
+}
+
+.clickable-more {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.clickable-more:hover {
+  background: rgba(88, 166, 255, 0.08);
+}
+.clickable-more .diff-content {
+  color: #58a6ff;
 }
 
 .diff-body {

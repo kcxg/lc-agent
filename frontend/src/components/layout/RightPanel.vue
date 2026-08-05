@@ -388,7 +388,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useToolsStore } from '@/stores/tools'
 import { api, fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
@@ -435,6 +435,16 @@ const { inputAnimation, currentOption: currentAnimationOption, setInputAnimation
 const summEnabled = ref(true)
 const summModel = ref('')
 
+let bgRefreshTimer: ReturnType<typeof setTimeout> | null = null
+
+function onBgProcessChanged() {
+  if (bgRefreshTimer) clearTimeout(bgRefreshTimer)
+  bgRefreshTimer = setTimeout(() => {
+    bgRefreshTimer = null
+    fetchProcesses()
+  }, 500)
+}
+
 onMounted(async () => {
   try {
     const conf = await api.getSummarization()
@@ -442,6 +452,15 @@ onMounted(async () => {
     summModel.value = conf.default_model || ''
   } catch { /* ignore */ }
   fetchProcesses()
+  window.addEventListener('bg-process-changed', onBgProcessChanged)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('bg-process-changed', onBgProcessChanged)
+  if (bgRefreshTimer) {
+    clearTimeout(bgRefreshTimer)
+    bgRefreshTimer = null
+  }
 })
 
 interface TrackedProcess {

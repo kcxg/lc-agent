@@ -161,6 +161,54 @@ def get_process_output(
     }
 
 
+_FILE_READ_MAX_SIZE = 10 * 1024 * 1024  # 10 MB
+_FILE_READ_MAX_LINES = 2000
+
+
+@router.get("/tools/file/read")
+def read_file_content(
+    path: str,
+    max_lines: int = 500,
+    user: User = Depends(get_current_user),
+):
+    """Read a file's content for frontend preview. Returns up to max_lines lines."""
+    from pathlib import Path as _Path
+    from lc_agent.tools.system_tools._config import validate_read_path
+
+    try:
+        resolved = validate_read_path(path)
+    except PermissionError as e:
+        return {"error": str(e)}
+
+    file_path = _Path(resolved)
+    if not file_path.exists():
+        return {"error": f"File not found: {path}"}
+    if not file_path.is_file():
+        return {"error": f"Not a file: {path}"}
+
+    try:
+        size = file_path.stat().st_size
+    except OSError:
+        return {"error": "Cannot stat file"}
+    if size > _FILE_READ_MAX_SIZE:
+        return {"error": f"File too large ({size} bytes, max {_FILE_READ_MAX_SIZE})"}
+
+    max_lines = min(max_lines, _FILE_READ_MAX_LINES)
+
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return {"error": str(e)}
+
+    lines = text.split("\n")
+    return {
+        "file": str(file_path),
+        "lines": lines[:max_lines],
+        "total_lines": len(lines),
+        "truncated": len(lines) > max_lines,
+    }
+
+
 @router.get("/tools/processes")
 def list_tracked_processes(
     user: User = Depends(get_current_user),

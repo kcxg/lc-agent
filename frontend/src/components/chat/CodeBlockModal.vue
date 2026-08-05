@@ -4,8 +4,8 @@
       <div class="code-modal" role="dialog" aria-modal="true" @click.stop>
         <div class="code-modal-header">
           <div class="code-modal-title-wrap">
-            <span class="code-modal-kicker">源码</span>
-            <span class="code-modal-title">{{ language }}</span>
+            <span class="code-modal-kicker">{{ kicker || '源码' }}</span>
+            <span class="code-modal-title">{{ title || language }}</span>
           </div>
           <div class="code-modal-actions">
             <button class="code-modal-action-btn" @click="copyCode">{{ copyLabel }}</button>
@@ -43,6 +43,8 @@ const props = defineProps<{
   visible: boolean
   code: string
   language: string
+  title?: string
+  kicker?: string
 }>()
 
 defineEmits<{ close: [] }>()
@@ -234,7 +236,9 @@ watch(activeMatchIndex, () => {
   font-size: 13px;
   font-weight: 600;
   color: var(--el-color-primary);
-  text-transform: lowercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .code-modal-actions {

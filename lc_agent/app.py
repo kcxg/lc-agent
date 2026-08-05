@@ -75,7 +75,10 @@ class LcAgentApp:
         permissions_path = config.get("permissions", {}).get("path", "./permissions.jsonc")
         self._permissions_service = PermissionsService(permissions_path=Path(permissions_path))
         self.engine = AgentEngine(config)
-        skills_dirs = config.get("skills", ["./skills"])
+        skills_dirs = list(config.get("skills", ["./skills"]))
+        contrib_dir = Path(__file__).parent / "skills" / "contrib_skills"
+        if contrib_dir.is_dir():
+            skills_dirs.insert(0, str(contrib_dir))
         existing_dirs = [d for d in skills_dirs if Path(d).is_dir()]
         if existing_dirs:
             inner_loaders = [DirectorySkillLoader(d) for d in existing_dirs]

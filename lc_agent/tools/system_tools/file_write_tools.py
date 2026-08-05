@@ -183,6 +183,31 @@ def move_file(
 
 
 @tool(group="file_write", group_description="文件写入")
+def delete_file(
+    path: Annotated[str, "Path to the file to delete"],
+) -> str:
+    """Delete a single file. You must be very careful — this is a dangerous operation."""
+    try:
+        resolved = validate_write_path(path)
+    except PermissionError as e:
+        return f"Error: {e}"
+
+    file_path = Path(resolved)
+
+    if not file_path.exists():
+        return f"Error: File not found: {path}"
+    if file_path.is_dir():
+        return f"Error: '{path}' is a directory, not a file"
+
+    try:
+        file_path.unlink()
+    except Exception as e:
+        return f"Error deleting file: {e}"
+
+    return f"Deleted: {resolved}"
+
+
+@tool(group="file_write", group_description="文件写入")
 def edit_block(
     file_path: Annotated[str, "Path to the file to edit"],
     old_string: Annotated[str, "Exact text to replace; must match the file content character-for-character including whitespace"],

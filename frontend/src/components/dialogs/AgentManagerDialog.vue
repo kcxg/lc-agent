@@ -571,6 +571,18 @@
         <p style="margin-top: 8px; color: var(--el-text-color-secondary); font-size: 12px;">
           git 状态是会话开始时的快照，如需刷新可让 Agent 执行 <code>run_command</code> 更新。
         </p>
+        <div style="margin-top: 12px; padding: 10px 12px; background: var(--el-fill-color-light); border-radius: 8px; border-left: 3px solid var(--el-color-primary); font-size: 13px; line-height: 1.6;">
+          <strong>💡 编程项目强烈推荐</strong>：配置
+          <a href="https://github.com/colbymchenry/codegraph" target="_blank" rel="noopener noreferrer" style="color: var(--el-color-primary);">codegraph</a>
+          MCP，让 Agent 获得代码智能分析能力（AST 级符号索引、调用链追踪、影响范围分析），大幅提升编码效率。
+          <br/>① 在项目根目录运行 <code>codegraph init</code> 完成索引
+          <br/>② 在 <code>config.jsonc</code> 的 <code>mcpServers</code> 中添加：
+          <pre style="margin: 6px 0 0; padding: 8px 10px; background: var(--el-bg-color); border-radius: 6px; font-size: 12px; line-height: 1.5; overflow-x: auto;">"codegraph": {
+  "type": "stdio",
+  "command": "codegraph",
+  "args": ["serve", "--mcp"]
+}</pre>
+        </div>
       </div>
     </el-dialog>
   </el-dialog>

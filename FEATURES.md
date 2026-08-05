@@ -170,6 +170,7 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 - 精确字符串替换：替换时前端实时渲染 **diff 预览**
 - 整文件覆写时展示**内容预览**
 - 移动 / 重命名文件或目录
+- 删除单个文件（受 `allowed_directories` + 扩展名黑名单约束；目录删除走 `command` 组）
 
 #### 命令执行（`command` 组）
 - 一次性执行 shell 命令（Windows 默认 PowerShell，Linux/macOS 用 `$SHELL`）

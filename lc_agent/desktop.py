@@ -147,6 +147,38 @@ def _apply_window_icon(title: str):
         desktop_logger.exception("Failed to set window icon")
 
 
+def _build_home_button_js(home_url: str) -> str:
+    """Build JS snippet that injects a floating 'Home' button on non-app pages."""
+    import json
+    safe_url = json.dumps(home_url)
+    return f"""
+(function() {{
+    if (document.getElementById('lc-home-btn')) return;
+    var homeUrl = {safe_url};
+    try {{
+        if (window.location.origin === new URL(homeUrl).origin) return;
+    }} catch(e) {{}}
+    if (!document.body) return;
+    var btn = document.createElement('button');
+    btn.id = 'lc-home-btn';
+    btn.innerHTML = '&#8962; 返回 lc-agent';
+    btn.style.cssText = [
+        'position:fixed', 'top:10px', 'left:10px', 'z-index:2147483647',
+        'padding:8px 16px', 'border:none', 'border-radius:8px',
+        'background:rgba(64,158,255,.92)', 'color:#fff',
+        'font-size:14px', 'font-weight:500', 'cursor:pointer',
+        'box-shadow:0 2px 12px rgba(0,0,0,.35)',
+        'backdrop-filter:blur(6px)',
+        'opacity:.9', 'transition:opacity .2s,transform .2s',
+    ].join(';');
+    btn.onmouseover = function() {{ btn.style.opacity='1'; btn.style.transform='scale(1.05)'; }};
+    btn.onmouseout  = function() {{ btn.style.opacity='.9'; btn.style.transform='scale(1)'; }};
+    btn.onclick = function() {{ window.location.href = homeUrl; }};
+    document.body.appendChild(btn);
+}})();
+"""
+
+
 def _webview_process(url: str, title: str):
     """Entry point for the webview subprocess."""
     try:
@@ -156,7 +188,7 @@ def _webview_process(url: str, title: str):
         return
 
     x, y, width, height = get_work_area()
-    webview.create_window(
+    window = webview.create_window(
         title=title,
         url=url,
         x=x,
@@ -166,6 +198,16 @@ def _webview_process(url: str, title: str):
         min_size=(800, 600),
         text_select=True,
     )
+
+    home_js = _build_home_button_js(url)
+
+    def on_loaded():
+        try:
+            window.evaluate_js(home_js)  # type: ignore[union-attr]
+        except Exception:
+            desktop_logger.debug("Failed to inject home button JS", exc_info=True)
+
+    window.events.loaded += on_loaded  # type: ignore[union-attr]
 
     def on_started():
         _apply_dark_titlebar(title)

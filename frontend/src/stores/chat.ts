@@ -771,6 +771,9 @@ export const useChatStore = defineStore('chat', () => {
           } else {
             delete tc.streamingOutput
           }
+          if (tc.name === 'command__start_background_process' || tc.name === 'command__kill_process') {
+            window.dispatchEvent(new Event('bg-process-changed'))
+          }
         }
       }
     })
