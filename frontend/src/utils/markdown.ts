@@ -53,8 +53,53 @@ const defaultLinkOpen =
   md.renderer.rules.link_open ||
   ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
 
+function getProjectMarkdownLinkPath(tokens: any[], idx: number, href: string): string | null {
+  const token = tokens[idx]
+  const explicitPath = href.split(/[?#]/, 1)[0]
+
+  if (
+    explicitPath
+    && !/^[a-z][a-z0-9+.-]*:/i.test(explicitPath)
+    && !explicitPath.startsWith('/')
+    && !explicitPath.startsWith('\\')
+    && /\.md(?:own)?$/i.test(explicitPath)
+  ) {
+    return explicitPath
+  }
+
+  if (token.markup !== 'linkify') return null
+
+  const label = tokens[idx + 1]?.content?.trim()
+  if (!label || !/\.md(?:own)?$/i.test(label)) return null
+
+  try {
+    const parsed = new URL(href)
+    if (
+      parsed.protocol === 'http:'
+      && parsed.pathname === '/'
+      && !parsed.search
+      && !parsed.hash
+      && parsed.hostname.toLowerCase() === label.toLowerCase()
+    ) {
+      return label
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
 md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   const href = tokens[idx].attrGet('href') || ''
+  const projectFilePath = getProjectMarkdownLinkPath(tokens, idx, href)
+
+  if (projectFilePath) {
+    tokens[idx].attrSet('href', '#')
+    tokens[idx].attrSet('data-lc-file-path', projectFilePath)
+    tokens[idx].attrSet('title', `在应用内预览 ${projectFilePath}`)
+    return defaultLinkOpen(tokens, idx, options, env, self)
+  }
 
   let isExternal = false
   if (/^https?:\/\//i.test(href) || href.startsWith('//')) {

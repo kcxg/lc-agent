@@ -29,7 +29,7 @@
                   @update:model-value="(v: string) => toolsStore.setLlmParam('reasoning_effort', v === 'default' ? null : v)"
                 >
                   <el-option
-                    v-for="effort in ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']"
+                    v-for="effort in ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']"
                     :key="effort"
                     :label="effort"
                     :value="effort"

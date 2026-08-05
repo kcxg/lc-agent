@@ -28,7 +28,8 @@
           </div>
         </div>
         <div class="code-modal-content">
-          <pre ref="preRef" class="code-modal-pre hljs"><code ref="codeRef" class="hljs" /></pre>
+          <pre v-if="!renderAsMarkdown" ref="preRef" class="code-modal-pre hljs"><code ref="contentRef" class="hljs" /></pre>
+          <div v-else ref="contentRef" class="code-modal-markdown markdown-body" />
         </div>
       </div>
     </div>
@@ -38,6 +39,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import hljs from 'highlight.js'
+import { renderMarkdown } from '@/utils/markdown'
 
 const props = defineProps<{
   visible: boolean
@@ -45,6 +47,7 @@ const props = defineProps<{
   language: string
   title?: string
   kicker?: string
+  renderAsMarkdown?: boolean
 }>()
 
 defineEmits<{ close: [] }>()
@@ -52,11 +55,13 @@ defineEmits<{ close: [] }>()
 const searchQuery = ref('')
 const activeMatchIndex = ref(0)
 const matchCount = ref(0)
-const codeRef = ref<HTMLElement | null>(null)
+const contentRef = ref<HTMLElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const copyLabel = ref('复制')
 
-const highlightedCode = computed(() => {
+const renderedContent = computed(() => {
+  if (props.renderAsMarkdown) return renderMarkdown(props.code)
+
   const lang = props.language.toLowerCase()
   if (lang && lang !== 'text' && hljs.getLanguage(lang)) {
     return hljs.highlight(props.code, { language: lang }).value
@@ -100,10 +105,10 @@ async function copyCode() {
 }
 
 function applyMarks() {
-  const codeEl = codeRef.value
-  if (!codeEl) return
+  const contentEl = contentRef.value
+  if (!contentEl) return
 
-  codeEl.innerHTML = highlightedCode.value
+  contentEl.innerHTML = renderedContent.value
 
   const query = searchQuery.value.trim()
   if (!query) {
@@ -112,7 +117,7 @@ function applyMarks() {
   }
 
   const regex = new RegExp(escapeRegExp(query), 'gi')
-  const walker = document.createTreeWalker(codeEl, NodeFilter.SHOW_TEXT)
+  const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT)
   const textNodes: Text[] = []
   let n: Node | null
   while ((n = walker.nextNode())) textNodes.push(n as Text)
@@ -139,15 +144,15 @@ function applyMarks() {
     tn.parentNode!.replaceChild(frag, tn)
   }
 
-  const allMarks = codeEl.querySelectorAll('mark.code-search-hit')
+  const allMarks = contentEl.querySelectorAll('mark.code-search-hit')
   matchCount.value = allMarks.length
   syncActive()
 }
 
 function syncActive() {
-  const codeEl = codeRef.value
-  if (!codeEl) return
-  const marks = codeEl.querySelectorAll('mark.code-search-hit')
+  const contentEl = contentRef.value
+  if (!contentEl) return
+  const marks = contentEl.querySelectorAll('mark.code-search-hit')
   marks.forEach((m, i) => m.classList.toggle('is-active', i === activeMatchIndex.value))
   const active = marks[activeMatchIndex.value]
   active?.scrollIntoView({ block: 'center', behavior: 'smooth' })
@@ -171,6 +176,12 @@ watch(() => props.visible, async (vis) => {
   await nextTick()
   applyMarks()
   searchInputRef.value?.focus()
+})
+
+watch([() => props.code, () => props.renderAsMarkdown], async () => {
+  if (!props.visible) return
+  await nextTick()
+  applyMarks()
 })
 
 watch(searchQuery, async () => {
@@ -368,14 +379,22 @@ watch(activeMatchIndex, () => {
   tab-size: 4;
 }
 
-.code-modal-pre :deep(.code-search-hit) {
+.code-modal-markdown {
+  min-height: 100%;
+  padding: 16px 20px;
+  color: var(--md-text, var(--el-text-color-primary));
+}
+
+.code-modal-pre :deep(.code-search-hit),
+.code-modal-markdown :deep(.code-search-hit) {
   background: rgba(250, 204, 21, 0.35);
   color: inherit;
   padding: 1px 0;
   border-radius: 2px;
 }
 
-.code-modal-pre :deep(.code-search-hit.is-active) {
+.code-modal-pre :deep(.code-search-hit.is-active),
+.code-modal-markdown :deep(.code-search-hit.is-active) {
   background: rgba(245, 158, 11, 0.78);
 }
 
@@ -440,6 +459,10 @@ watch(activeMatchIndex, () => {
     padding: 12px 10px;
     font-size: 12px;
     line-height: 1.6;
+  }
+
+  .code-modal-markdown {
+    padding: 12px 10px;
   }
 }
 </style>

@@ -42,6 +42,7 @@ expectIncludes('markdown.ts', files.markdown, 'markdown-code-toolbar')
 expectIncludes('markdown.ts', files.markdown, 'markdown-code-copy')
 expectIncludes('markdown.ts', files.markdown, 'data-code')
 expectIncludes('markdown.ts', files.markdown, 'language-')
+expectIncludes('markdown.ts', files.markdown, 'data-lc-file-path')
 
 expectIncludes('useMarkdownTheme.ts', files.markdownTheme, 'MARKDOWN_THEME_OPTIONS')
 expectIncludes('useMarkdownTheme.ts', files.markdownTheme, 'lc-agent:markdown-theme')
@@ -105,6 +106,7 @@ expectNotIncludes('RightPanel.vue', files.rightPanel, 'md-theme-card')
 
 expectIncludes('ChatView.vue', files.chatView, 'markdown-code-block')
 expectIncludes('ChatView.vue', files.chatView, 'markdown-code-copy')
+expectIncludes('ChatView.vue', files.chatView, 'openProjectMarkdownFile')
 
 if (failures.length > 0) {
   console.error('Markdown 主题契约测试失败:')

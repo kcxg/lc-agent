@@ -599,7 +599,7 @@ import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore, type AgentPreset, type AgentSubagentConfig } from '@/stores/agents'
 import { usePromptsStore } from '@/stores/prompts'
 
-const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()

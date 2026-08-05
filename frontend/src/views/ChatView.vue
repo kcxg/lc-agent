@@ -283,6 +283,16 @@
       @close="codeModalVisible = false"
     />
 
+    <CodeBlockModal
+      :visible="filePreviewVisible"
+      :code="filePreviewContent"
+      language="markdown"
+      :title="filePreviewPath"
+      kicker="文件预览"
+      render-as-markdown
+      @close="filePreviewVisible = false"
+    />
+
     <el-image-viewer
       v-if="imageViewerVisible"
       :url-list="[imageViewerUrl]"
@@ -305,6 +315,7 @@ import { BubbleList, Thinking, Welcome } from 'vue-element-plus-x'
 import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
 import { Cpu, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
@@ -396,6 +407,9 @@ const showLoadOlderMessages = ref(false)
 const codeModalVisible = ref(false)
 const codeModalSource = ref('')
 const codeModalLanguage = ref('')
+const filePreviewVisible = ref(false)
+const filePreviewContent = ref('')
+const filePreviewPath = ref('')
 const imageViewerVisible = ref(false)
 const imageViewerUrl = ref('')
 
@@ -1123,6 +1137,13 @@ async function handleLoadOlderMessages() {
 function handleMarkdownClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null
 
+  const fileLink = target?.closest?.('a[data-lc-file-path]') as HTMLAnchorElement | null
+  if (fileLink) {
+    event.preventDefault()
+    void openProjectMarkdownFile(fileLink.dataset.lcFilePath || '')
+    return
+  }
+
   const expandBtn = target?.closest?.('.markdown-code-expand') as HTMLButtonElement | null
   if (expandBtn) {
     event.preventDefault()
@@ -1147,6 +1168,60 @@ function handleMarkdownClick(event: MouseEvent) {
       button.textContent = '复制'
     }, 1400)
   })
+}
+
+function resolveProjectFilePath(relativePath: string): string | null {
+  const projectRoot = agentsStore.currentAgent?.project_mode
+    ? agentsStore.currentAgent.project_root?.trim()
+    : undefined
+  const normalizedPath = relativePath.replace(/\//g, '\\')
+
+  if (
+    !projectRoot
+    || !normalizedPath
+    || /^(?:[a-z]:)?\\/i.test(normalizedPath)
+    || normalizedPath.split('\\').some(part => part === '..')
+  ) {
+    return null
+  }
+
+  return `${projectRoot.replace(/[\\/]+$/, '')}\\${normalizedPath}`
+}
+
+function decodeProjectFilePath(relativePath: string): string {
+  try {
+    return decodeURIComponent(relativePath)
+  } catch {
+    return relativePath
+  }
+}
+
+async function openProjectMarkdownFile(relativePath: string) {
+  const decodedPath = decodeProjectFilePath(relativePath)
+  const filePath = resolveProjectFilePath(decodedPath)
+  if (!filePath) {
+    ElMessage.warning('当前 Agent 未配置项目目录，无法预览此文件')
+    return
+  }
+
+  try {
+    const data = await fetchApi<{ lines: string[]; truncated?: boolean; error?: string }>(
+      `/tools/file/read?path=${encodeURIComponent(filePath)}&max_lines=2000&agent_id=${encodeURIComponent(agentsStore.currentAgentId)}`,
+    )
+    if (data.error) {
+      ElMessage.error(`无法读取 ${decodedPath}: ${data.error}`)
+      return
+    }
+
+    filePreviewPath.value = decodedPath
+    filePreviewContent.value = data.lines.join('\n')
+    if (data.truncated) {
+      filePreviewContent.value += '\n\n> 文件过大，仅显示前 2000 行。'
+    }
+    filePreviewVisible.value = true
+  } catch (error) {
+    ElMessage.error(`无法读取 ${decodedPath}: ${String(error)}`)
+  }
 }
 
 function applyAlwaysScrollbar() {
