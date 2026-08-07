@@ -146,10 +146,14 @@ function buildMcpHtml(data: any, query: string): string {
 }
 
 function buildSkillHtml(data: any, query: string): string {
-  let html = ''
-  if (data.description) {
-    html += `<div class="detail-section-desc">${highlightText(data.description, query)}</div>`
+  let html = '<div class="detail-info-grid">'
+  if (data.path) {
+    html += `<div class="detail-info-row"><span class="detail-info-label">文件路径</span><span class="detail-mono">${highlightText(data.path, query)}</span></div>`
   }
+  if (data.description) {
+    html += `<div class="detail-info-row"><span class="detail-info-label">描述</span><span>${highlightText(data.description, query)}</span></div>`
+  }
+  html += '</div>'
   const body = data.body || data.content
   if (body) {
     const mdHtml = renderMarkdown(body)

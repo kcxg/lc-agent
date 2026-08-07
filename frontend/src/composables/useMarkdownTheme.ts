@@ -1,6 +1,6 @@
 import { computed, readonly, ref, watch } from 'vue'
 
-export type MarkdownThemeId = 'github' | 'notion' | 'aurora' | 'neon' | 'obsidian' | 'paper' | 'lime' | 'sky' | 'candy' | 'solar'
+export type MarkdownThemeId = 'mist-blue' | 'sage' | 'graphite' | 'warm-gray' | 'rosewood' | 'paper' | 'sepia' | 'slate' | 'ocean-ink' | 'night-ink'
 
 export interface MarkdownThemeOption {
   id: MarkdownThemeId
@@ -10,20 +10,20 @@ export interface MarkdownThemeOption {
 }
 
 export const MARKDOWN_THEME_OPTIONS: MarkdownThemeOption[] = [
-  { id: 'github', label: 'Arctic Blue', description: '冰蓝银白的冷调高级风', accent: '#38bdf8' },
-  { id: 'notion', label: 'Cyber Mint', description: '薄荷青绿的玻璃科技风', accent: '#2dd4bf' },
-  { id: 'aurora', label: 'Aurora Blast', description: '亮紫电蓝的极光炫彩风', accent: '#a855f7' },
-  { id: 'neon', label: 'Neon Future', description: '高亮霓虹科技演示风', accent: '#22d3ee' },
-  { id: 'obsidian', label: 'Sunset Chrome', description: '橙红玫瑰金的暖色金属风', accent: '#fb7185' },
-  { id: 'paper', label: 'Paper Luxe', description: '高级纸张阅读器风', accent: '#b7791f' },
-  { id: 'lime', label: 'Lime Surge', description: '电光青柠的能量科技风', accent: '#a3e635' },
-  { id: 'sky', label: 'Prism White', description: '银白棱镜的高亮彩光风', accent: '#c4b5fd' },
-  { id: 'candy', label: 'Lava Pulse', description: '黑红熔岩的高能冲击风', accent: '#ef4444' },
-  { id: 'solar', label: 'Solar Flare', description: '太阳耀斑的亮黄橙金风', accent: '#facc15' },
+  { id: 'mist-blue', label: 'Mist Blue', description: '低饱和雾蓝的清爽阅读', accent: '#6d8ca2' },
+  { id: 'sage', label: 'Sage', description: '柔和鼠尾草绿的长文阅读', accent: '#718a78' },
+  { id: 'graphite', label: 'Graphite', description: '中性石墨灰的通用默认', accent: '#687b89' },
+  { id: 'warm-gray', label: 'Warm Gray', description: '暖灰与浅褐的低刺激层次', accent: '#8c7e70' },
+  { id: 'rosewood', label: 'Rosewood', description: '低饱和玫瑰木与灰粉', accent: '#97727a' },
+  { id: 'paper', label: 'Paper', description: '自然纸张与柔和墨色', accent: '#9a876a' },
+  { id: 'sepia', label: 'Sepia', description: '克制棕褐的纸本阅读', accent: '#9a7757' },
+  { id: 'slate', label: 'Slate', description: '冷静石板蓝灰', accent: '#71849a' },
+  { id: 'ocean-ink', label: 'Ocean Ink', description: '深海墨蓝与青灰', accent: '#5f8893' },
+  { id: 'night-ink', label: 'Night Ink', description: '低亮度夜墨蓝灰', accent: '#6f8190' },
 ]
 
 const STORAGE_KEY = 'lc-agent:markdown-theme'
-const DEFAULT_THEME: MarkdownThemeId = 'aurora'
+const DEFAULT_THEME: MarkdownThemeId = 'graphite'
 const validThemeIds = new Set<MarkdownThemeId>(MARKDOWN_THEME_OPTIONS.map(option => option.id))
 const markdownTheme = ref<MarkdownThemeId>(loadInitialTheme())
 

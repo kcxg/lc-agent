@@ -1,10 +1,12 @@
 # lc_agent/core/engine.py
 import logging
+from collections.abc import Callable
 from typing import Annotated, Any, AsyncIterator, Literal
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langchain.agents.middleware.summarization import SummarizationMiddleware
+
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolCallId
 from langchain_core.tools import tool as lc_tool
@@ -13,6 +15,7 @@ from pydantic import Field as _PydanticField
 from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, _convert_text_file_blocks
 from lc_agent.core.engine_helpers.project_context import _build_project_context_text
 from lc_agent.skills.skill_middleware import _LcAgentSkillMiddleware
+from lc_agent.middlewares.patch_tool_calls import PatchToolCallsMiddleware
 from lc_agent.core.engine_helpers.subagent_helpers import SubAgentDescriptor, _extract_subagent_result
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
@@ -47,6 +50,9 @@ class AgentEngine:
         self._models: list[ModelInfo] = self._parse_models(config)
         self._presets: dict[str, AgentPreset] = {}
         self._custom_presets: dict[str, AgentPreset] = {}
+        self._code_agent_factories: dict[
+            str, Callable[[str, dict[str, Any] | None], Any]
+        ] = {}
         self._agent_mcp_gen: dict[str, int] = {}
         self._mcp_generation: int = 0
         self.recursion_limit: int = config.get("agent", {}).get("recursion_limit", 100)
@@ -66,6 +72,18 @@ class AgentEngine:
 
     def _should_use_memory_context(self, preset_id: str) -> bool:
         return self._store is not None and self._memory_enabled() and not self._is_code_agent(preset_id)
+
+    def register_code_agent_factory(
+        self,
+        name: str,
+        factory: Callable[[str, dict[str, Any] | None], Any],
+    ) -> None:
+        """Register a lazy factory for a code-defined graph.
+
+        Factories are used when a graph must be built from runtime resources such as
+        connected MCP tool schemas or the application's checkpointer.
+        """
+        self._code_agent_factories[name] = factory
 
     def _parse_models(self, config: dict) -> list[ModelInfo]:
         """Extract ModelInfo list from config."""
@@ -378,6 +396,10 @@ class AgentEngine:
         llm = self._create_llm(model_info, preset.default_model, llm_params=effective_params or None)
 
         middleware = []
+        # Patch dangling tool calls (e.g. after a manual stop leaves an AIMessage
+        # with tool_calls but no following ToolMessage) so the next model call
+        # doesn't 400 on "tool_calls must be followed by tool messages".
+        middleware.append(PatchToolCallsMiddleware())
         if _depth > 0:
             middleware.append(SystemPromptMiddleware(
                 SUBAGENT_DELEGATION_PROMPT, "SubagentDelegationMiddleware", prepend=True
@@ -712,6 +734,28 @@ class AgentEngine:
         """Get cached agent or build a new one. Rebuilds preset agents if MCP state changed."""
         preset = self._resolve_preset(preset_id)
         if preset.source == "code" or preset_id in self._custom_presets:
+            factory = self._code_agent_factories.get(preset_id)
+            if factory is not None:
+                selected_model_id = (
+                    model_id
+                    if model_id and self._find_model(model_id)
+                    else self.config.get("agent", {}).get("default_model", "")
+                )
+                cache_key = self._get_agent_cache_key(
+                    preset_id,
+                    selected_model_id,
+                    llm_params=llm_params,
+                    _depth=_depth,
+                )
+                mcp_gen = getattr(self, "_mcp_generation", 0)
+                cached = self._agents.get(cache_key)
+                cached_gen = self._agent_mcp_gen.get(cache_key, -1)
+                if cached is None or cached_gen != mcp_gen:
+                    cached = factory(selected_model_id, llm_params)
+                    self._agents[cache_key] = cached
+                    self._agent_mcp_gen[cache_key] = mcp_gen
+                return cached
+
             agent = self._agents.get(preset_id)
             if agent is None:
                 raise ValueError(f"Code agent '{preset_id}' is registered without a graph")

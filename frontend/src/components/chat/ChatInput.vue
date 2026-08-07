@@ -80,18 +80,20 @@
           accept="image/*,.txt,.md,.markdown,.json,.yaml,.yml,.csv,.log,.xml,.html,.htm,.js,.ts,.jsx,.tsx,.py,.go,.rs,.java,.c,.cpp,.h,.hpp,.sh,.sql,.css,.scss,.less,.vue,.toml,.ini,.conf"
           @change="handleFileInputChange"
         />
-        <button
-          v-if="isStreamingState"
-          type="button"
-          class="input-action-btn stop-btn animated-stop-btn"
-          aria-label="停止生成"
-          title="停止生成"
-          @click="handleStop"
-        >
-          <span class="stop-spinner" aria-hidden="true">
-            <span class="stop-square" />
-          </span>
-        </button>
+        <template v-if="isStreamingState">
+          <button
+            type="button"
+            class="input-action-btn stop-btn animated-stop-btn"
+            aria-label="停止生成"
+            title="停止生成"
+            @click="handleStop"
+          >
+            <span class="stop-spinner" aria-hidden="true">
+              <span class="stop-square" />
+            </span>
+          </button>
+          <span class="stop-timer" aria-live="polite">{{ formatElapsed(elapsedSeconds) }}</span>
+        </template>
         <button
           v-else-if="messageText || attachments.length > 0"
           type="button"
@@ -115,7 +117,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
@@ -151,6 +153,44 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const messageText = ref('')
 const attachments = ref<Attachment[]>([])
 const isStreamingState = computed(() => props.isStreaming ?? isStreaming.value)
+const elapsedSeconds = ref(0)
+let elapsedTimer: number | null = null
+
+function formatElapsed(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60)
+    .toString()
+    .padStart(2, '0')
+  const s = (totalSeconds % 60).toString().padStart(2, '0')
+  return `${m}:${s}`
+}
+
+watch(
+  isStreamingState,
+  (streaming) => {
+    if (streaming) {
+      elapsedSeconds.value = 0
+      const start = chatStore.streamStartTime ?? Date.now()
+      elapsedSeconds.value = Math.floor((Date.now() - start) / 1000)
+      elapsedTimer = window.setInterval(() => {
+        const startTime = chatStore.streamStartTime ?? start
+        elapsedSeconds.value = Math.floor((Date.now() - startTime) / 1000)
+      }, 1000)
+    } else {
+      if (elapsedTimer !== null) {
+        clearInterval(elapsedTimer)
+        elapsedTimer = null
+      }
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  if (elapsedTimer !== null) {
+    clearInterval(elapsedTimer)
+    elapsedTimer = null
+  }
+})
 const marqueeColors = [
   '#ff2d95', '#9b5cff', '#2da8ff', '#18e6c3', '#ffe14d', '#ff7a2d',
   '#ff2d95', '#9b5cff', '#2da8ff', '#18e6c3', '#ffe14d', '#ff7a2d',
@@ -514,6 +554,17 @@ function handleCancelEdit() {
   border-radius: 1px;
   background: var(--el-color-danger);
   display: block;
+}
+
+.stop-timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-danger);
+  line-height: 1;
+  user-select: none;
+  min-width: 36px;
+  text-align: center;
 }
 
 @keyframes stop-spin {

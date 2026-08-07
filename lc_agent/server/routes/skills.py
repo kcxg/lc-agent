@@ -21,6 +21,15 @@ def _get_loader(request: Request) -> FilteredSkillLoader | None:
     return getattr(request.app.state, "filtered_loader", None)
 
 
+def _resolve_skill_path(skill_name: str, search_dirs: list[str]) -> str | None:
+    """Find SKILL.md absolute path for a skill by scanning directories."""
+    for d in search_dirs:
+        candidate = Path(d).expanduser().resolve() / skill_name / "SKILL.md"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 @router.get("/skills")
 def list_skills(
     request: Request,
@@ -47,15 +56,16 @@ def list_skills(
         resolved_root = Path(project_root).expanduser().resolve()
         project_skills_dir = resolved_root / ".agents" / "skills"
         if project_skills_dir.is_dir():
+            # Keep loader state in sync so subsequent toggle_skill() recognizes project skills
+            loader.set_project_overlay(str(project_skills_dir))
             try:
-                from langchain_agentskills.loaders import DirectorySkillLoader
-                project_loader = DirectorySkillLoader(str(project_skills_dir))
-                project_skills = project_loader.list_skills()
+                project_skills = loader._project_skills()
                 project_skill_names = {s.name for s in project_skills}
                 result.extend(
                     {
                         "name": s.name,
                         "description": s.description,
+                        "path": _resolve_skill_path(s.name, [str(project_skills_dir)]),
                         "source": str(s.source) if s.source else None,
                         "metadata": s.metadata,
                         "enabled": s.name not in loader.disabled_skills,
@@ -69,10 +79,12 @@ def list_skills(
                 )
 
     # Always use list_global_skills() so runtime project overlay never pollutes the global scope
+    global_dirs = loader.global_skill_dirs
     result.extend(
         {
             "name": s.name,
             "description": s.description,
+            "path": _resolve_skill_path(s.name, global_dirs),
             "source": str(s.source) if s.source else None,
             "metadata": s.metadata,
             "enabled": s.name not in loader.disabled_skills,

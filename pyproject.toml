@@ -23,6 +23,7 @@ dependencies = [
     "pyyaml>=6.0",
     "langchain-agentskills>=0.4",
     "mcp>=1.0",
+  
 ]
 
 [project.optional-dependencies]

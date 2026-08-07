@@ -120,7 +120,7 @@
               <template v-for="(seg, segIdx) in item.segments" :key="segIdx">
                 <div
                   v-if="seg.type === 'text' && seg.text"
-                  class="markdown-body"
+                  class="markdown-body answer-markdown"
                   v-html="renderMarkdown(seg.text)"
                 />
                 <div
@@ -129,6 +129,7 @@
                   :class="[
                     { 'is-expanded': isThinkingExpanded(item, segIdx) },
                     { 'is-overflow': isThinkingOverflow(item, segIdx) },
+                    { 'is-thinking-active': item.isStreamingMessage && segIdx === item.segments.length - 1 },
                   ]"
                 >
                   <button
@@ -212,7 +213,7 @@
               <span v-else-if="item.role === 'user'" class="user-plain-text">{{ item.content }}</span>
               <div
                 v-else
-                class="markdown-body"
+                class="markdown-body answer-markdown"
                 v-html="renderMarkdown(stripThinkingMarkers(item.content || ''))"
               />
             </template>
@@ -1453,7 +1454,7 @@ onBeforeUnmount(() => {
 
 .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper) {
   position: relative;
-  padding: 10px 14px 10px 18px;
+  padding: 10px 16px;
   border-radius: 6px 16px 16px 16px;
   background: var(--el-bg-color-overlay);
   border: none;
@@ -1950,6 +1951,80 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
+/* Active thinking animation: golden neural pulse */
+.thinking-block.is-thinking-active {
+  border-color: rgba(234, 179, 8, 0.55);
+  border-left-color: #facc15;
+  box-shadow:
+    0 0 0 1px rgba(234, 179, 8, 0.25),
+    0 0 18px rgba(234, 179, 8, 0.18);
+  animation: thinking-glow 2.2s ease-in-out infinite;
+}
+
+.thinking-block.is-thinking-active::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto auto -42%;
+  width: 36%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #facc15, transparent);
+  box-shadow: 0 0 12px #facc15;
+  animation: thinking-energy-flow 1.2s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.thinking-block.is-thinking-active .thinking-summary,
+.thinking-block.is-thinking-active .thinking-body {
+  position: relative;
+  z-index: 1;
+}
+
+.thinking-block.is-thinking-active .thinking-summary :deep(.el-icon) {
+  animation: thinking-icon-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes thinking-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(234, 179, 8, 0.22),
+      0 0 10px rgba(234, 179, 8, 0.1);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(234, 179, 8, 0.45),
+      0 0 26px rgba(234, 179, 8, 0.28);
+  }
+}
+
+@keyframes thinking-energy-flow {
+  0% {
+    left: -42%;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    left: 106%;
+    opacity: 0;
+  }
+}
+
+@keyframes thinking-icon-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.75;
+  }
+}
+
 .thinking-unavailable {
   display: flex;
   gap: 9px;
@@ -2002,8 +2077,8 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
-/* blockquote styling */
-.messages-container :deep(.markdown-body blockquote) {
+/* Blockquote styling for system and thinking content. Final answers use markdown-theme.css. */
+.messages-container :deep(.markdown-body:not(.answer-markdown) blockquote) {
   position: relative;
   margin: 12px 0 !important;
   padding: 10px 14px 10px 32px !important;
@@ -2016,7 +2091,7 @@ onBeforeUnmount(() => {
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, var(--el-border-color-lighter));
   color: var(--el-text-color-regular) !important;
 }
-.messages-container :deep(.markdown-body blockquote)::before {
+.messages-container :deep(.markdown-body:not(.answer-markdown) blockquote)::before {
   content: '❝';
   position: absolute;
   left: 10px;
@@ -2028,10 +2103,10 @@ onBeforeUnmount(() => {
   opacity: 0.85;
   text-shadow: 0 0 8px color-mix(in srgb, var(--el-color-primary) 22%, transparent);
 }
-.messages-container :deep(.markdown-body blockquote > *:first-child) {
+.messages-container :deep(.markdown-body:not(.answer-markdown) blockquote > *:first-child) {
   margin-top: 0 !important;
 }
-.messages-container :deep(.markdown-body blockquote > *:last-child) {
+.messages-container :deep(.markdown-body:not(.answer-markdown) blockquote > *:last-child) {
   margin-bottom: 0 !important;
 }
 

@@ -98,6 +98,38 @@ export const api = {
   getAgentPrompts: (agentId: string) => fetchApi<string[]>(`/agents/${agentId}/prompts`),
   setAgentPrompts: (agentId: string, promptIds: string[]) =>
     fetchApi<string[]>(`/agents/${agentId}/prompts`, { method: 'PUT', body: JSON.stringify({ prompt_ids: promptIds }) }),
+
+  // 数据清理 / 瘦身（参见 docs/adr/adr-001-data-cleanup.md）
+  previewCleanup: (data: {
+    keep_days: number
+    skip_pinned?: boolean
+    skip_active?: boolean
+    active_session_ids?: string[]
+  }) =>
+    fetchApi<{
+      would_delete_sessions: number
+      would_delete_messages: number
+      would_delete_threads: number
+      affected_session_ids: string[]
+    }>('/admin/cleanup/preview', { method: 'POST', body: JSON.stringify(data) }),
+  cleanupData: (data: {
+    keep_days: number
+    skip_pinned?: boolean
+    skip_active?: boolean
+    active_session_ids?: string[]
+  }) =>
+    fetchApi<{
+      deleted_sessions: number
+      deleted_messages: number
+      deleted_threads: number
+      kept_sessions: number
+      errors: Array<{ session_id?: string; phase: string; error: string }>
+    }>('/admin/cleanup', { method: 'POST', body: JSON.stringify(data) }),
+  vacuumDatabases: () =>
+    fetchApi<{
+      data: { success: boolean; path: string; error: string | null }
+      checkpoints: { success: boolean; path: string; error: string | null }
+    }>('/admin/vacuum', { method: 'POST' }),
 }
 
 export async function fetchAvailableSubagents(): Promise<Array<{

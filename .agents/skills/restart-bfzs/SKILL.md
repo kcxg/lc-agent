@@ -21,9 +21,11 @@ description: >-
 ### 仅前端编译（不重启服务）
 
 ```powershell
-# working_directory: D:\codes\lc-agent\frontend
-npm run build
+# working_directory: D:\codes\lc-agent
+powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\restart-bfzs\scripts\build-frontend.ps1"
 ```
+
+脚本路径：`D:\codes\lc-agent\.agents\skills\restart-bfzs\scripts\build-frontend.ps1`
 
 ### 完整重启（前端编译 + 停旧服务 + 启新服务）
 

@@ -64,14 +64,20 @@ class FilteredSkillLoader(SkillLoader):
     take priority over global skills with the same name.
     """
 
-    def __init__(self, inner: SkillLoader) -> None:
+    def __init__(self, inner: SkillLoader, global_skill_dirs: list[str] | None = None) -> None:
         self._inner = inner
+        self._global_skill_dirs: list[str] = list(global_skill_dirs) if global_skill_dirs else []
         self._disabled: set[str] = set()
         self._project_loader: SkillLoader | None = None
 
     @property
     def disabled_skills(self) -> set[str]:
         return self._disabled
+
+    @property
+    def global_skill_dirs(self) -> list[str]:
+        """Directories scanned for global skills."""
+        return list(self._global_skill_dirs)
 
     def set_project_overlay(self, project_skills_dir: str | None) -> None:
         """Set or clear a project-level skills directory overlay."""

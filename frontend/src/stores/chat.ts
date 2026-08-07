@@ -609,6 +609,7 @@ export const useChatStore = defineStore('chat', () => {
     const msgs = messages.value
     return msgs[msgs.length - 1] ?? null
   })
+  const streamStartTime = computed(() => _active()?.streamStartTime ?? null)
 
   function _createClientForSession(state: SessionState, sessionId: string): ChatSseClient {
     const client = new ChatSseClient()
@@ -1240,6 +1241,7 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     isConnected,
     threadId,
+    streamStartTime,
     interrupt,
     lastMessage,
     todos,

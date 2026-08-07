@@ -296,6 +296,13 @@ lc-agent 里的 Agent 不只会答，还会**动手做**。区别落到四个字
 - **普通聊天网页**：只能聊
 - **lc-agent**：能聊，更能做——而且做的过程看得见、管得住、换得了
 
+### 即使是普通联网聊天，也吊打普通大模型官网联网聊天
+
+因为对于复杂问题，需要多轮换关键词联网，需要分解任务，需要多次打开多个详情页提取正文，普通大模型官网的联网搜索为了节约算力完全没达到这种效果。
+下面截图是lc-agent调用自己写的`baidu-search`联网搜索的skill，真实使用的截图，agent会分解步骤亲自搜索查看每一天央视新闻联播报道了什么，lcagent的提问效果吊打在deepseek官网直接问 "8月份央视新闻联报，每一天报道了什么"。
+![baidu_skill_search](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/baidu_skill_search.png)
+
+
 ## 项目关系
 
 | 项目 | 角色 |
@@ -414,6 +421,16 @@ launch_desktop(host='127.0.0.1', port=8001, title="心有灵犀") # host port ti
   }
 }
 ```
+
+除了配 MCP，框架还内置一个**零成本**的联网 skill：`baidu-search`（位于 `lc_agent/skills/contrib_skills/baidu-search`）。
+
+它走百度接口，**免费、无限次、无需 API key、无需启动任何 MCP 服务**，开箱即用。提供两个命令，Agent 通过 `run_skill_script` 执行 `baidu_search_cli.py` 调用：
+
+- `search`：按关键词联网检索，返回标题/链接/摘要/时间
+- `extract`：抓取指定网页并提取正文，可直接吃 `search` 返回的链接
+
+默认用 `curl_cffi` 模拟 Chrome 指纹绕反爬，稳定性远超requests。和上面的 MCP 路线相比，它胜在**零部署、零花费**，适合不想折腾 MCP 服务、又想立刻让 Agent 联网的场景；缺点是依赖百度接口，搜索稳定性那肯定不如 anysearch大公司做的商业产品，anysearch的稳定性几乎100%了， baidu-search 的稳定性95%左右。
+
 
 ### lc-agent 能不能作为aicoding 工具来使用？
 

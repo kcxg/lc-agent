@@ -609,13 +609,23 @@ function formatTokenCount(count: number): string {
 
 .tool-call-card.running::before {
   position: absolute;
-  inset: 0 auto auto -42%;
-  width: 36%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--el-color-primary), transparent);
-  box-shadow: 0 0 12px var(--el-color-primary);
+  left: -45%;
+  top: 0;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    color-mix(in srgb, var(--el-color-primary) 22%, transparent) 30%,
+    color-mix(in srgb, var(--el-color-primary) 55%, transparent) 50%,
+    color-mix(in srgb, var(--el-color-primary) 22%, transparent) 70%,
+    transparent 100%
+  );
   content: '';
-  animation: tool-energy-flow 1s linear infinite;
+  opacity: 0.65;
+  animation: tool-scan 1.7s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+  z-index: 0;
 }
 
 .tool-call-card.done {
@@ -751,8 +761,21 @@ function formatTokenCount(count: number): string {
   position: relative;
 }
 
-@keyframes tool-energy-flow {
-  to { transform: translateX(430%); }
+@keyframes tool-scan {
+  0% {
+    left: -45%;
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.65;
+  }
+  88% {
+    opacity: 0.65;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
 }
 
 @keyframes tool-complete-sweep {

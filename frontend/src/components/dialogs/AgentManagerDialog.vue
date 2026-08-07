@@ -412,9 +412,17 @@
                       </el-radio-group>
                       <div v-if="globalSkillsMode === 'custom'" v-loading="dialogSkillsLoading" class="custom-groups">
                         <el-checkbox-group v-model="selectedGlobalSkills">
-                          <el-checkbox v-for="skill in dialogGlobalSkills" :key="skill.name" :value="skill.name">
-                            {{ skill.name }}
-                            <span class="skill-hint">{{ skill.description }}</span>
+                          <el-checkbox
+                            v-for="skill in dialogGlobalSkills"
+                            :key="skill.name"
+                            :value="skill.name"
+                            class="skill-checkbox"
+                          >
+                            <div class="skill-item-main">
+                              <span class="skill-item-name">{{ skill.name }}</span>
+                              <span v-if="skill.path" class="skill-item-path" :title="skill.path">{{ skill.path }}</span>
+                            </div>
+                            <div v-if="skill.description" class="skill-item-desc">{{ skill.description }}</div>
                           </el-checkbox>
                           <div v-if="dialogGlobalSkills.length === 0" class="skill-empty-tip">暂无全局 Skills</div>
                         </el-checkbox-group>
@@ -432,9 +440,17 @@
                       </el-radio-group>
                       <div v-if="projectSkillsMode === 'custom'" v-loading="dialogSkillsLoading" class="custom-groups">
                         <el-checkbox-group v-model="selectedProjectSkills">
-                          <el-checkbox v-for="skill in dialogProjectSkills" :key="skill.name" :value="skill.name">
-                            {{ skill.name }}
-                            <span class="skill-hint">{{ skill.description }}</span>
+                          <el-checkbox
+                            v-for="skill in dialogProjectSkills"
+                            :key="skill.name"
+                            :value="skill.name"
+                            class="skill-checkbox"
+                          >
+                            <div class="skill-item-main">
+                              <span class="skill-item-name">{{ skill.name }}</span>
+                              <span v-if="skill.path" class="skill-item-path" :title="skill.path">{{ skill.path }}</span>
+                            </div>
+                            <div v-if="skill.description" class="skill-item-desc">{{ skill.description }}</div>
                           </el-checkbox>
                         </el-checkbox-group>
                       </div>
@@ -818,7 +834,7 @@ const availableSubagents = ref<Array<{
 }>>([])
 
 // Skills lists
-type DialogSkill = { name: string; description: string; scope: 'global' | 'project'; enabled: boolean }
+type DialogSkill = { name: string; description: string; path: string | null; scope: 'global' | 'project'; enabled: boolean }
 const dialogAllSkills = ref<DialogSkill[]>([])
 const dialogSkillsLoading = ref(false)
 const dialogGlobalSkills = computed(() => dialogAllSkills.value.filter(s => s.scope === 'global'))
@@ -1830,15 +1846,42 @@ defineExpose({ open })
 
 .custom-groups .el-checkbox {
   display: flex;
-  align-items: center;
-  margin-bottom: 4px;
+  align-items: flex-start;
+  margin-bottom: 8px;
 }
 
-.skill-hint {
+.custom-groups .el-checkbox .el-checkbox__input {
+  margin-top: 2px;
+}
+
+.skill-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.skill-item-name {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.skill-item-path {
   font-size: 11px;
   color: var(--el-text-color-secondary);
-  margin-left: 4px;
-  opacity: 0.7;
+  opacity: 0.85;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-item-desc {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  opacity: 0.75;
+  line-height: 1.4;
+  margin-top: 2px;
 }
 
 .skill-empty-tip {

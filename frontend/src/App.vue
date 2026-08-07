@@ -30,8 +30,13 @@
         :class="{ 'is-mobile-open': mobileLeftOpen }"
         :collapsed="mobileLeftOpen ? false : sidebarCollapsed"
         @new-chat="handleNewChat"
+        @new-chat-for-agent="handleAgentChange"
         @switch-session="handleSwitchSession"
         @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
+        @open-settings="openCleanupDialog"
+        @change-password="openChangePassword"
+        @go-admin="goAdmin"
+        @logout="handleLogout"
       />
 
       <main class="chat-main">
@@ -45,6 +50,8 @@
     </div>
 
     <AgentManagerDialog ref="agentManagerRef" />
+    <CleanupDialog ref="cleanupDialogRef" @cleaned="handleCleanupDone" />
+    <ChangePasswordDialog ref="changePasswordRef" />
     </div>
   </ConfigProvider>
 </template>
@@ -63,6 +70,9 @@ import AppHeader from '@/components/layout/AppHeader.vue'
 import LeftSidebar from '@/components/layout/LeftSidebar.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'
 import AgentManagerDialog from '@/components/dialogs/AgentManagerDialog.vue'
+import CleanupDialog from '@/components/dialogs/CleanupDialog.vue'
+import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { isDark } = useTheme()
 
@@ -72,7 +82,10 @@ const chatStore = useChatStore()
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
 const sessionsStore = useSessionsStore()
+const authStore = useAuthStore()
 const agentManagerRef = ref<InstanceType<typeof AgentManagerDialog>>()
+const cleanupDialogRef = ref<InstanceType<typeof CleanupDialog>>()
+const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
 const sidebarCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
@@ -247,6 +260,37 @@ async function handleAgentChange(agentId: string) {
 
 function openAgentManager() {
   agentManagerRef.value?.open(agentsStore.currentAgentId)
+}
+
+function openCleanupDialog() {
+  cleanupDialogRef.value?.open()
+}
+
+function openChangePassword() {
+  changePasswordRef.value?.open()
+}
+
+function goAdmin() {
+  router.push('/admin')
+}
+
+function handleLogout() {
+  authStore.logout()
+  router.push('/login')
+}
+
+function handleCleanupDone() {
+  // 清理后当前会话可能已被删除（用户取消"跳过活跃"勾选时），需要善后
+  const currentId = sessionsStore.currentSessionId
+  const stillExists = currentId ? sessionsStore.sessions.some(s => s.id === currentId) : false
+  if (stillExists) return
+  // 当前会话已删：优先切换到第一个会话，无会话则新建
+  const firstSession = sessionsStore.sessions[0]
+  if (firstSession) {
+    handleSwitchSession(firstSession.id)
+  } else {
+    handleNewChat()
+  }
 }
 
 function openMobileLeft() {
