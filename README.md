@@ -8,25 +8,25 @@
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-`lc-agent` 既是可以直接使用的 Agent 工作台，也是可以被用户被作为导入的 Python 框架，降低从0开发agent全套的繁琐。
+`lc-agent` 是一套开箱即用的 AI Agent 工作台，也是一个能被业务项目直接 `import` 的 Python 框架——不用从零搭建模型调用、工具注册、会话持久化这些基础能力。
 
-它把 **模型、思考参数、Tools、MCP、Skills、子 Agent、长期记忆、知识库入口、Human-in-the-top 控制** 放进一个统一的 Web UI 里，并支持运行时热切换配置，无需重启代码。
+它把 **模型、思考参数、Tools、MCP、Skills、子 Agent、长期记忆、知识库、人工审批** 统一放进一个 Web UI，运行时即可在前端切换配置，无需重启服务。
 
 演示项目：[lc-agent-bfzs](https://github.com/ydf0509/lc-agent-bfzs)
 
 ## 为什么是 lc-agent
 
-大部分 LangChain / LangGraph 项目需要写大量胶水代码来把模型调用、Tools、MCP、子 Agent 串起来。切换模型或调整工具集往往意味着改代码、重启服务。
+用 LangChain / LangGraph 搭 Agent，通常要写大量样板代码，把模型调用、Tools、MCP、子 Agent 一层层串起来；换模型、换工具，往往还得改代码、重启服务。
 
 `lc-agent` 把这些能力整合进一个开箱即用的 Web 工作台：
 
-- **运行时热切换**：模型、思考等级、工具组、MCP、Skills、Agent 预设都可以在前端切换，无需重启服务
-- **统一能力编排**：Tools、MCP、Skills、子 Agent、代码型 Graph 接入同一个执行入口
-- **透明可观测**：thinking、tool call、diff 预览、HTTP trace、token usage、子 Agent 执行过程全部可视化
-- **权限与审批**：工具白名单、敏感操作人工确认，人始终拥有最高控制权
+- **运行时热切换**：模型、思考等级、工具组、MCP、Skills、Agent 预设都在前端切换，不用重启
+- **统一能力编排**：Tools、MCP、Skills、子 Agent、代码型 Graph 走同一个执行入口
+- **全程可观测**：思考过程、工具调用、diff 预览、HTTP 追踪、token 用量、子 Agent 执行细节、 bash命令执行过程 全部可视化
+- **权限与人工审批**：工具白名单、敏感操作人工确认，人始终保留最终控制权
 - **框架与产品一体**：既能直接当工作台用，也能 `import lc_agent` 嵌入业务项目
 
-## lc-aegnt核心能力
+## lc-agent 核心能力
 
 | 能力 | 说明 |
 | --- | --- |
@@ -47,6 +47,8 @@
 | ai coding | 内置工具组和第三方mcp例如serena mcp都能使lc-aegnt 实现ai coding |
 | Context Management | 内置 SummarizationMiddleware，长对话自动压缩摘要，避免上下文溢出 |
 | Streaming & Diff | 命令执行实时流式输出、文件编辑 diff 预览、写入预览，过程全程可视 |
+
+### 完整功能清单请阅读 [FEATURES.md](https://github.com/ydf0509/lc-agent/blob/main/FEATURES.md)
 
 ## 截图
 
@@ -170,9 +172,9 @@ app.run()
 
 推荐理解方式：
 
-- **Tools**：项目内 Python 函数，适合业务工具和本地能力
-- **MCP**：外部工具服务器，适合跨项目复用和进程隔离
-- **Skills**：面向 Agent 的能力说明与工作流知识，适合渐进式触发
+- **Tools**：Agent 的操作接口（`@tool` 注册的函数 + 内置文件/命令工具组）
+- **MCP**：按标准协议（stdio / Streamable HTTP）接入的外部工具服务器，不写代码就能给 Agent 扩展联网搜索、文档检索、知识库等能力
+- **Skills**：写给 Agent 看的能力说明与工作流指令（SKILL.md），AI 按需加载，可带脚本执行
 - **[nbrag](https://github.com/ydf0509/nbrag) / RAG**：作为 MCP 工具接入，保持知识库与 Agent 框架低耦合
 
 ## 项目文件夹模式
@@ -278,19 +280,28 @@ Human-in-the-loop 通常是 Agent 遇到危险动作时请求审批；而 lc-age
 
 ## 和普通聊天网页的区别
 
-如果只聊天，lc-agent 和普通聊天网页都能完成任务。
+普通聊天网页，你问一句，它答一句——产物是一段文字，模型不会（也没能力）去碰你的文件、跑你的命令、动你的系统。
 
-lc-agent 真正多出来的是：
+普通网页聊天，也能算agent，只不过那个agent是只给你联网工具，没有其他工具（你用脑子想下，如果没有给你配置高昂成本的虚拟容器的前提下，豆包官网给你配有命令行和文件操作工具，那么恶意用户会指挥豆包agent执行rm -rf删除豆包服务器，指挥豆包agent在豆包服务器上执行恶意代码程序 ， 但是如果跑在你自己本地电脑，你还会故意指挥codex claude code cursor 删除你自己系统文件和执行恶意程序吗？）。
 
-- 你能看见 Agent 在做什么
-- 你能控制 Agent 可以用什么
-- 你能把多个能力源拼起来：Tools、MCP、Skills、子 Agent、自定义 Graph、知识库入口
-- 你不需要自己再做前端、会话、审批、trace、调试面板
+lc-agent 里的 Agent 不只会答，还会**动手做**。区别落到四个字上：
 
-简化理解：
+- **执行**：聊天网页止于文字，lc-agent 能真正操作你的机器和外部系统
+- **可观测**：思考过程、工具调用、HTTP 请求、token 用量、子 Agent 执行——每一步都摊开给你看，不是黑盒
+- **可控**：模型、工具组、MCP、Skills 运行时随时切换，危险操作要过审批
+- **可扩展**：是框架，能 `@tool` 注册工具、能配置mcp和skills，注册自定义 Agent、`import` 进业务项目——聊天网页是封闭产品
 
-- **普通聊天网页**：更像对话产品
-- **lc-agent**：更像可直接运行、也可二次开发的 Agent 工作台 / Runtime Control Plane
+简单来说：
+
+- **普通聊天网页**：只能聊
+- **lc-agent**：能聊，更能做——而且做的过程看得见、管得住、换得了
+
+### 即使是普通联网聊天，也吊打普通大模型官网联网聊天
+
+因为对于复杂问题，需要多轮换关键词联网，需要分解任务，需要多次打开多个详情页提取正文，普通大模型官网的联网搜索为了节约算力完全没达到这种效果。
+下面截图是lc-agent调用自己写的`baidu-search`联网搜索的skill，真实使用的截图，agent会分解步骤亲自搜索查看每一天央视新闻联播报道了什么，lcagent的提问效果吊打在deepseek官网直接问 "8月份央视新闻联报，每一天报道了什么"。
+![baidu_skill_search](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/baidu_skill_search.png)
+
 
 ## 项目关系
 
@@ -300,23 +311,29 @@ lc-agent 真正多出来的是：
 | [lc-agent-bfzs](https://github.com/ydf0509/lc-agent-bfzs) | 基于 lc-agent 的演示应用 |
 | [nbrag](https://github.com/ydf0509/nbrag) | 可通过 MCP 接入的 agentic search 知识库 |
 
-## 登录和部署边界
+## 登录、部署与多人共用
 
-lc-agent 已经支持登录认证、用户隔离、管理员能力。
+### lc-agent 适合部署在哪里？
 
-但它的定位不是纯云端托管聊天站，而是一个可以接本地工具、MCP、脚本和执行环境的 Agent 框架。因此更适合：
+lc-agent 不是「注册就能上」的云端聊天站，而是能接本地工具、MCP、脚本和执行环境的 Agent 框架，所以它更适合跑在你自己可控的地方：单机、内网，或者你自己的服务器或工作机。
 
-- 单机部署
-- 内网部署
-- 用户自己可控的服务器或工作机
+### 支持登录和多用户吗？
 
-如果你给 Agent 接了文件系统、命令执行或自定义 MCP，它运行的仍然是**部署机器的权限边界**。
+支持。lc-agent 自带登录认证、用户隔离和管理员能力，在配置里启用 `auth.secret` 即可使用。
 
-当然你也可以部署到云端。如果仅用于聊天和信息检索，包括联网和rag知识库检索（不开启文件/命令工具组），lc-agent 完全可以多人共用一个实例。
+### 能多人共用一个实例吗？
 
-但若开启了 `file_write`、`command` 等工具组，请确保**单人独占**——它们直接操作部署机器的文件系统，多人同时操作会相互冲突。这和 Claude Code / Cursor / Codex 的道理一样：涉及本机文件读写的工具需要每人各自一份环境。
+分情况。
 
-多用户 + 文件操作的隔离（如虚拟容器沙箱）技术上可行，但成本极高，例如kimi minimax官网的agent功能单次agent任务收费极其高昂，这种共用一个web服务但是通过虚拟容器隔离不同用户agent操作的技术不在 lc-agent 当前的考虑范围内。
+如果你只拿它聊天、查资料——联网检索、RAG 知识库检索都算，只要不开 `file_write`、`command` 这类工具组——完全可以多个人共用一个实例。
+
+但只要开了这些工具组，就必须**一人一个实例**。原因很简单：它们直接操作部署机器的文件系统，多人同时用会互相踩。这和 Claude Code / Cursor / Codex 是同一个道理：凡是能读写本机文件的工具，都得一人一套环境。
+
+另外记住一点：无论你给 Agent 接了什么——文件系统、命令执行、自定义 MCP——它能碰到的始终只是**部署机器**允许的范围，不会超出那台机器。
+
+### 多用户 + 文件操作隔离（沙箱）不行吗？
+
+技术上可行（比如每个用户一个虚拟容器），但成本极高，不在 lc-agent 当前的考虑范围内。
 
 ## 开发
 
@@ -380,7 +397,7 @@ launch_desktop(host='127.0.0.1', port=8001, title="心有灵犀") # host port ti
 
 ### lc-agent 能不能联网查询问题？
 
-答： 你购买apikey后，模型厂商是不会自动送你联网功能的，联网实际是通过工具调用。
+答： 你购买大模型apikey后，模型厂商是不会自动送你联网功能的，联网实际是通过工具调用。
 所以你可以配置mcp，市面上能联网的mcp有很多
 
 例如配置 Open Web Search MCP，你在docker里面启动mcp服务，然后配置到config.jsonc里面的mcpServers，agent可以勾选启用这个mcp，这样`agent`就能联网查询新闻了，而且可以启用web-search这个skill，引导ai何时联网，怎么高效使用这个mcp的各个工具。
@@ -405,12 +422,23 @@ launch_desktop(host='127.0.0.1', port=8001, title="心有灵犀") # host port ti
 }
 ```
 
+除了配 MCP，框架还内置一个**零成本**的联网 skill：`baidu-search`（位于 `lc_agent/skills/contrib_skills/baidu-search`）。
+
+它走百度接口，**免费、无限次、无需 API key、无需启动任何 MCP 服务**，开箱即用。提供两个命令，Agent 通过 `run_skill_script` 执行 `baidu_search_cli.py` 调用：
+
+- `search`：按关键词联网检索，返回标题/链接/摘要/时间
+- `extract`：抓取指定网页并提取正文，可直接吃 `search` 返回的链接
+
+默认用 `curl_cffi` 模拟 Chrome 指纹绕反爬，稳定性远超requests。和上面的 MCP 路线相比，它胜在**零部署、零花费**，适合不想折腾 MCP 服务、又想立刻让 Agent 联网的场景；缺点是依赖百度接口，搜索稳定性那肯定不如 anysearch大公司做的商业产品，anysearch的稳定性几乎100%了， baidu-search 的稳定性95%左右。
+
+
 ### lc-agent 能不能作为aicoding 工具来使用？
 
 答：完全可以，而且编程效果和体验都很好。
 
 方案A:
-可以，你可以搭配serena mcp全套来编程。但是这个因为是第三方mcp，对于edit文件 和 执行命令，lc-agent的前端界面没有精细化适配，例如文件变更diff、执行命令的流式打字机效果等，对serena没支持。
+可以，你可以搭配serena mcp全套来编程。但是这个因为是第三方mcp，对于edit文件 和 执行命令，lc-agent的前端界面没有精细化适配，例如文件变更diff、执行命令的流式打字机效果等，对serena没支持。所以不推荐用serena mcp全套工具。
+方案A不好，和lc-agent的前端ui没有深度融合。
 
 方案B：
 开启lc-agent 内置赠送的工具组， 用户开启`file_read` `file_write` `command` 三个工具组，大约20个工具，足以编程了。另外你还可以搭配 nbrag 或者codegraph mcp，使代码语义和符号检索更强大。

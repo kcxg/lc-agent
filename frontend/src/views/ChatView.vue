@@ -123,7 +123,7 @@
               <template v-for="(seg, segIdx) in item.segments" :key="segIdx">
                 <div
                   v-if="seg.type === 'text' && seg.text"
-                  class="markdown-body"
+                  class="markdown-body answer-markdown"
                   v-html="renderMarkdown(seg.text)"
                 />
                 <div
@@ -132,6 +132,7 @@
                   :class="[
                     { 'is-expanded': isThinkingExpanded(item, segIdx) },
                     { 'is-overflow': isThinkingOverflow(item, segIdx) },
+                    { 'is-thinking-active': item.isStreamingMessage && segIdx === item.segments.length - 1 },
                   ]"
                 >
                   <button
@@ -215,7 +216,7 @@
               <span v-else-if="item.role === 'user'" class="user-plain-text">{{ item.content }}</span>
               <div
                 v-else
-                class="markdown-body"
+                class="markdown-body answer-markdown"
                 v-html="renderMarkdown(stripThinkingMarkers(item.content || ''))"
               />
             </template>
@@ -286,6 +287,16 @@
       @close="codeModalVisible = false"
     />
 
+    <CodeBlockModal
+      :visible="filePreviewVisible"
+      :code="filePreviewContent"
+      language="markdown"
+      :title="filePreviewPath"
+      kicker="文件预览"
+      render-as-markdown
+      @close="filePreviewVisible = false"
+    />
+
     <el-image-viewer
       v-if="imageViewerVisible"
       :url-list="[imageViewerUrl]"
@@ -308,6 +319,7 @@ import { BubbleList, Thinking } from 'vue-element-plus-x'
 import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
 import { Cpu, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
@@ -399,6 +411,9 @@ const showLoadOlderMessages = ref(false)
 const codeModalVisible = ref(false)
 const codeModalSource = ref('')
 const codeModalLanguage = ref('')
+const filePreviewVisible = ref(false)
+const filePreviewContent = ref('')
+const filePreviewPath = ref('')
 const imageViewerVisible = ref(false)
 const imageViewerUrl = ref('')
 
@@ -1126,6 +1141,13 @@ async function handleLoadOlderMessages() {
 function handleMarkdownClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null
 
+  const fileLink = target?.closest?.('a[data-lc-file-path]') as HTMLAnchorElement | null
+  if (fileLink) {
+    event.preventDefault()
+    void openProjectMarkdownFile(fileLink.dataset.lcFilePath || '')
+    return
+  }
+
   const expandBtn = target?.closest?.('.markdown-code-expand') as HTMLButtonElement | null
   if (expandBtn) {
     event.preventDefault()
@@ -1150,6 +1172,60 @@ function handleMarkdownClick(event: MouseEvent) {
       button.textContent = '复制'
     }, 1400)
   })
+}
+
+function resolveProjectFilePath(relativePath: string): string | null {
+  const projectRoot = agentsStore.currentAgent?.project_mode
+    ? agentsStore.currentAgent.project_root?.trim()
+    : undefined
+  const normalizedPath = relativePath.replace(/\//g, '\\')
+
+  if (
+    !projectRoot
+    || !normalizedPath
+    || /^(?:[a-z]:)?\\/i.test(normalizedPath)
+    || normalizedPath.split('\\').some(part => part === '..')
+  ) {
+    return null
+  }
+
+  return `${projectRoot.replace(/[\\/]+$/, '')}\\${normalizedPath}`
+}
+
+function decodeProjectFilePath(relativePath: string): string {
+  try {
+    return decodeURIComponent(relativePath)
+  } catch {
+    return relativePath
+  }
+}
+
+async function openProjectMarkdownFile(relativePath: string) {
+  const decodedPath = decodeProjectFilePath(relativePath)
+  const filePath = resolveProjectFilePath(decodedPath)
+  if (!filePath) {
+    ElMessage.warning('当前 Agent 未配置项目目录，无法预览此文件')
+    return
+  }
+
+  try {
+    const data = await fetchApi<{ lines: string[]; truncated?: boolean; error?: string }>(
+      `/tools/file/read?path=${encodeURIComponent(filePath)}&max_lines=2000&agent_id=${encodeURIComponent(agentsStore.currentAgentId)}`,
+    )
+    if (data.error) {
+      ElMessage.error(`无法读取 ${decodedPath}: ${data.error}`)
+      return
+    }
+
+    filePreviewPath.value = decodedPath
+    filePreviewContent.value = data.lines.join('\n')
+    if (data.truncated) {
+      filePreviewContent.value += '\n\n> 文件过大，仅显示前 2000 行。'
+    }
+    filePreviewVisible.value = true
+  } catch (error) {
+    ElMessage.error(`无法读取 ${decodedPath}: ${String(error)}`)
+  }
 }
 
 function applyAlwaysScrollbar() {
@@ -1381,7 +1457,7 @@ onBeforeUnmount(() => {
 
 .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper) {
   position: relative;
-  padding: 10px 14px 10px 18px;
+  padding: 10px 16px;
   border-radius: 6px 16px 16px 16px;
   background: var(--el-bg-color-overlay);
   border: none;
@@ -1878,6 +1954,80 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
+/* Active thinking animation: golden neural pulse */
+.thinking-block.is-thinking-active {
+  border-color: rgba(234, 179, 8, 0.55);
+  border-left-color: #facc15;
+  box-shadow:
+    0 0 0 1px rgba(234, 179, 8, 0.25),
+    0 0 18px rgba(234, 179, 8, 0.18);
+  animation: thinking-glow 2.2s ease-in-out infinite;
+}
+
+.thinking-block.is-thinking-active::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto auto -42%;
+  width: 36%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #facc15, transparent);
+  box-shadow: 0 0 12px #facc15;
+  animation: thinking-energy-flow 1.2s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.thinking-block.is-thinking-active .thinking-summary,
+.thinking-block.is-thinking-active .thinking-body {
+  position: relative;
+  z-index: 1;
+}
+
+.thinking-block.is-thinking-active .thinking-summary :deep(.el-icon) {
+  animation: thinking-icon-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes thinking-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(234, 179, 8, 0.22),
+      0 0 10px rgba(234, 179, 8, 0.1);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(234, 179, 8, 0.45),
+      0 0 26px rgba(234, 179, 8, 0.28);
+  }
+}
+
+@keyframes thinking-energy-flow {
+  0% {
+    left: -42%;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    left: 106%;
+    opacity: 0;
+  }
+}
+
+@keyframes thinking-icon-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.75;
+  }
+}
+
 .thinking-unavailable {
   display: flex;
   gap: 9px;
@@ -1942,8 +2092,8 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 
-/* blockquote styling */
-.messages-container :deep(.markdown-body blockquote) {
+/* Blockquote styling for system and thinking content. Final answers use markdown-theme.css. */
+.messages-container :deep(.markdown-body:not(.answer-markdown) blockquote) {
   position: relative;
   margin: 12px 0 !important;
   padding: 10px 14px 10px 32px !important;
@@ -1956,7 +2106,7 @@ onBeforeUnmount(() => {
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, var(--el-border-color-lighter));
   color: var(--el-text-color-regular) !important;
 }
-.messages-container :deep(.markdown-body blockquote)::before {
+.messages-container :deep(.markdown-body:not(.answer-markdown) blockquote)::before {
   content: '❝';
   position: absolute;
   left: 10px;
@@ -1968,10 +2118,10 @@ onBeforeUnmount(() => {
   opacity: 0.85;
   text-shadow: 0 0 8px color-mix(in srgb, var(--el-color-primary) 22%, transparent);
 }
-.messages-container :deep(.markdown-body blockquote > *:first-child) {
+.messages-container :deep(.markdown-body:not(.answer-markdown) blockquote > *:first-child) {
   margin-top: 0 !important;
 }
-.messages-container :deep(.markdown-body blockquote > *:last-child) {
+.messages-container :deep(.markdown-body:not(.answer-markdown) blockquote > *:last-child) {
   margin-bottom: 0 !important;
 }
 

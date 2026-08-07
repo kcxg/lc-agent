@@ -1,7 +1,9 @@
 # lc_agent/app.py
 
 from contextlib import asynccontextmanager
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
@@ -75,12 +77,19 @@ class LcAgentApp:
         permissions_path = config.get("permissions", {}).get("path", "./permissions.jsonc")
         self._permissions_service = PermissionsService(permissions_path=Path(permissions_path))
         self.engine = AgentEngine(config)
-        skills_dirs = config.get("skills", ["./skills"])
-        existing_dirs = [d for d in skills_dirs if Path(d).is_dir()]
+        skills_dirs = list(config.get("skills", ["./skills"]))
+        contrib_dir = Path(__file__).parent / "skills" / "contrib_skills"
+        if contrib_dir.is_dir():
+            skills_dirs.insert(0, str(contrib_dir))
+        existing_dirs = [
+            str(Path(d).expanduser().resolve())
+            for d in skills_dirs
+            if Path(d).is_dir()
+        ]
         if existing_dirs:
             inner_loaders = [DirectorySkillLoader(d) for d in existing_dirs]
             inner = inner_loaders[0] if len(inner_loaders) == 1 else CompositeSkillLoader(inner_loaders)
-            self.filtered_loader = FilteredSkillLoader(inner)
+            self.filtered_loader = FilteredSkillLoader(inner, global_skill_dirs=existing_dirs)
             self.skills_toolkit = SkillsToolkit(loaders=[self.filtered_loader])
             patch_windows_script_executor(self.skills_toolkit)
         else:
@@ -97,6 +106,8 @@ class LcAgentApp:
         self.fastapi_app.state.engine = self.engine
         self.fastapi_app.state.permissions = self._permissions_service
         self.engine._permissions_service = self._permissions_service
+        self.fastapi_app.state.db_url = self._db_url
+        self.fastapi_app.state.checkpoint_path = self._checkpoint_path
         sse_module.configure(self.engine, self._db_url)
         mount_static_files(self.fastapi_app)
 
@@ -236,23 +247,38 @@ class LcAgentApp:
         finally:
             await session.close()
 
-    def add_agent(self, name: str, graph, description: str = "", delegation_description: str = "", display_name: str | None = None):
-        """Register a pre-built CompiledStateGraph as a named agent.
+    def add_agent(
+        self,
+        name: str,
+        graph=None,
+        description: str = "",
+        delegation_description: str = "",
+        display_name: str | None = None,
+        graph_factory: Callable[[str, dict[str, Any] | None], Any] | None = None,
+    ):
+        """Register a code-defined graph or a lazy graph factory as a named agent.
 
         Args:
             name: Unique agent identifier (ASCII slug recommended)
             graph: A compiled LangGraph (must have ainvoke and astream_events)
+            graph_factory: Builds a graph from the selected model and runtime LLM
+                parameters after startup resources such as MCP schemas are ready.
             description: Human-readable description
             delegation_description: Default delegation guidance for parent agents
             display_name: Optional human-readable display name (can be non-ASCII)
         """
-        if name in self.engine._agents:
+        if name in self.engine._agents or name in self.engine._custom_presets:
             raise ValueError(f"Agent '{name}' already registered")
+        if (graph is None) == (graph_factory is None):
+            raise ValueError("Provide exactly one of graph or graph_factory")
 
         from lc_agent.core.models import AgentPreset
 
-        self.engine._agents[name] = graph
-        self.engine._agent_mcp_gen[name] = self.engine._mcp_generation
+        if graph is not None:
+            self.engine._agents[name] = graph
+            self.engine._agent_mcp_gen[name] = self.engine._mcp_generation
+        else:
+            self.engine.register_code_agent_factory(name, graph_factory)
         preset = AgentPreset(
             id=name,
             name=name,

@@ -39,7 +39,7 @@
                   @update:model-value="(v: string) => toolsStore.setLlmParam('reasoning_effort', v === 'default' ? null : v)"
                 >
                   <el-option
-                    v-for="effort in ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']"
+                    v-for="effort in ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']"
                     :key="effort"
                     :label="effort"
                     :value="effort"
@@ -122,9 +122,37 @@
         </div>
       </template>
 
-        <div class="panel-section markdown-theme-section appearance-section">
+      <div class="panel-section markdown-layout-section appearance-section">
         <div class="section-header compact-section-header">
-          <h4>Markdown 风格</h4>
+          <h4>Markdown 版式</h4>
+          <span class="theme-current">{{ currentLayoutOption.label }}</span>
+        </div>
+        <el-select
+          v-model="markdownLayout"
+          size="small"
+          class="markdown-theme-select"
+          @change="(value: MarkdownLayoutId) => setMarkdownLayout(value)"
+        >
+          <el-option
+            v-for="option in MARKDOWN_LAYOUT_OPTIONS"
+            :key="option.id"
+            :label="option.label"
+            :value="option.id"
+          >
+            <div class="theme-option-row">
+              <span class="layout-option-mark">Aa</span>
+              <div class="theme-option-copy">
+                <span class="theme-option-name">{{ option.label }}</span>
+                <span class="theme-option-desc">{{ option.description }}</span>
+              </div>
+            </div>
+          </el-option>
+        </el-select>
+      </div>
+
+      <div class="panel-section markdown-theme-section appearance-section">
+        <div class="section-header compact-section-header">
+          <h4>Markdown 色盘</h4>
           <span class="theme-current">{{ currentOption.label }}</span>
         </div>
         <el-select
@@ -351,7 +379,13 @@
                 size="small"
                 @change="toolsStore.toggleSkill(skill.name)"
               />
-              <span class="skill-name" :class="{ dimmed: !skill.enabled }">{{ skill.name }}</span>
+              <div class="skill-body">
+                <div class="skill-line">
+                  <span class="skill-name" :class="{ dimmed: !skill.enabled }">{{ skill.name }}</span>
+                  <span v-if="skill.source" class="skill-path" :title="skill.source">{{ skill.source }}</span>
+                </div>
+                <span class="skill-desc">{{ skill.description }}</span>
+              </div>
               <button class="detail-btn" type="button" @click="openDetail('skill', skill.name, skill)">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="12" cy="12" r="10" />
@@ -361,7 +395,6 @@
                 详情
               </button>
             </div>
-            <span class="skill-desc">{{ skill.description }}</span>
           </div>
           <p v-if="!toolsStore.skills.length" class="empty-hint">暂无 Skills</p>
         </div>
@@ -399,12 +432,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useToolsStore } from '@/stores/tools'
 import { api, fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '@/composables/useMarkdownTheme'
+import { useMarkdownLayout, MARKDOWN_LAYOUT_OPTIONS, type MarkdownLayoutId } from '@/composables/useMarkdownLayout'
 import { useInputAnimation, INPUT_ANIMATION_OPTIONS, type InputAnimationType } from '@/composables/useInputAnimation'
 import { AnsiUp } from 'ansi_up'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
@@ -443,10 +477,21 @@ const reasoningFromPreset = computed(() =>
   !hasReasoningOverride.value && presetLlmParams.value?.reasoning_effort !== undefined
 )
 const { markdownTheme, currentOption, setMarkdownTheme } = useMarkdownTheme()
+const { markdownLayout, currentLayoutOption, setMarkdownLayout } = useMarkdownLayout()
 const { inputAnimation, currentOption: currentAnimationOption, setInputAnimation } = useInputAnimation()
 
 const summEnabled = ref(true)
 const summModel = ref('')
+
+let bgRefreshTimer: ReturnType<typeof setTimeout> | null = null
+
+function onBgProcessChanged() {
+  if (bgRefreshTimer) clearTimeout(bgRefreshTimer)
+  bgRefreshTimer = setTimeout(() => {
+    bgRefreshTimer = null
+    fetchProcesses()
+  }, 500)
+}
 
 onMounted(async () => {
   try {
@@ -455,6 +500,15 @@ onMounted(async () => {
     summModel.value = conf.default_model || ''
   } catch { /* ignore */ }
   fetchProcesses()
+  window.addEventListener('bg-process-changed', onBgProcessChanged)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('bg-process-changed', onBgProcessChanged)
+  if (bgRefreshTimer) {
+    clearTimeout(bgRefreshTimer)
+    bgRefreshTimer = null
+  }
 })
 
 interface TrackedProcess {
@@ -700,11 +754,13 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   border-radius: 8px;
 }
 
+.markdown-layout-section,
 .markdown-theme-section {
   background: linear-gradient(180deg, color-mix(in srgb, var(--el-fill-color-extra-light) 90%, var(--el-color-primary) 5%), var(--el-fill-color-extra-light));
 }
 
 .window-trim-section,
+.markdown-layout-section,
 .markdown-theme-section {
   margin-bottom: 14px;
 }
@@ -863,6 +919,23 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   height: 10px;
   border-radius: 999px;
   box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+  flex-shrink: 0;
+}
+
+.layout-option-mark {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 4px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-family: Georgia, serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
   flex-shrink: 0;
 }
 
@@ -1153,8 +1226,44 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 
 .skill-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
+}
+
+.skill-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.skill-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.skill-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.skill-desc {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .detail-btn {

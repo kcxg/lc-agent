@@ -21,7 +21,7 @@ lc_agent/tools/system_tools/
 | group | 风险等级 | 工具 |
 |-------|---------|------|
 | file_read | 低（只读） | read_file, read_multiple_files, list_directory, get_file_info, search_files |
-| file_write | 高（修改文件系统） | write_file, create_directory, move_file, edit_block |
+| file_write | 高（修改文件系统） | write_file, create_directory, move_file, delete_file, edit_block |
 | command | 高（执行命令） | run_command, list_processes, kill_process |
 
 ## 3. config.jsonc 配置段
@@ -96,6 +96,12 @@ lc_agent/tools/system_tools/
 - 参数：`source: str`, `destination: str`
 - 支持重命名和移动
 - 安全：source 和 destination 都要校验
+
+#### delete_file
+- 参数：`path: str`
+- 只删单文件，不删目录（目录走 command 组）
+- 文件不存在 → 报错；path 是目录 → 报错
+- 安全：校验 allowed_directories + blocked_extensions
 
 #### edit_block
 - 参数：`file_path: str`, `old_string: str`, `new_string: str`, `expected_replacements: int = 1`

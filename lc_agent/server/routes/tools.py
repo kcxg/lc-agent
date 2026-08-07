@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy import select
 
 from lc_agent.core.engine import AgentEngine
-from lc_agent.db.models_auth import User
+from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.server.auth_middleware import get_current_user
-from lc_agent.server.dependencies import get_engine, get_registry
+from lc_agent.server.dependencies import get_db_session, get_engine, get_registry
 from lc_agent.tools.registry import ToolRegistry
 
 router = APIRouter(tags=["tools"])
@@ -158,6 +161,96 @@ def get_process_output(
         "status": status,
         "output": text,
         "offset": new_offset,
+    }
+
+
+_FILE_READ_MAX_SIZE = 10 * 1024 * 1024  # 10 MB
+_FILE_READ_MAX_LINES = 2000
+
+
+async def _get_project_preview_root(
+    agent_id: str,
+    engine: AgentEngine,
+    user: User,
+    db,
+) -> Path:
+    if not engine._preset_exists(agent_id):
+        raise PermissionError("Agent not found")
+
+    if user.role != "admin":
+        access_stmt = select(UserAgentAccess.agent_id).where(
+            UserAgentAccess.user_id == user.id,
+            UserAgentAccess.agent_id == agent_id,
+        )
+        access = await db.execute(access_stmt)
+        if access.scalar_one_or_none() is None:
+            raise PermissionError("Access denied for this agent")
+
+    preset = engine._resolve_preset(agent_id)
+    if not preset.project_mode or not preset.project_root:
+        raise PermissionError("This agent has no project directory configured")
+
+    project_root = Path(preset.project_root).expanduser().resolve()
+    if not project_root.is_dir():
+        raise PermissionError("The agent project directory is unavailable")
+    return project_root
+
+
+def _require_path_within_project(path: str, project_root: Path) -> str:
+    resolved = Path(path).resolve()
+    try:
+        resolved.relative_to(project_root)
+    except ValueError as e:
+        raise PermissionError("File is outside the agent project directory") from e
+    return str(resolved)
+
+
+@router.get("/tools/file/read")
+async def read_file_content(
+    path: str,
+    max_lines: int = 500,
+    agent_id: str | None = None,
+    user: User = Depends(get_current_user),
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db_session),
+):
+    """Read a file's content for frontend preview. Returns up to max_lines lines."""
+    from lc_agent.tools.system_tools._config import validate_read_path
+
+    try:
+        resolved = validate_read_path(path)
+        if agent_id:
+            project_root = await _get_project_preview_root(agent_id, engine, user, db)
+            resolved = _require_path_within_project(resolved, project_root)
+    except PermissionError as e:
+        return {"error": str(e)}
+
+    file_path = Path(resolved)
+    if not file_path.exists():
+        return {"error": f"File not found: {path}"}
+    if not file_path.is_file():
+        return {"error": f"Not a file: {path}"}
+
+    try:
+        size = file_path.stat().st_size
+    except OSError:
+        return {"error": "Cannot stat file"}
+    if size > _FILE_READ_MAX_SIZE:
+        return {"error": f"File too large ({size} bytes, max {_FILE_READ_MAX_SIZE})"}
+
+    max_lines = min(max_lines, _FILE_READ_MAX_LINES)
+
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return {"error": str(e)}
+
+    lines = text.split("\n")
+    return {
+        "file": str(file_path),
+        "lines": lines[:max_lines],
+        "total_lines": len(lines),
+        "truncated": len(lines) > max_lines,
     }
 
 

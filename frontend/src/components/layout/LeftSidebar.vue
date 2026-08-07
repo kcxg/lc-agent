@@ -47,6 +47,14 @@
             <span class="agent-group-icon">{{ group.agentIcon }}</span>
             <span class="agent-group-name">{{ group.agentName }}</span>
             <span class="agent-card-count">{{ group.badgeText }}</span>
+            <button
+              type="button"
+              class="agent-new-chat-btn"
+              title="新建会话"
+              @click.stop="emit('newChatForAgent', group.agentId)"
+            >
+              +
+            </button>
           </button>
 
           <div v-if="!collapsedGroups.has(group.agentName)" class="session-children">
@@ -108,6 +116,24 @@
         <span>{{ normalizedQuery ? '没有匹配的聊天标题' : '暂无聊天' }}</span>
       </div>
     </div>
+
+    <div v-if="!collapsed" class="sidebar-footer">
+      <el-dropdown trigger="click" placement="top-start" @command="handleSettingsCommand">
+        <button type="button" class="settings-btn" title="设置">
+          <span class="settings-icon">⚙️</span>
+          <span class="settings-label">{{ authStore.user?.username || '设置' }}</span>
+          <el-icon class="settings-arrow"><ArrowUp /></el-icon>
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="change-password">修改密码</el-dropdown-item>
+            <el-dropdown-item v-if="authStore.isAdmin" command="admin">管理后台</el-dropdown-item>
+            <el-dropdown-item v-if="authStore.isAdmin" command="cleanup">数据清理</el-dropdown-item>
+            <el-dropdown-item divided command="logout">登出</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </div>
   </aside>
 
   <el-dialog v-model="deleteDialogVisible" title="删除会话" width="400px" :close-on-click-modal="false">
@@ -130,15 +156,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { InputInstance } from 'element-plus'
+import { ArrowUp } from '@element-plus/icons-vue'
 import { useSessionsStore, type Session } from '@/stores/sessions'
 import { useAgentsStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ collapsed: boolean }>()
 
 const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()
 const chatStore = useChatStore()
+
+const authStore = useAuthStore()
 
 const deleteDialogVisible = ref(false)
 const deleteTargetId = ref<string | null>(null)
@@ -147,7 +177,29 @@ const renameDialogVisible = ref(false)
 const renameTargetId = ref<string | null>(null)
 const renameValue = ref('')
 const renameInputRef = ref<InputInstance | null>(null)
-const emit = defineEmits<{ newChat: []; switchSession: [id: string]; toggleCollapse: [] }>()
+
+const emit = defineEmits<{
+  newChat: []
+  newChatForAgent: [agentId: string]
+  switchSession: [id: string]
+  toggleCollapse: []
+  openSettings: []
+  changePassword: []
+  goAdmin: []
+  logout: []
+}>()
+
+function handleSettingsCommand(command: string) {
+  if (command === 'change-password') {
+    emit('changePassword')
+  } else if (command === 'admin') {
+    emit('goAdmin')
+  } else if (command === 'cleanup') {
+    emit('openSettings')
+  } else if (command === 'logout') {
+    emit('logout')
+  }
+}
 
 const DEFAULT_VISIBLE_COUNT = 5
 const LOAD_MORE_COUNT = 20
@@ -623,6 +675,39 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.agent-new-chat-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.13s ease, background 0.13s ease, color 0.13s ease;
+  flex-shrink: 0;
+}
+
+.agent-section-header:hover .agent-new-chat-btn,
+.agent-new-chat-btn:hover {
+  opacity: 1;
+}
+
+.agent-new-chat-btn:hover {
+  background: var(--el-fill-color);
+  color: var(--el-color-primary);
+}
+
+.agent-section.is-active-agent .agent-new-chat-btn:hover {
+  color: var(--el-color-primary);
+}
+
 .session-children {
   display: flex;
   flex-direction: column;
@@ -829,6 +914,52 @@ onBeforeUnmount(() => {
   justify-content: center;
   color: var(--el-text-color-secondary);
   font-size: 13px;
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 6px 12px 10px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.settings-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.settings-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+}
+
+.settings-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.settings-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.settings-arrow {
+  font-size: 12px;
+  opacity: 0.55;
+  flex-shrink: 0;
 }
 
 .fade-enter-active,

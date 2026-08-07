@@ -169,6 +169,32 @@ def test_code_agent_resolution_returns_registered_graph_without_rebuild(monkeypa
     assert "research::model::some-ui-model" not in app.engine._agents
 
 
+def test_graph_factory_is_lazy_and_rebuilds_after_mcp_refresh():
+    app = LcAgentApp({"agent": {"default_model": "model-a"}})
+    built_graphs = []
+
+    def graph_factory(model_id, llm_params):
+        graph = object()
+        built_graphs.append((graph, model_id, llm_params))
+        return graph
+
+    app.add_agent("lazy_nbrag", graph_factory=graph_factory)
+
+    assert "lazy_nbrag" not in app.engine._agents
+
+    first_graph = app.engine._get_or_build_agent("lazy_nbrag")
+    assert built_graphs == [(first_graph, "model-a", None)]
+
+    app.engine._mcp_generation += 1
+    refreshed_graph = app.engine._get_or_build_agent("lazy_nbrag")
+
+    assert refreshed_graph is not first_graph
+    assert built_graphs == [
+        (first_graph, "model-a", None),
+        (refreshed_graph, "model-a", None),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_code_agent_chat_stream_does_not_receive_framework_memory_context():
     from lc_agent.app import LcAgentApp

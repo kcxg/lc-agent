@@ -57,21 +57,6 @@
       <span class="mobile-only">
         <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
       </span>
-      <el-dropdown trigger="click" @command="handleUserCommand">
-        <span class="user-dropdown-trigger">
-          <el-icon><UserFilled /></el-icon>
-          <span class="username-text">{{ authStore.user?.username || '用户' }}</span>
-          <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
-        </span>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="manage-agents" class="mobile-manage-agents-item">⚙ Agents管理</el-dropdown-item>
-            <el-dropdown-item command="change-password">修改密码</el-dropdown-item>
-            <el-dropdown-item v-if="authStore.isAdmin" command="admin">管理后台</el-dropdown-item>
-            <el-dropdown-item divided command="logout">登出</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
       <el-button
         class="mobile-tools-btn"
         :icon="Setting"
@@ -104,43 +89,22 @@
       <el-button :icon="RefreshRight" circle size="small" title="刷新页面" @click="reloadPage" />
       <el-button :icon="isDark ? Sunny : Moon" circle size="small" @click="toggleDark()" />
     </div>
-
-    <ChangePasswordDialog ref="changePasswordRef" />
   </header>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
-import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
-import { Sunny, Moon, Menu, Setting, RefreshRight, UserFilled, ArrowDown, Plus, Briefcase } from '@element-plus/icons-vue'
+import { Sunny, Moon, Menu, Setting, RefreshRight, Plus, Briefcase } from '@element-plus/icons-vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
-import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
 
-const router = useRouter()
 const agentsStore = useAgentsStore()
-const authStore = useAuthStore()
 const chatStore = useChatStore()
 const toolsStore = useToolsStore()
 const { isDark, toggleDark } = useTheme()
-const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
-
-function handleUserCommand(command: string) {
-  if (command === 'manage-agents') {
-    emit('manageAgents')
-  } else if (command === 'change-password') {
-    changePasswordRef.value?.open()
-  } else if (command === 'admin') {
-    router.push('/admin')
-  } else if (command === 'logout') {
-    authStore.logout()
-    router.push('/login')
-  }
-}
 
 function reloadPage() {
   window.location.reload()
@@ -350,37 +314,6 @@ const emit = defineEmits<{
   font-size: 11px;
 }
 
-.user-dropdown-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--el-border-color);
-  background: var(--el-fill-color-light);
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.user-dropdown-trigger:hover {
-  background: var(--el-fill-color);
-  border-color: var(--el-color-primary-light-5);
-}
-
-.username-text {
-  max-width: 80px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dropdown-arrow {
-  font-size: 12px;
-  opacity: 0.6;
-}
-
 
 .agent-option {
   display: flex;
@@ -555,11 +488,6 @@ const emit = defineEmits<{
   border-color: rgba(165, 180, 252, 0.42);
 }
 
-/* Hide "Agents管理" dropdown item everywhere (dedicated buttons on both desktop and mobile) */
-:global(.mobile-manage-agents-item) {
-  display: none !important;
-}
-
 /* Mobile Agents管理 icon button — hidden on desktop */
 .mobile-agents-btn {
   display: none;
@@ -681,20 +609,6 @@ const emit = defineEmits<{
   }
   .mobile-new-chat-btn .mobile-btn-icon {
     font-size: 14px;
-  }
-
-  .user-dropdown-trigger .username-text,
-  .user-dropdown-trigger .dropdown-arrow {
-    display: none;
-  }
-  .user-dropdown-trigger {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
   }
 
   .header-right :deep(.el-button.is-circle) {

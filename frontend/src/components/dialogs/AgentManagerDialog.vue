@@ -412,9 +412,17 @@
                       </el-radio-group>
                       <div v-if="globalSkillsMode === 'custom'" v-loading="dialogSkillsLoading" class="custom-groups">
                         <el-checkbox-group v-model="selectedGlobalSkills">
-                          <el-checkbox v-for="skill in dialogGlobalSkills" :key="skill.name" :value="skill.name">
-                            {{ skill.name }}
-                            <span class="skill-hint">{{ skill.description }}</span>
+                          <el-checkbox
+                            v-for="skill in dialogGlobalSkills"
+                            :key="skill.name"
+                            :value="skill.name"
+                            class="skill-checkbox"
+                          >
+                            <div class="skill-item-main">
+                              <span class="skill-item-name">{{ skill.name }}</span>
+                              <span v-if="skill.path" class="skill-item-path" :title="skill.path">{{ skill.path }}</span>
+                            </div>
+                            <div v-if="skill.description" class="skill-item-desc">{{ skill.description }}</div>
                           </el-checkbox>
                           <div v-if="dialogGlobalSkills.length === 0" class="skill-empty-tip">暂无全局 Skills</div>
                         </el-checkbox-group>
@@ -432,9 +440,17 @@
                       </el-radio-group>
                       <div v-if="projectSkillsMode === 'custom'" v-loading="dialogSkillsLoading" class="custom-groups">
                         <el-checkbox-group v-model="selectedProjectSkills">
-                          <el-checkbox v-for="skill in dialogProjectSkills" :key="skill.name" :value="skill.name">
-                            {{ skill.name }}
-                            <span class="skill-hint">{{ skill.description }}</span>
+                          <el-checkbox
+                            v-for="skill in dialogProjectSkills"
+                            :key="skill.name"
+                            :value="skill.name"
+                            class="skill-checkbox"
+                          >
+                            <div class="skill-item-main">
+                              <span class="skill-item-name">{{ skill.name }}</span>
+                              <span v-if="skill.path" class="skill-item-path" :title="skill.path">{{ skill.path }}</span>
+                            </div>
+                            <div v-if="skill.description" class="skill-item-desc">{{ skill.description }}</div>
                           </el-checkbox>
                         </el-checkbox-group>
                       </div>
@@ -571,6 +587,18 @@
         <p style="margin-top: 8px; color: var(--el-text-color-secondary); font-size: 12px;">
           git 状态是会话开始时的快照，如需刷新可让 Agent 执行 <code>run_command</code> 更新。
         </p>
+        <div style="margin-top: 12px; padding: 10px 12px; background: var(--el-fill-color-light); border-radius: 8px; border-left: 3px solid var(--el-color-primary); font-size: 13px; line-height: 1.6;">
+          <strong>💡 编程项目强烈推荐</strong>：配置
+          <a href="https://github.com/colbymchenry/codegraph" target="_blank" rel="noopener noreferrer" style="color: var(--el-color-primary);">codegraph</a>
+          MCP，让 Agent 获得代码智能分析能力（AST 级符号索引、调用链追踪、影响范围分析），大幅提升编码效率。
+          <br/>① 在项目根目录运行 <code>codegraph init</code> 完成索引
+          <br/>② 在 <code>config.jsonc</code> 的 <code>mcpServers</code> 中添加：
+          <pre style="margin: 6px 0 0; padding: 8px 10px; background: var(--el-bg-color); border-radius: 6px; font-size: 12px; line-height: 1.5; overflow-x: auto;">"codegraph": {
+  "type": "stdio",
+  "command": "codegraph",
+  "args": ["serve", "--mcp"]
+}</pre>
+        </div>
       </div>
     </el-dialog>
   </el-dialog>
@@ -587,7 +615,7 @@ import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore, type AgentPreset, type AgentSubagentConfig } from '@/stores/agents'
 import { usePromptsStore } from '@/stores/prompts'
 
-const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
@@ -806,7 +834,7 @@ const availableSubagents = ref<Array<{
 }>>([])
 
 // Skills lists
-type DialogSkill = { name: string; description: string; scope: 'global' | 'project'; enabled: boolean }
+type DialogSkill = { name: string; description: string; path: string | null; scope: 'global' | 'project'; enabled: boolean }
 const dialogAllSkills = ref<DialogSkill[]>([])
 const dialogSkillsLoading = ref(false)
 const dialogGlobalSkills = computed(() => dialogAllSkills.value.filter(s => s.scope === 'global'))
@@ -1818,15 +1846,42 @@ defineExpose({ open })
 
 .custom-groups .el-checkbox {
   display: flex;
-  align-items: center;
-  margin-bottom: 4px;
+  align-items: flex-start;
+  margin-bottom: 8px;
 }
 
-.skill-hint {
+.custom-groups .el-checkbox .el-checkbox__input {
+  margin-top: 2px;
+}
+
+.skill-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.skill-item-name {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.skill-item-path {
   font-size: 11px;
   color: var(--el-text-color-secondary);
-  margin-left: 4px;
-  opacity: 0.7;
+  opacity: 0.85;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-item-desc {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  opacity: 0.75;
+  line-height: 1.4;
+  margin-top: 2px;
 }
 
 .skill-empty-tip {

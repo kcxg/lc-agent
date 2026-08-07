@@ -11,12 +11,12 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
-    AgentEditorDialog: typeof import('./src/components/dialogs/AgentEditorDialog.vue')['default']
     AgentManagerDialog: typeof import('./src/components/dialogs/AgentManagerDialog.vue')['default']
     AppHeader: typeof import('./src/components/layout/AppHeader.vue')['default']
     ChangePasswordDialog: typeof import('./src/components/dialogs/ChangePasswordDialog.vue')['default']
     ChatBubble: typeof import('./src/components/chat/ChatBubble.vue')['default']
     ChatInput: typeof import('./src/components/chat/ChatInput.vue')['default']
+    CleanupDialog: typeof import('./src/components/dialogs/CleanupDialog.vue')['default']
     CodeBlockModal: typeof import('./src/components/chat/CodeBlockModal.vue')['default']
     CopyRoundsButton: typeof import('./src/components/chat/CopyRoundsButton.vue')['default']
     DetailModal: typeof import('./src/components/panels/DetailModal.vue')['default']

@@ -5,13 +5,35 @@ from langchain_agentskills import SkillMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 _LOAD_SKILL_DESCRIPTION = (
-    "Retrieve the full step-by-step instructions for a skill. "
-    "This MUST be called before executing any task that matches a skill — "
-    "the brief description in the system prompt is only a trigger hint, "
-    "not the actual procedure. "
+    "Load a skill by name to get its full instructions. "
     "Returns the skill's markdown body, available resources, and scripts. "
     "Skill names are listed in the system prompt under '## Available Skills'."
 )
+
+_READ_SKILL_RESOURCE_DESCRIPTION = (
+    "Read a resource file from a skill. "
+    "Use load_skill first to see available resources.\n"
+    "Parameters:\n"
+    "- skill_name: the skill name (from '## Available Skills' in the system prompt)\n"
+    "- resource_name: the resource filename to read — must be one of the "
+    "resources listed by load_skill, do not guess."
+)
+
+_RUN_SKILL_SCRIPT_DESCRIPTION = (
+    "Run a script from a skill. "
+    "Use load_skill first to see available scripts.\n"
+    "Parameters:\n"
+    "- skill_name: the skill name (from '## Available Skills' in the system prompt)\n"
+    "- script_name: the script filename to run — must be one of the scripts "
+    "listed by load_skill, do not guess.\n"
+    "- script_args: optional list of string arguments passed to the script."
+)
+
+_SKILL_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "load_skill": _LOAD_SKILL_DESCRIPTION,
+    "read_skill_resource": _READ_SKILL_RESOURCE_DESCRIPTION,
+    "run_skill_script": _RUN_SKILL_SCRIPT_DESCRIPTION,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -120,13 +142,14 @@ class _LcAgentSkillMiddleware(SkillMiddleware):
         )
         # 先取出父类设置的工具实例（self.tools 之后会被重建），
         # 再补上父类缺失的 args_schema（见上方 _SKILL_TOOL_ARGS_SCHEMAS 说明），
-        # 并覆盖 load_skill 的 description。
+        # 并覆盖三个工具的 description（见上方 _SKILL_TOOL_DESCRIPTIONS 说明）。
         original_tools = list(self.tools)
         self.tools = []
         for t in original_tools:
             update: dict[str, Any] = {}
-            if t.name == "load_skill":
-                update["description"] = _LOAD_SKILL_DESCRIPTION
+            desc = _SKILL_TOOL_DESCRIPTIONS.get(t.name)
+            if desc is not None:
+                update["description"] = desc
             schema = _SKILL_TOOL_ARGS_SCHEMAS.get(t.name)
             if schema is not None:
                 update["args_schema"] = schema

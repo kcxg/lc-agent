@@ -71,7 +71,13 @@ def validate_path_access(path: str, allowed_directories: list[str]) -> str:
     Returns the resolved absolute path if allowed.
     Raises PermissionError if path is outside allowed directories.
     """
-    resolved = Path(path).expanduser().resolve()
+    root = _active_project_root_var.get()
+    if root:
+        # In project mode, relative paths (including ".") are resolved against the
+        # active project root so that "path='.'" refers to the bound project folder.
+        resolved = Path(root).joinpath(path).expanduser().resolve()
+    else:
+        resolved = Path(path).expanduser().resolve()
 
     if not allowed_directories:
         return str(resolved)

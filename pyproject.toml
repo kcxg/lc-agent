@@ -25,6 +25,7 @@ dependencies = [
     "python-jose[cryptography]>=3.3",
     "langchain-agentskills>=0.4",
     "mcp>=1.0",
+  
 ]
 
 [project.optional-dependencies]
