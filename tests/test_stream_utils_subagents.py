@@ -1,4 +1,5 @@
 from lc_agent.server.stream_utils import (
+    accumulate_display_state,
     _extract_subagent_tool_call_id,
     _get_checkpoint_ns,
     convert_stream_event,
@@ -52,6 +53,87 @@ def test_multi_segment_tools_namespace_is_subagent_internal_thinking():
     assert results == [("subagent_thinking", {"tool_call_id": "abc123", "content": "sub thought"})]
 
 
+def test_nested_agent_namespace_is_not_subagent_internal_token():
+    event = {
+        "event": "on_chat_model_stream",
+        "metadata": {"langgraph_checkpoint_ns": "agent:abc123|model:def456"},
+        "data": {"chunk": _make_chunk("nested agent answer")},
+    }
+    results = convert_stream_event(event)
+    assert results == [("token", {"content": "nested agent answer"})]
+
+
+def test_nested_agent_tool_events_are_regular_tool_events():
+    start_event = {
+        "event": "on_tool_start",
+        "name": "mcp__nbrag__nbrag_retrieve",
+        "run_id": "run123",
+        "metadata": {"langgraph_checkpoint_ns": "agent:abc123|tools:def456"},
+        "data": {"input": {"query": "quantum"}},
+    }
+    end_event = {
+        "event": "on_tool_end",
+        "name": "mcp__nbrag__nbrag_retrieve",
+        "run_id": "run123",
+        "metadata": {"langgraph_checkpoint_ns": "agent:abc123|tools:def456"},
+        "data": {"output": "found"},
+    }
+
+    assert convert_stream_event(start_event) == [
+        (
+            "tool_call",
+            {
+                "name": "mcp__nbrag__nbrag_retrieve",
+                "tool_call_id": "def456",
+                "args": {"query": "quantum"},
+            },
+        )
+    ]
+    assert convert_stream_event(end_event) == [
+        (
+            "tool_result",
+            {
+                "name": "mcp__nbrag__nbrag_retrieve",
+                "tool_call_id": "def456",
+                "result": "found",
+            },
+        )
+    ]
+
+
+def test_nested_agent_tool_events_are_accumulated_for_history():
+    start_event = {
+        "event": "on_tool_start",
+        "name": "mcp__nbrag__nbrag_retrieve",
+        "run_id": "run123",
+        "metadata": {"langgraph_checkpoint_ns": "agent:abc123|tools:def456"},
+        "data": {"input": {"query": "quantum"}},
+    }
+    end_event = {
+        "event": "on_tool_end",
+        "name": "mcp__nbrag__nbrag_retrieve",
+        "run_id": "run123",
+        "metadata": {"langgraph_checkpoint_ns": "agent:abc123|tools:def456"},
+        "data": {"output": "found"},
+    }
+    content_parts: list[str] = []
+    tool_calls: list[dict] = []
+
+    in_thinking = accumulate_display_state(
+        start_event,
+        content_parts,
+        tool_calls,
+        False,
+    )
+    accumulate_display_state(end_event, content_parts, tool_calls, in_thinking)
+
+    assert content_parts == ["\n<!--TOOL:0-->\n"]
+    assert tool_calls[0]["name"] == "mcp__nbrag__nbrag_retrieve"
+    assert tool_calls[0]["runId"] == "def456"
+    assert tool_calls[0]["status"] == "done"
+    assert tool_calls[0]["result"] == "found"
+
+
 def test_subagent_start_emitted_for_subagent_tools_with_single_segment_namespace():
     event = {
         "event": "on_tool_start",
@@ -66,6 +148,7 @@ def test_subagent_start_emitted_for_subagent_tools_with_single_segment_namespace
             "tool_call",
             {
                 "name": "research_expert",
+                "tool_call_id": "task123",
                 "run_id": "task123",
                 "args": {"query": "quantum"},
                 "is_subagent": True,
@@ -229,6 +312,7 @@ def test_subagent_tool_without_namespace_falls_back_to_run_id():
             "tool_call",
             {
                 "name": "research_expert",
+                "tool_call_id": "run123",
                 "run_id": "run123",
                 "args": {"query": "quantum"},
                 "is_subagent": True,
@@ -261,6 +345,7 @@ def test_extract_subagent_tool_call_id():
     assert _extract_subagent_tool_call_id("tools:abc123") is None
     assert _extract_subagent_tool_call_id("tools:abc123|model:def") == "abc123"
     assert _extract_subagent_tool_call_id("tools:abc123|tools:def456") == "abc123"
+    assert _extract_subagent_tool_call_id("agent:abc123|tools:def456") is None
     assert _extract_subagent_tool_call_id("") is None
 
 
