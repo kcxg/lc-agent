@@ -23,18 +23,23 @@ def _extract_subagent_tool_call_id(checkpoint_ns: str) -> str | None:
       - Sub-agent internal event:    "tools:{task_uuid}|agent"    (multiple segments)
       - Sub-agent internal tool:     "tools:{uuid}|...|tools:{uuid2}" (multiple segments)
 
-    Returns None for single-segment namespaces (main-agent-level events).
-    Returns the task_uuid from the first "tools:" segment when multi-segment.
+    A regular graph node that embeds a compiled agent is also a nested graph,
+    but it starts with its node name instead of the parent task tool:
+      - Regular nested agent:        "agent:{graph_uuid}|tools:{uuid}"
+
+    Only namespaces rooted at ``tools:{task_uuid}`` represent a sub-agent
+    launched through a task tool. Other nested graphs must continue to use
+    normal tool events so they can be rendered in the main conversation.
+
+    Returns None for main-agent namespaces and ordinary nested graph events.
+    Returns the task_uuid from the root "tools:" segment for task sub-agents.
     """
     segments = checkpoint_ns.split("|")
-    if len(segments) <= 1:
-        # Single segment: main-agent-level event — NOT inside a sub-agent
+    if len(segments) <= 1 or not segments[0].startswith("tools:"):
+        # Main-agent events and ordinary nested graph events are not task
+        # sub-agent events.
         return None
-    # Multiple segments: we are executing inside a sub-agent graph
-    for seg in segments:
-        if seg.startswith("tools:"):
-            return seg.split(":", 1)[1]
-    return None
+    return segments[0].split(":", 1)[1]
 
 
 def _extract_tools_task_id(checkpoint_ns: str) -> str | None:
