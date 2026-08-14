@@ -79,6 +79,9 @@
 **ai coding 编辑用户代码，类似cursor codex的代码变动 diff 红绿渲染**
 ![ai coding 编辑用户代码，类似cursor codex的代码变动 diff 红绿渲染](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/aicoding_edit.png)
 
+**ai coding连续完成4个脚本**
+![ai coding2](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/aicoding2.png.png)
+
 **子 agent 效果，可委派给子 agent 执行，并流式打字机显示和保留独立执行过程**
 ![子 agent 效果，可委派给子 agent 执行，并流式打字机显示和保留独立执行过程](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/subagent.png)
 

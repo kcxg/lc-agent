@@ -71,7 +71,6 @@ export const useAgentsStore = defineStore('agents', () => {
   }
 
   async function selectAgent(id: string) {
-    await api.activateAgent(id)
     currentAgentId.value = id
   }
 

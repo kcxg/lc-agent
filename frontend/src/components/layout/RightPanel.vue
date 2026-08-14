@@ -206,10 +206,11 @@
         </el-select>
       </div>
 
-      <div v-if="chatStore.todos.length > 0" class="panel-section">
+      </template>
+
+      <div v-if="chatStore.todos.length > 0" class="panel-section todo-section">
         <TodoList :todos="chatStore.todos" />
       </div>
-      </template>
     </div>
 
     <div class="right-panel-scroll">
