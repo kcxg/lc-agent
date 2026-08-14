@@ -155,6 +155,7 @@ const attachments = ref<Attachment[]>([])
 const isStreamingState = computed(() => props.isStreaming ?? isStreaming.value)
 const elapsedSeconds = ref(0)
 let elapsedTimer: number | null = null
+let localStartTs = 0
 
 function formatElapsed(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60)
@@ -168,12 +169,16 @@ watch(
   isStreamingState,
   (streaming) => {
     if (streaming) {
-      elapsedSeconds.value = 0
-      const start = chatStore.streamStartTime ?? Date.now()
-      elapsedSeconds.value = Math.floor((Date.now() - start) / 1000)
+      // 每次重新进入 streaming 都以当前时间为本地基准，确保从 0 重新计时
+      localStartTs = Date.now()
+      // 如果 store 中已经有本次流的开始时间（刚设置的），并且比本地基准更新，用它校正
+      const storeTs = chatStore.streamStartTime
+      if (storeTs && storeTs > localStartTs - 5000) {
+        localStartTs = storeTs
+      }
+      elapsedSeconds.value = Math.floor((Date.now() - localStartTs) / 1000)
       elapsedTimer = window.setInterval(() => {
-        const startTime = chatStore.streamStartTime ?? start
-        elapsedSeconds.value = Math.floor((Date.now() - startTime) / 1000)
+        elapsedSeconds.value = Math.floor((Date.now() - localStartTs) / 1000)
       }, 1000)
     } else {
       if (elapsedTimer !== null) {

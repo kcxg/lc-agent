@@ -161,6 +161,32 @@ async def _check_sse_auth(request: Request, thread_id: str) -> JSONResponse | No
     return None
 
 
+async def _check_sse_agent_access(request: Request, preset_id: str) -> JSONResponse | None:
+    user = await _authenticate_sse(request)
+    if user is None or user.role == "admin" or preset_id == "chat":
+        return None
+
+    from lc_agent.db.engine import get_async_session
+    from lc_agent.db.models_auth import UserAgentAccess
+    from sqlalchemy import select
+
+    db_url = request.app.state.config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
+    db = get_async_session(db_url)
+    try:
+        result = await db.execute(
+            select(UserAgentAccess).where(
+                UserAgentAccess.user_id == user.id,
+                UserAgentAccess.agent_id == preset_id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            return JSONResponse(status_code=403, content={"detail": "无权使用此智能体"})
+    finally:
+        await db.close()
+
+    return None
+
+
 def _get_lock(thread_id: str) -> asyncio.Lock:
     if thread_id not in _run_locks:
         _run_locks[thread_id] = asyncio.Lock()
@@ -173,6 +199,10 @@ async def run_stream(thread_id: str, req: RunStreamRequest, request: Request):
     auth_error = await _check_sse_auth(request, thread_id)
     if auth_error is not None:
         return auth_error
+
+    agent_access_error = await _check_sse_agent_access(request, req.preset_id)
+    if agent_access_error is not None:
+        return agent_access_error
 
     lock = _get_lock(thread_id)
     if lock.locked():
@@ -220,6 +250,10 @@ async def get_thread_state(thread_id: str, request: Request, preset_id: str = "c
     auth_error = await _check_sse_auth(request, thread_id)
     if auth_error is not None:
         return auth_error
+
+    agent_access_error = await _check_sse_agent_access(request, preset_id)
+    if agent_access_error is not None:
+        return agent_access_error
 
     engine = _get_engine()
     agent = engine._get_or_build_agent(preset_id, model)
