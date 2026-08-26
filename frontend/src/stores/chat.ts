@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, shallowReactive } from 'vue'
 import { ChatSseClient, type SseMessage } from '@/api/sse-client'
 import { useSessionsStore } from '@/stores/sessions'
+import { useFileChangesStore } from '@/stores/file-changes'
 import { api } from '@/api/http'
 import { createClientId } from '@/utils/client-id'
 import { createSessionState } from './chat-session-state'
@@ -840,6 +841,33 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
 
+    client.on('file_change', (msg: SseMessage) => {
+      if (sessionId !== activeSessionId.value) return
+      const filePath = (msg as any).file_path || ''
+      if (!filePath) return
+      const eventSessionId = (msg as any).session_id || ''
+      const isSubAgent = eventSessionId && eventSessionId !== sessionId && eventSessionId.includes('--sa--')
+      const fileChangesStore = useFileChangesStore()
+      if (isSubAgent) {
+        // Sub-agent change — will be fully loaded on drawer open via fetchFileChanges
+        return
+      }
+      fileChangesStore.addFileChange({
+        file_path: filePath,
+        change_type: (msg as any).change_type || 'edit',
+        move_destination: (msg as any).move_destination,
+      })
+    })
+
+    client.on('file_change_git_snapshot', (msg: SseMessage) => {
+      if (sessionId !== activeSessionId.value) return
+      const eventSessionId = (msg as any).session_id || ''
+      if (eventSessionId && eventSessionId !== sessionId) return
+      const fileChangesStore = useFileChangesStore()
+      const hash = (msg as any).git_base_hash
+      if (hash) fileChangesStore.gitBaseHash = hash
+    })
+
     client.on('subagent_start', (msg: SseMessage) => {
       const result = applySubAgentEventToMessages(state.messages.value, msg, applySubAgentStart, sessionId)
       if (result.shouldRefresh) {
@@ -1028,6 +1056,9 @@ export const useChatStore = defineStore('chat', () => {
 
     activeSessionId.value = sessionId
     useSessionsStore().markSessionViewed(sessionId)
+    const fcStore = useFileChangesStore()
+    fcStore.reset()
+    fcStore.fetchFileChanges(sessionId)
 
     // Arriving session: already in registry means it was streaming in background
     if (activeSessions.has(sessionId)) return

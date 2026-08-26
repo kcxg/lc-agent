@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from lc_agent.db.models import AgentPresetDB, AgentPromptBindingDB, ChatUiMessage, PromptTemplateDB, SessionMeta
+from lc_agent.db.models import AgentPresetDB, AgentPromptBindingDB, ChatUiMessage, FileChange, PromptTemplateDB, SessionMeta
 
 
 class PromptRepository:
@@ -165,6 +165,14 @@ class SessionRepository:
         await self.session.commit()
         return True
 
+    async def list_children(self, parent_session_id: str) -> list[SessionMeta]:
+        result = await self.session.execute(
+            select(SessionMeta)
+            .where(SessionMeta.parent_session_id == parent_session_id)
+            .order_by(SessionMeta.created_at)
+        )
+        return list(result.scalars().all())
+
     async def increment_messages(self, session_id: str) -> None:
         sess = await self.get_by_id(session_id)
         if sess:
@@ -259,3 +267,33 @@ class ChatUiMessageRepository:
             select(func.count()).select_from(ChatUiMessage).where(ChatUiMessage.session_id == session_id)
         )
         return int(result.scalar_one())
+
+
+class FileChangeRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(self, **kwargs) -> FileChange:
+        fc = FileChange(**kwargs)
+        self.session.add(fc)
+        await self.session.commit()
+        try:
+            await self.session.refresh(fc)
+        except Exception:
+            pass
+        return fc
+
+    async def list_by_session(self, session_id: str) -> list[FileChange]:
+        result = await self.session.execute(
+            select(FileChange)
+            .where(FileChange.session_id == session_id)
+            .order_by(FileChange.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def delete_by_session(self, session_id: str) -> int:
+        rows = await self.list_by_session(session_id)
+        for row in rows:
+            await self.session.delete(row)
+        await self.session.commit()
+        return len(rows)

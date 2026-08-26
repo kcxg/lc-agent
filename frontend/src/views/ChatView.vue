@@ -1238,7 +1238,14 @@ function injectScrollbarStyle() {
   style.id = 'chat-scrollbar-override'
   // Inject as the last stylesheet so it wins over all library CSS
   // (dynamic <style> tags added to <head> are always applied after static bundles)
+  // Use scrollbar-color (CSS Scrollbars spec) to override the library's
+  // "scrollbar-color: transparent transparent" which hides the thumb in Chrome.
+  // Chrome hybrid mode: webkit pseudo-elements control shape, scrollbar-color controls color.
   style.textContent = [
+    '.elx-bubble-list__list {',
+    '  scrollbar-color: var(--el-border-color-dark, #999) transparent !important;',
+    '  scrollbar-width: thin !important;',
+    '}',
     '.elx-bubble-list__list::-webkit-scrollbar { width: 8px !important; }',
     '.elx-bubble-list__list::-webkit-scrollbar-track { background: transparent !important; }',
     '.elx-bubble-list__list::-webkit-scrollbar-thumb {',

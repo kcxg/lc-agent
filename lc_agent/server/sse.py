@@ -415,6 +415,9 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             if req.replace_from_message_id:
                 stream_kwargs["history"] = req.history or []
 
+            from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
+            bind_session_for_file_tracking(thread_id)
+
             model_info = engine._find_model(model_id) if model_id else None
             provider = model_info.provider if model_info else None
             resolved_model = model_info.id if model_info else model_id
@@ -466,6 +469,29 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                             tool_call_id = evt_data.get("tool_call_id")
                             if isinstance(tool_call_id, str):
                                 active_subagent_tool_call_ids.discard(tool_call_id)
+                        elif evt_type == "file_change":
+                            asyncio.create_task(persistence.save_file_change(
+                                _db_url,
+                                evt_data.get("session_id", thread_id),
+                                evt_data.get("file_path", ""),
+                                evt_data.get("change_type", ""),
+                                old_string=evt_data.get("old_string"),
+                                new_string=evt_data.get("new_string"),
+                                tool_call_id=evt_data.get("tool_call_id"),
+                                move_destination=evt_data.get("move_destination"),
+                            ))
+                            yield stream_utils.format_sse_event(evt_type, evt_data)
+                            last_event_time = time.time()
+                            continue
+                        elif evt_type == "file_change_git_snapshot":
+                            asyncio.create_task(persistence.save_git_base_hash(
+                                _db_url,
+                                evt_data.get("session_id", thread_id),
+                                evt_data.get("git_base_hash", ""),
+                            ))
+                            yield stream_utils.format_sse_event(evt_type, evt_data)
+                            last_event_time = time.time()
+                            continue
                         evt_type, evt_data = subagent_tracker.handle_event(evt_type, evt_data)
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()
@@ -607,6 +633,9 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     async def event_stream():
         await lock.acquire()
         try:
+            from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
+            bind_session_for_file_tracking(thread_id)
+
             usage_rounds: list[dict] = []
             round_start_time = time.time()
             stream_start_time = time.time()
@@ -721,6 +750,29 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                             tool_call_id = evt_data.get("tool_call_id")
                             if isinstance(tool_call_id, str):
                                 active_subagent_tool_call_ids.discard(tool_call_id)
+                        elif evt_type == "file_change":
+                            asyncio.create_task(persistence.save_file_change(
+                                _db_url,
+                                evt_data.get("session_id", thread_id),
+                                evt_data.get("file_path", ""),
+                                evt_data.get("change_type", ""),
+                                old_string=evt_data.get("old_string"),
+                                new_string=evt_data.get("new_string"),
+                                tool_call_id=evt_data.get("tool_call_id"),
+                                move_destination=evt_data.get("move_destination"),
+                            ))
+                            yield stream_utils.format_sse_event(evt_type, evt_data)
+                            last_event_time = time.time()
+                            continue
+                        elif evt_type == "file_change_git_snapshot":
+                            asyncio.create_task(persistence.save_git_base_hash(
+                                _db_url,
+                                evt_data.get("session_id", thread_id),
+                                evt_data.get("git_base_hash", ""),
+                            ))
+                            yield stream_utils.format_sse_event(evt_type, evt_data)
+                            last_event_time = time.time()
+                            continue
                         evt_type, evt_data = subagent_tracker.handle_event(evt_type, evt_data)
                         yield stream_utils.format_sse_event(evt_type, evt_data)
                         last_event_time = time.time()

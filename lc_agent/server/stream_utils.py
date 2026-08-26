@@ -317,6 +317,21 @@ def convert_stream_event(
                 "total_lines": data.get("total_lines", 0),
                 "start_line": data.get("start_line", 1),
             }))
+        elif custom_name == "file_change_record":
+            results.append(("file_change", {
+                "session_id": data.get("session_id", ""),
+                "file_path": data.get("file_path", ""),
+                "change_type": data.get("change_type", ""),
+                "old_string": data.get("old_string"),
+                "new_string": data.get("new_string"),
+                "move_destination": data.get("move_destination"),
+                "tool_call_id": tool_call_id,
+            }))
+        elif custom_name == "file_change_git_snapshot":
+            results.append(("file_change_git_snapshot", {
+                "session_id": data.get("session_id", ""),
+                "git_base_hash": data.get("git_base_hash", ""),
+            }))
 
     return results
 

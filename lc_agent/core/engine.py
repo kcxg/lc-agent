@@ -258,8 +258,14 @@ class AgentEngine:
                 },
             }
 
+            from lc_agent.tools.system_tools._file_change_tracker import (
+                bind_session_for_file_tracking,
+                reset_session_for_file_tracking,
+            )
+
             _sa_collector = HttpTraceCollector(provider=None, model=None)
             _trace_token = bind_http_trace_collector(_sa_collector)
+            _file_token = bind_session_for_file_tracking(sub_thread_id)
             try:
                 result = await sub_agent.ainvoke(
                     {"messages": [{"role": "user", "content": description}]},
@@ -271,6 +277,7 @@ class AgentEngine:
                 logger.exception("Subagent %s failed: %s", descriptor.preset_id, exc)
                 return f"[Sub-agent error: {exc}]"
             finally:
+                reset_session_for_file_tracking(_file_token)
                 reset_http_trace_collector(_trace_token)
                 register_subagent_collector(sub_thread_id, _sa_collector)
 

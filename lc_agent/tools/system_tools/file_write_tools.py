@@ -5,6 +5,7 @@ from typing import Annotated
 
 from lc_agent.tools.registry import tool
 from lc_agent.tools.system_tools._config import validate_write_path
+from lc_agent.tools.system_tools._file_change_tracker import emit_file_change
 
 _CONTEXT_LINES = 5
 _WRITE_PREVIEW_LINES = 20
@@ -112,6 +113,14 @@ def write_file(
     except Exception as e:
         return f"Error creating parent directory: {e}"
 
+    existed_before = file_path.exists()
+    original_content: str | None = None
+    if existed_before and mode != "append":
+        try:
+            original_content = file_path.read_text(encoding="utf-8")
+        except Exception as e:
+            return f"Error reading existing file: {e}"
+
     try:
         if mode == "append":
             with open(file_path, "a", encoding="utf-8") as f:
@@ -126,6 +135,18 @@ def write_file(
     line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
 
     _emit_write_preview(resolved, content, mode)
+
+    if mode == "append":
+        emit_file_change(resolved, "append", new_string=content)
+    elif existed_before:
+        emit_file_change(
+            resolved,
+            "edit",
+            old_string=original_content,
+            new_string=content,
+        )
+    else:
+        emit_file_change(resolved, "create", new_string=content)
 
     return f"{action} {line_count} lines to {resolved}"
 
@@ -179,6 +200,8 @@ def move_file(
     except Exception as e:
         return f"Error moving file: {e}"
 
+    emit_file_change(resolved_src, "move", move_destination=resolved_dst)
+
     return f"Moved: {resolved_src} → {resolved_dst}"
 
 
@@ -203,6 +226,8 @@ def delete_file(
         file_path.unlink()
     except Exception as e:
         return f"Error deleting file: {e}"
+
+    emit_file_change(resolved, "delete")
 
     return f"Deleted: {resolved}"
 
@@ -265,6 +290,8 @@ def edit_block(
     new_lines = new_string.count("\n") + 1
 
     _emit_edit_diff(content, new_content, old_string, new_string, resolved, expected_replacements)
+
+    emit_file_change(resolved, "edit", old_string=old_string, new_string=new_string)
 
     return (
         f"Replaced {count} occurrence(s) in {resolved}\n"

@@ -298,6 +298,58 @@ async def save_subsession_delegation_message(
     )
 
 
+async def save_file_change(
+    db_url: str,
+    session_id: str,
+    file_path: str,
+    change_type: str,
+    *,
+    old_string: str | None = None,
+    new_string: str | None = None,
+    tool_call_id: str | None = None,
+    move_destination: str | None = None,
+) -> None:
+    """Persist a file change record."""
+    try:
+        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.repository import FileChangeRepository
+
+        session = get_async_session(db_url)
+        try:
+            repo = FileChangeRepository(session)
+            await repo.create(
+                session_id=session_id,
+                file_path=file_path,
+                change_type=change_type,
+                old_string=old_string,
+                new_string=new_string,
+                tool_call_id=tool_call_id,
+                move_destination=move_destination,
+            )
+        finally:
+            await session.close()
+    except Exception:
+        logger.exception("Failed to save file change for session %s", session_id)
+
+
+async def save_git_base_hash(db_url: str, session_id: str, git_base_hash: str) -> None:
+    """Save git base hash to session metadata."""
+    try:
+        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.repository import SessionRepository
+
+        session = get_async_session(db_url)
+        try:
+            repo = SessionRepository(session)
+            sess = await repo.get_by_id(session_id)
+            if sess and not sess.git_base_hash:
+                await repo.update(session_id, git_base_hash=git_base_hash)
+        finally:
+            await session.close()
+    except Exception:
+        logger.exception("Failed to save git base hash for session %s", session_id)
+
+
 async def finalize_subsession_message(
     db_url: str,
     sub_session_id: str,

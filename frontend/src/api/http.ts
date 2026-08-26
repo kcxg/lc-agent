@@ -99,6 +99,41 @@ export const api = {
   setAgentPrompts: (agentId: string, promptIds: string[]) =>
     fetchApi<string[]>(`/agents/${agentId}/prompts`, { method: 'PUT', body: JSON.stringify({ prompt_ids: promptIds }) }),
 
+  // File changes
+  getFileChanges: (sessionId: string) =>
+    fetchApi<{ session_id: string; git_base_hash: string | null; files: any[] }>(
+      `/sessions/${sessionId}/file-changes`
+    ),
+  getFileDiff: (sessionId: string, filePath: string) =>
+    fetchApi<{ file_path: string; final_type: string; hunks: any[]; change_count: number }>(
+      `/sessions/${sessionId}/file-changes/diff?file_path=${encodeURIComponent(filePath)}`
+    ),
+  getGitDiff: (sessionId: string) =>
+    fetchApi<{ available: boolean; base_hash?: string; diff?: string; reason?: string }>(
+      `/sessions/${sessionId}/git-diff`
+    ),
+  getGitDiffFiles: (sessionId: string) =>
+    fetchApi<{
+      available: boolean
+      base_hash?: string
+      files?: Array<{
+        file_path: string
+        change_type: string
+        additions: number
+        deletions: number
+      }>
+      reason?: string
+    }>(`/sessions/${sessionId}/git-diff/files`),
+  getGitFileDiff: (sessionId: string, filePath: string) =>
+    fetchApi<{
+      available: boolean
+      file_path?: string
+      diff?: string
+      reason?: string
+    }>(
+      `/sessions/${sessionId}/git-diff/file?file_path=${encodeURIComponent(filePath)}`
+    ),
+
   // 数据清理 / 瘦身（参见 docs/adr/adr-001-data-cleanup.md）
   previewCleanup: (data: {
     keep_days: number
