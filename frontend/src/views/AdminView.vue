@@ -265,12 +265,35 @@ async function handleSaveAgents() {
   }
 }
 
-function copyPassword() {
-  navigator.clipboard.writeText(generatedPassword.value).then(() => {
-    ElMessage.success('已复制到剪贴板')
-  }).catch(() => {
+async function copyPassword() {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(generatedPassword.value)
+      ElMessage.success('已复制到剪贴板')
+      return
+    } catch {
+      // fall through to fallback
+    }
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = generatedPassword.value
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  try {
+    if (document.execCommand('copy')) {
+      ElMessage.success('已复制到剪贴板')
+    } else {
+      ElMessage.warning('复制失败，请手动复制')
+    }
+  } catch {
     ElMessage.warning('复制失败，请手动复制')
-  })
+  } finally {
+    document.body.removeChild(textarea)
+  }
 }
 </script>
 

@@ -70,10 +70,25 @@ class SessionMeta(SQLModel, table=True):
     parent_session_id: str | None = Field(default=None, index=True)
     tool_call_id: str | None = Field(default=None)
     message_count: int = 0
+    git_base_hash: str | None = Field(default=None)
     is_pinned: bool = False
     pinned_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class FileChange(SQLModel, table=True):
+    __tablename__ = "file_changes"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    session_id: str = Field(index=True)
+    file_path: str
+    change_type: str  # "edit" | "create" | "append" | "delete" | "move"
+    old_string: str | None = Field(default=None)
+    new_string: str | None = Field(default=None)
+    tool_call_id: str | None = Field(default=None)
+    move_destination: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class ChatUiMessage(SQLModel, table=True):

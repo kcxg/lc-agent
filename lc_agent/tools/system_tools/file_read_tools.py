@@ -1,4 +1,5 @@
 import base64
+import fnmatch
 import mimetypes
 import os
 import subprocess
@@ -135,6 +136,11 @@ def read_multiple_files(
 def list_directory(
     path: Annotated[str, "Directory path to list"],
     depth: Annotated[int, "Maximum number of directory levels to list; minimum 1, default 2"] = 2,
+    exclude: Annotated[
+        list[str] | None,
+        "Entry names or glob patterns to exclude from the listing, e.g. ['node_modules', '__pycache__', '*.pyc']. "
+        "Matched case-sensitively against basenames at every depth; excluded directories are skipped entirely (not recursed into).",
+    ] = None,
 ) -> str:
     """List directory contents up to the specified depth; depth=1 lists only direct children. Results are capped at 10,000 entries; if truncated, reduce depth and inspect subdirectories individually."""
     if depth < 1:
@@ -149,7 +155,7 @@ def list_directory(
         return f"Error: '{path}' is not a directory"
 
     lines: list[str] = []
-    truncated = _walk_dir(dir_path, lines, depth, current_depth=1)
+    truncated = _walk_dir(dir_path, lines, depth, current_depth=1, exclude=exclude)
     if truncated:
         lines.append(f"... [truncated: showing the first {_MAX_DIRECTORY_ITEMS} entries]")
         lines.append(
@@ -161,8 +167,12 @@ def list_directory(
 _ALWAYS_IGNORE = frozenset({".git"})
 
 
+def _is_excluded(name: str, patterns: list[str]) -> bool:
+    return any(name == p or fnmatch.fnmatchcase(name, p) for p in patterns)
+
+
 def _walk_dir(
-    dir_path: Path, lines: list[str], max_depth: int, current_depth: int
+    dir_path: Path, lines: list[str], max_depth: int, current_depth: int, exclude: list[str] | None
 ) -> bool:
     try:
         entries = sorted(dir_path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
@@ -173,6 +183,8 @@ def _walk_dir(
     for entry in entries:
         if entry.name in _ALWAYS_IGNORE:
             continue
+        if exclude and _is_excluded(entry.name, exclude):
+            continue
         if len(lines) >= _MAX_DIRECTORY_ITEMS:
             return True
 
@@ -180,7 +192,7 @@ def _walk_dir(
         if entry.is_dir():
             lines.append(f"{indent}[DIR] {entry.name}/")
             if current_depth < max_depth and _walk_dir(
-                entry, lines, max_depth, current_depth + 1
+                entry, lines, max_depth, current_depth + 1, exclude=exclude
             ):
                 return True
         else:

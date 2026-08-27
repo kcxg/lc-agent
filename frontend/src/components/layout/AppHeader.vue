@@ -41,6 +41,7 @@
       </el-select>
       </div>
       <div class="header-actions desktop-only">
+        <FileChangesBadge />
         <button class="header-btn btn-manage-agents" @click="$emit('manageAgents')">⚙ Agents管理</button>
         <button class="header-btn btn-new-chat" @click="$emit('newChat')">+ 新对话</button>
         <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
@@ -55,6 +56,7 @@
         <span class="mobile-btn-text">新对话</span>
       </button>
       <span class="mobile-only">
+        <FileChangesBadge />
         <CopyRoundsButton v-if="hasMessages" :messages="chatStore.messages" :model-name="sessionModel" />
       </span>
       <el-button
@@ -100,6 +102,7 @@ import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
 import { Sunny, Moon, Menu, Setting, RefreshRight, Plus, Briefcase } from '@element-plus/icons-vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
+import FileChangesBadge from '@/components/chat/FileChangesBadge.vue'
 
 const agentsStore = useAgentsStore()
 const chatStore = useChatStore()

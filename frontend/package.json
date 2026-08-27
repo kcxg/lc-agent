@@ -34,6 +34,7 @@
     "@element-plus/icons-vue": "^2.3.2",
     "@vueuse/core": "^14.3.0",
     "ansi_up": "^6.0.6",
+    "diff2html": "^3.4.56",
     "element-plus": "^2.14.1",
     "highlight.js": "^11.11.1",
     "js-tiktoken": "^1.0.21",

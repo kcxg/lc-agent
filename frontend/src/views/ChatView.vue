@@ -1235,8 +1235,40 @@ function applyAlwaysScrollbar() {
   }
 }
 
+function injectScrollbarStyle() {
+  if (document.getElementById('chat-scrollbar-override')) return
+  const style = document.createElement('style')
+  style.id = 'chat-scrollbar-override'
+  // Inject as the last stylesheet so it wins over all library CSS
+  // (dynamic <style> tags added to <head> are always applied after static bundles)
+  // Use scrollbar-color (CSS Scrollbars spec) to override the library's
+  // "scrollbar-color: transparent transparent" which hides the thumb in Chrome.
+  // Chrome hybrid mode: webkit pseudo-elements control shape, scrollbar-color controls color.
+  style.textContent = [
+    '.elx-bubble-list__list {',
+    '  scrollbar-color: var(--el-border-color-dark, #999) transparent !important;',
+    '  scrollbar-width: thin !important;',
+    '}',
+    '.elx-bubble-list__list::-webkit-scrollbar { width: 8px !important; }',
+    '.elx-bubble-list__list::-webkit-scrollbar-track { background: transparent !important; }',
+    '.elx-bubble-list__list::-webkit-scrollbar-thumb {',
+    '  background: var(--el-border-color-dark, #999) !important;',
+    '  border-radius: 4px !important;',
+    '  min-height: 40px !important;',
+    '}',
+    '.elx-bubble-list__list::-webkit-scrollbar-thumb:hover {',
+    '  background: var(--el-text-color-secondary, #777) !important;',
+    '}',
+    '.elx-bubble-list__list::-webkit-scrollbar-thumb:active {',
+    '  background: var(--el-text-color-primary, #555) !important;',
+    '}',
+  ].join('\n')
+  document.head.appendChild(style)
+}
+
 onMounted(() => {
   document.addEventListener('click', handleMarkdownClick)
+  injectScrollbarStyle()
   nextTick(() => {
     applyAlwaysScrollbar()
     updateThinkingOverflowFlags()
@@ -2134,6 +2166,10 @@ onBeforeUnmount(() => {
 
 .messages-container :deep(.elx-welcome__title) {
   color: var(--el-text-color-primary) !important;
+}
+
+.messages-container :deep(.elx-welcome__description) {
+  color: var(--el-text-color-secondary) !important;
 }
 
 .empty-orb {

@@ -59,37 +59,11 @@ summary::-webkit-details-marker {
   background: var(--el-border-color);
 }
 
-/* Override vue-element-plus-x BubbleList scrollbar.
-   The library hides scrollbar by default and shows only on :hover.
-   We use the library's own --always-scrollbar class (applied via JS in ChatView)
-   to keep it permanently visible. Only override structural properties here;
-   color (#c1c1c1 / #a8a8a8) is intentionally left to the library's own CSS
-   since it works in both dark and light mode. */
+/* BubbleList scroll container: keep it interactive.
+   Scrollbar appearance is handled by the dynamic <style> tag
+   injected in ChatView.vue onMounted (injectScrollbarStyle). */
 .elx-bubble-list__list {
   pointer-events: auto !important;
-}
-
-.elx-bubble-list__list::-webkit-scrollbar {
-  width: 6px !important;
-}
-
-.elx-bubble-list__list::-webkit-scrollbar-track {
-  background: transparent !important;
-  border-radius: 3px !important;
-}
-
-.elx-bubble-list__list::-webkit-scrollbar-thumb {
-  background: #c1c1c1 !important;
-  border-radius: 3px !important;
-  min-height: 40px !important;
-}
-
-.elx-bubble-list__list::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8 !important;
-}
-
-.elx-bubble-list__list::-webkit-scrollbar-thumb:active {
-  background: #888888 !important;
 }
 
 .el-message .el-message__closeBtn {

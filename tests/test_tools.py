@@ -144,3 +144,64 @@ class TestListDirectory:
         assert "showing the first 2 entries" in result
         assert "Reduce depth" in result
         assert "individual subdirectories" in result
+
+    def test_exclude_exact_name(self, tmp_path, monkeypatch):
+        (tmp_path / "keep.txt").write_text("keep")
+        (tmp_path / "skip.txt").write_text("skip")
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+
+        result = file_read_tools.list_directory("ignored", depth=1, exclude=["skip.txt"])
+
+        assert "[FILE] keep.txt" in result
+        assert "skip.txt" not in result
+
+    def test_exclude_glob_pattern(self, tmp_path, monkeypatch):
+        (tmp_path / "a.py").write_text("")
+        (tmp_path / "b.pyc").write_text("")
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+
+        result = file_read_tools.list_directory("ignored", depth=1, exclude=["*.pyc"])
+
+        assert "[FILE] a.py" in result
+        assert "b.pyc" not in result
+
+    def test_exclude_multiple_patterns(self, tmp_path, monkeypatch):
+        (tmp_path / "__pycache__").mkdir()
+        (tmp_path / "app.log").write_text("")
+        (tmp_path / "keep.txt").write_text("")
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+
+        result = file_read_tools.list_directory("ignored", depth=2, exclude=["__pycache__", "*.log"])
+
+        assert "[FILE] keep.txt" in result
+        assert "app.log" not in result
+        assert "__pycache__" not in result
+
+    def test_exclude_is_case_sensitive(self, tmp_path, monkeypatch):
+        (tmp_path / "a.PYC").write_text("")
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+
+        result = file_read_tools.list_directory("ignored", depth=1, exclude=["*.pyc"])
+
+        assert "[FILE] a.PYC" in result 
+
+    def test_exclude_prunes_whole_directory(self, tmp_path, monkeypatch):
+        cache = tmp_path / "__pycache__"
+        cache.mkdir()
+        (cache / "inner.txt").write_text("inner")
+        (tmp_path / "keep.txt").write_text("")
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+
+        result = file_read_tools.list_directory("ignored", depth=2, exclude=["__pycache__"])
+
+        assert "keep.txt" in result
+        assert "__pycache__" not in result
+        assert "inner.txt" not in result
+
+    def test_exclude_defaults_to_none(self, tmp_path, monkeypatch):
+        (tmp_path / "a.txt").write_text("")
+        monkeypatch.setattr(file_read_tools, "validate_read_path", lambda _: str(tmp_path))
+
+        result = file_read_tools.list_directory("ignored", depth=1)
+
+        assert "[FILE] a.txt" in result

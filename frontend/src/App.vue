@@ -54,6 +54,7 @@
     <AgentManagerDialog ref="agentManagerRef" />
     <CleanupDialog ref="cleanupDialogRef" @cleaned="handleCleanupDone" />
     <ChangePasswordDialog ref="changePasswordRef" />
+    <FileChangesDrawer />
     </div>
   </ConfigProvider>
 </template>
@@ -74,6 +75,7 @@ import RightPanel from '@/components/layout/RightPanel.vue'
 import AgentManagerDialog from '@/components/dialogs/AgentManagerDialog.vue'
 import CleanupDialog from '@/components/dialogs/CleanupDialog.vue'
 import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
+import FileChangesDrawer from '@/components/chat/FileChangesDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const { isDark } = useTheme()

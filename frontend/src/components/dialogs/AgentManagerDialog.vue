@@ -588,7 +588,7 @@
           git 状态是会话开始时的快照，如需刷新可让 Agent 执行 <code>run_command</code> 更新。
         </p>
         <div style="margin-top: 12px; padding: 10px 12px; background: var(--el-fill-color-light); border-radius: 8px; border-left: 3px solid var(--el-color-primary); font-size: 13px; line-height: 1.6;">
-          <strong>💡 编程项目强烈推荐</strong>：配置
+          <strong>💡 编程项目强烈推荐</strong>：在全局配置文件config.jsonc中配置
           <a href="https://github.com/colbymchenry/codegraph" target="_blank" rel="noopener noreferrer" style="color: var(--el-color-primary);">codegraph</a>
           MCP，让 Agent 获得代码智能分析能力（AST 级符号索引、调用链追踪、影响范围分析），大幅提升编码效率。
           <br/>① 在项目根目录运行 <code>codegraph init</code> 完成索引
