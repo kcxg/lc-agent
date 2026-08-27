@@ -1,5 +1,5 @@
 <template>
-  <aside class="left-sidebar" :class="{ collapsed }">
+  <aside class="left-sidebar" :class="{ collapsed }" :style="panelWidth !== undefined ? { width: panelWidth + 'px' } : {}">
     <div class="sidebar-header">
       <transition name="fade">
         <div v-if="!collapsed" class="sidebar-brand-wrap">
@@ -146,7 +146,7 @@ import { useAgentsStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 
-const props = defineProps<{ collapsed: boolean }>()
+const props = defineProps<{ collapsed: boolean; panelWidth?: number }>()
 
 const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()

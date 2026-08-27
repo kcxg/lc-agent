@@ -49,6 +49,37 @@
         </div>
       </div>
 
+      <div
+        v-if="skillMenuOpen && !isStreamingState"
+        class="skill-picker"
+        role="listbox"
+        aria-label="选择 Skill"
+        @mousedown.prevent
+      >
+        <div class="skill-picker-header">
+          <span>Skills</span>
+          <span class="skill-picker-query">/{{ skillQuery }}</span>
+        </div>
+        <button
+          v-for="(skill, index) in skillSuggestions"
+          :key="skill.name"
+          type="button"
+          class="skill-picker-item"
+          :class="{ 'is-active': index === activeSkillIndex }"
+          role="option"
+          :aria-selected="index === activeSkillIndex"
+          @mousedown.prevent="selectSkill(skill)"
+        >
+          <el-icon class="skill-picker-icon"><MagicStick /></el-icon>
+          <span class="skill-picker-main">
+            <span class="skill-picker-name">/{{ skill.name }}</span>
+            <span class="skill-picker-description">{{ getSkillDescription(skill.description) }}</span>
+          </span>
+          <span v-if="skill.scope === 'project'" class="skill-picker-scope">项目</span>
+        </button>
+        <div v-if="skillSuggestions.length === 0" class="skill-picker-empty">没有匹配的 Skill</div>
+      </div>
+
       <textarea
         ref="textareaRef"
         v-model="messageText"
@@ -56,8 +87,11 @@
         rows="1"
         placeholder="Send a message... (可粘贴/拖拽图片或文本文件)"
         enterkeyhint="enter"
-        @input="resizeTextarea"
+        @input="handleInput"
         @keydown="handleKeydown"
+        @keyup="handleKeyup"
+        @click="updateSkillMenu"
+        @blur="closeSkillMenu"
         @paste="handlePaste"
       />
       <div class="input-actions">
@@ -120,7 +154,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
+import { MagicStick } from '@element-plus/icons-vue'
 import { useChatStore } from '@/stores/chat'
+import { useAgentsStore } from '@/stores/agents'
+import { useToolsStore, type Skill } from '@/stores/tools'
 import { useInputAnimation } from '@/composables/useInputAnimation'
 import {
   type Attachment,
@@ -146,12 +183,43 @@ const emit = defineEmits<{
 }>()
 
 const chatStore = useChatStore()
+const agentsStore = useAgentsStore()
+const toolsStore = useToolsStore()
 const { isStreaming } = storeToRefs(chatStore)
 const { inputAnimation } = useInputAnimation()
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const messageText = ref('')
 const attachments = ref<Attachment[]>([])
+const skillMenuOpen = ref(false)
+const skillQuery = ref('')
+const activeSkillIndex = ref(0)
+
+type SkillSuggestion = Skill & { allowed?: boolean }
+
+const availableSkills = computed<SkillSuggestion[]>(() => {
+  if (agentsStore.isCodeAgent) return []
+  return toolsStore.filteredSkills.filter((skill: SkillSuggestion) =>
+    skill.enabled && skill.allowed !== false,
+  )
+})
+
+const skillSuggestions = computed(() => {
+  const query = skillQuery.value.trim().toLocaleLowerCase()
+  if (!query) return availableSkills.value
+  return availableSkills.value
+    .filter((skill) => {
+      const name = skill.name.toLocaleLowerCase()
+      const description = skill.description.toLocaleLowerCase()
+      return name.includes(query) || description.includes(query)
+    })
+    .sort((a, b) => {
+      const aStarts = a.name.toLocaleLowerCase().startsWith(query)
+      const bStarts = b.name.toLocaleLowerCase().startsWith(query)
+      return Number(bStarts) - Number(aStarts)
+    })
+})
+
 const isStreamingState = computed(() => props.isStreaming ?? isStreaming.value)
 const elapsedSeconds = ref(0)
 let elapsedTimer: number | null = null
@@ -168,6 +236,7 @@ function formatElapsed(totalSeconds: number): string {
 watch(
   isStreamingState,
   (streaming) => {
+    if (streaming) closeSkillMenu()
     if (streaming) {
       // 每次重新进入 streaming 都以当前时间为本地基准，确保从 0 重新计时
       localStartTs = Date.now()
@@ -233,6 +302,76 @@ function resizeTextarea() {
   textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
 }
 
+function getSkillDescription(description: string): string {
+  const firstLine = description.split(/\r?\n/, 1)[0].trim()
+  return firstLine.length > 100 ? `${firstLine.slice(0, 100)}...` : firstLine
+}
+
+function getSkillTrigger(): { start: number; end: number; query: string } | null {
+  const textarea = textareaRef.value
+  if (!textarea) return null
+  const cursor = textarea.selectionStart
+  const beforeCursor = messageText.value.slice(0, cursor)
+  const match = beforeCursor.match(/(?:^|\s)\/([^\s]*)$/)
+  if (!match) return null
+
+  const matchStart = cursor - match[0].length
+  return {
+    start: matchStart + (match[0].startsWith(' ') ? 1 : 0),
+    end: cursor,
+    query: match[1],
+  }
+}
+
+function updateSkillMenu() {
+  if (isStreamingState.value || agentsStore.isCodeAgent) {
+    closeSkillMenu()
+    return
+  }
+  const trigger = getSkillTrigger()
+  if (!trigger) {
+    closeSkillMenu()
+    return
+  }
+  const queryChanged = skillQuery.value !== trigger.query
+  skillQuery.value = trigger.query
+  if (!skillMenuOpen.value || queryChanged) activeSkillIndex.value = 0
+  if (activeSkillIndex.value >= skillSuggestions.value.length) activeSkillIndex.value = 0
+  skillMenuOpen.value = true
+}
+
+function handleInput() {
+  resizeTextarea()
+  updateSkillMenu()
+}
+
+function handleKeyup(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  updateSkillMenu()
+}
+
+function closeSkillMenu() {
+  skillMenuOpen.value = false
+  skillQuery.value = ''
+  activeSkillIndex.value = 0
+}
+
+function selectSkill(skill: SkillSuggestion) {
+  const textarea = textareaRef.value
+  const trigger = getSkillTrigger()
+  if (!textarea || !trigger) return
+
+  const replacement = `/${skill.name} `
+  messageText.value = `${messageText.value.slice(0, trigger.start)}${replacement}${messageText.value.slice(trigger.end)}`
+  closeSkillMenu()
+  nextTick(() => {
+    const cursor = trigger.start + replacement.length
+    textarea.focus()
+    textarea.setSelectionRange(cursor, cursor)
+    resizeTextarea()
+  })
+}
+
 function focusTextarea(position: 'start' | 'end' = 'end') {
   const textarea = textareaRef.value
   if (!textarea) return
@@ -244,6 +383,7 @@ function focusTextarea(position: 'start' | 'end' = 'end') {
 function clearInput() {
   messageText.value = ''
   attachments.value = []
+  closeSkillMenu()
   nextTick(() => {
     resizeTextarea()
     focusTextarea('end')
@@ -251,6 +391,28 @@ function clearInput() {
 }
 
 function handleKeydown(event: KeyboardEvent) {
+  if (skillMenuOpen.value && !event.isComposing) {
+    if (event.key === 'ArrowDown' && skillSuggestions.value.length > 0) {
+      event.preventDefault()
+      activeSkillIndex.value = (activeSkillIndex.value + 1) % skillSuggestions.value.length
+      return
+    }
+    if (event.key === 'ArrowUp' && skillSuggestions.value.length > 0) {
+      event.preventDefault()
+      activeSkillIndex.value = (activeSkillIndex.value - 1 + skillSuggestions.value.length) % skillSuggestions.value.length
+      return
+    }
+    if ((event.key === 'Enter' || event.key === 'Tab') && skillSuggestions.value.length > 0) {
+      event.preventDefault()
+      selectSkill(skillSuggestions.value[activeSkillIndex.value])
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeSkillMenu()
+      return
+    }
+  }
   if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey) || event.isComposing) return
   event.preventDefault()
   handleSubmit()
@@ -310,6 +472,7 @@ function handleSubmit() {
   if (isStreamingState.value) return
   const blocks = buildContentBlocks(messageText.value, attachments.value)
   if (blocks.length === 0) return
+  closeSkillMenu()
   emit('send', blocks)
   clearInput()
 }
@@ -433,6 +596,109 @@ function handleCancelEdit() {
 .textarea-shell.is-streaming > * {
   position: relative;
   z-index: 1;
+}
+
+.skill-picker {
+  position: absolute;
+  z-index: 20;
+  left: 8px;
+  bottom: calc(100% + 8px);
+  width: min(460px, calc(100% - 16px));
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-bg-color-overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.skill-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.skill-picker-query {
+  overflow: hidden;
+  color: var(--el-color-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.skill-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.skill-picker-item:hover,
+.skill-picker-item.is-active {
+  background: var(--el-fill-color-light);
+}
+
+.skill-picker-icon {
+  flex-shrink: 0;
+  color: var(--el-color-primary);
+  font-size: 16px;
+}
+
+.skill-picker-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.skill-picker-name {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-picker-description {
+  overflow: hidden;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-picker-scope {
+  flex-shrink: 0;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 30%, var(--el-border-color));
+  border-radius: 4px;
+  color: var(--el-color-primary);
+  font-size: 10px;
+}
+
+.skill-picker-empty {
+  padding: 12px 10px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-align: center;
 }
 
 @keyframes input-conic-spin {

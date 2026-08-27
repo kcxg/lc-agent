@@ -174,12 +174,19 @@ export const useToolsStore = defineStore('tools', () => {
     }
   }
 
+  async function getSkillsForCurrentAgent() {
+    const agentsStore = useAgentsStore()
+    const agent = agentsStore.currentAgent
+    const projectRoot = agent?.project_mode ? agent.project_root || undefined : undefined
+    return api.getSkills(projectRoot)
+  }
+
   async function refreshRuntimeToggles() {
     try {
       const [groupsData, mcpData, skillsData] = await Promise.all([
         api.getToolGroups(),
         api.getMcpServers(),
-        api.getSkills(),
+        getSkillsForCurrentAgent(),
       ])
       groups.value = groupsData
       mcpServers.value = mcpData
@@ -195,7 +202,7 @@ export const useToolsStore = defineStore('tools', () => {
         api.getToolGroups(),
         api.getModels(),
         api.getMcpServers(),
-        api.getSkills(),
+        getSkillsForCurrentAgent(),
       ])
       groups.value = groupsData
       models.value = modelsData
@@ -204,12 +211,19 @@ export const useToolsStore = defineStore('tools', () => {
       syncModelWithAgentDefault()
 
       const agentsStore = useAgentsStore()
-      watch(() => agentsStore.currentAgentId, () => {
-        _clearOverrides()
-        syncModelWithAgentDefault()
-        resetLlmParams()
-        refreshRuntimeToggles()
-      })
+      watch(
+        () => [
+          agentsStore.currentAgentId,
+          agentsStore.currentAgent?.project_mode,
+          agentsStore.currentAgent?.project_root,
+        ] as const,
+        () => {
+          _clearOverrides()
+          syncModelWithAgentDefault()
+          resetLlmParams()
+          refreshRuntimeToggles()
+        },
+      )
     } catch (e) {
       console.error('[ToolsStore] Failed to fetch:', e)
     }

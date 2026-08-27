@@ -1,5 +1,5 @@
 <template>
-  <aside class="right-panel">
+  <aside class="right-panel" :style="panelWidth !== undefined ? { width: panelWidth + 'px' } : {}">
     <div class="right-panel-fixed">
       <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
         <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '折叠设置' }}</span>
@@ -423,6 +423,9 @@
 
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
+
+defineProps<{ panelWidth?: number }>()
+
 import { useToolsStore } from '@/stores/tools'
 import { api, fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'

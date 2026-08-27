@@ -29,6 +29,7 @@
         class="mobile-left-panel"
         :class="{ 'is-mobile-open': mobileLeftOpen }"
         :collapsed="mobileLeftOpen ? false : sidebarCollapsed"
+        :panel-width="sidebarWidth"
         @new-chat="handleNewChat"
         @new-chat-for-agent="handleAgentChange"
         @switch-session="handleSwitchSession"
@@ -39,13 +40,25 @@
         @logout="handleLogout"
       />
 
+      <div
+        v-if="!sidebarCollapsed"
+        class="resizer resizer-left"
+        @mousedown="startResize('left', $event)"
+      />
+
       <main class="chat-main">
         <router-view />
       </main>
 
+      <div
+        class="resizer resizer-right"
+        @mousedown="startResize('right', $event)"
+      />
+
       <RightPanel
         class="mobile-right-panel"
         :class="{ 'is-mobile-open': mobileRightOpen }"
+        :panel-width="rightWidth"
       />
     </div>
 
@@ -62,6 +75,7 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ConfigProvider } from 'vue-element-plus-x'
 import { useTheme } from '@/composables/useTheme'
+import { usePanelResize } from '@/composables/usePanelResize'
 import { api } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
@@ -77,6 +91,9 @@ import FileChangesDrawer from '@/components/chat/FileChangesDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const { isDark } = useTheme()
+const { leftWidth, rightWidth, startResize } = usePanelResize()
+
+const sidebarWidth = computed(() => sidebarCollapsed.value ? 68 : leftWidth.value)
 
 const router = useRouter()
 const route = useRoute()
@@ -334,7 +351,31 @@ function closeMobileDrawers() {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
+}
+
+.resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  position: relative;
+  z-index: 10;
+}
+
+.resizer:hover,
+.resizer:active {
+  background: var(--el-color-primary);
+}
+
+.resizer-left {
+  border-right: 1px solid var(--el-border-color-lighter);
+}
+
+.resizer-right {
+  border-left: 1px solid var(--el-border-color-lighter);
 }
 
 .mobile-drawer-backdrop {
@@ -342,8 +383,8 @@ function closeMobileDrawers() {
 }
 
 @media (max-width: 900px) {
-  .app-body {
-    position: relative;
+  .resizer {
+    display: none;
   }
 
   .chat-main {

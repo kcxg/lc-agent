@@ -4,6 +4,7 @@ from httpx import ASGITransport, AsyncClient
 from lc_agent.app import LcAgentApp
 from lc_agent.db.engine import init_db, reset_engine
 from lc_agent.skills.scanner import SkillScanner
+from lc_agent.skills.skill_middleware import _build_skills_prompt
 from tests.conftest import setup_test_auth
 
 @pytest.fixture
@@ -55,6 +56,19 @@ def test_filter_skills(skills_dir):
     some = scanner.get_filtered(["researcher"])
     assert len(some) == 1
     assert some[0].name == "researcher"
+
+
+def test_skill_prompt_supports_direct_slash_commands():
+    skill = type("Skill", (), {
+        "name": "coding-assistant",
+        "description": "Expert coding help",
+    })()
+
+    prompt = _build_skills_prompt([skill])
+
+    assert "standalone `/`" in prompt
+    assert "/coding-assistant" in prompt
+    assert "call `load_skill`" in prompt
 
 
 def test_empty_directory(tmp_path):

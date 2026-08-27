@@ -101,21 +101,36 @@ export const api = {
 
   // File changes
   getFileChanges: (sessionId: string) =>
-    fetchApi<{ session_id: string; git_base_hash: string | null; files: any[] }>(
+    fetchApi<{ session_id: string; git_base_hash: string | null; files: any[]; sub_sessions?: any[] }>(
       `/sessions/${sessionId}/file-changes`
     ),
   getFileDiff: (sessionId: string, filePath: string) =>
     fetchApi<{ file_path: string; final_type: string; hunks: any[]; change_count: number }>(
       `/sessions/${sessionId}/file-changes/diff?file_path=${encodeURIComponent(filePath)}`
     ),
-  getGitDiff: (sessionId: string) =>
-    fetchApi<{ available: boolean; base_hash?: string; diff?: string; reason?: string }>(
-      `/sessions/${sessionId}/git-diff`
-    ),
-  getGitDiffFiles: (sessionId: string) =>
+  getGitDiff: (sessionId: string, baseline: string = 'session', commit?: string) =>
     fetchApi<{
       available: boolean
       base_hash?: string
+      baseline?: string
+      baseline_label?: string
+      diff?: string
+      reason?: string
+    }>(
+      `/sessions/${sessionId}/git-diff?baseline=${encodeURIComponent(baseline)}${commit ? `&commit=${encodeURIComponent(commit)}` : ''}`
+    ),
+  getGitCommits: (sessionId: string) =>
+    fetchApi<{
+      available: boolean
+      commits: Array<{ hash: string; short_hash: string; subject: string }>
+      reason?: string
+    }>(`/sessions/${sessionId}/git-diff/commits`),
+  getGitDiffFiles: (sessionId: string, baseline: string = 'session', commit?: string) =>
+    fetchApi<{
+      available: boolean
+      base_hash?: string
+      baseline?: string
+      baseline_label?: string
       files?: Array<{
         file_path: string
         change_type: string
@@ -123,15 +138,17 @@ export const api = {
         deletions: number
       }>
       reason?: string
-    }>(`/sessions/${sessionId}/git-diff/files`),
-  getGitFileDiff: (sessionId: string, filePath: string) =>
+    }>(`/sessions/${sessionId}/git-diff/files?baseline=${encodeURIComponent(baseline)}${commit ? `&commit=${encodeURIComponent(commit)}` : ''}`),
+  getGitFileDiff: (sessionId: string, filePath: string, baseline: string = 'session', commit?: string) =>
     fetchApi<{
       available: boolean
       file_path?: string
+      baseline?: string
+      baseline_label?: string
       diff?: string
       reason?: string
     }>(
-      `/sessions/${sessionId}/git-diff/file?file_path=${encodeURIComponent(filePath)}`
+      `/sessions/${sessionId}/git-diff/file?file_path=${encodeURIComponent(filePath)}&baseline=${encodeURIComponent(baseline)}${commit ? `&commit=${encodeURIComponent(commit)}` : ''}`
     ),
 
   // 数据清理 / 瘦身（参见 docs/adr/adr-001-data-cleanup.md）

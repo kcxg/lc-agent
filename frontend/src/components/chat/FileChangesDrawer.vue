@@ -11,18 +11,60 @@
   >
     <template #header>
       <div class="drawer-header">
-        <h3 class="drawer-title">文件变更</h3>
+        <div class="drawer-heading">
+          <h3 class="drawer-title">文件变更</h3>
+          <span v-if="changeSource === 'git' && gitBaselineLabel" class="baseline-label">
+            {{ gitBaselineLabel }}
+          </span>
+        </div>
         <div class="drawer-actions">
-          <el-button
-            v-if="store.gitBaseHash"
+          <el-button-group class="source-switch">
+            <el-button
+              size="small"
+              :type="changeSource === 'agent' ? 'primary' : 'default'"
+              @click="changeSource = 'agent'"
+            >
+              Agent 修改
+            </el-button>
+            <el-button
+              v-if="store.gitBaseHash"
+              size="small"
+              :type="changeSource === 'git' ? 'primary' : 'default'"
+              :loading="gitDiffLoading && gitDiffFiles.length === 0"
+              @click="changeSource = 'git'"
+            >
+              Git Diff
+            </el-button>
+          </el-button-group>
+          <el-select
+            v-if="changeSource === 'git'"
+            v-model="gitBaseline"
             size="small"
-            type="primary"
-            plain
-            :loading="gitDiffLoading"
-            @click="loadGitDiff"
+            class="git-baseline-select"
+            aria-label="Git 基准"
+            @change="handleBaselineChange"
           >
-            Git Diff
-          </el-button>
+            <el-option label="会话基准" value="session" :disabled="!store.gitBaseHash" />
+            <el-option label="HEAD" value="head" />
+            <el-option label="暂存区（HEAD → 暂存区）" value="staged" />
+            <el-option label="指定提交" value="commit" />
+          </el-select>
+          <el-select
+            v-if="changeSource === 'git' && gitBaseline === 'commit'"
+            v-model="selectedCommit"
+            size="small"
+            class="git-commit-select"
+            placeholder="选择提交"
+            aria-label="选择 Git 提交"
+            @change="loadGitDiff"
+          >
+            <el-option
+              v-for="item in gitCommits"
+              :key="item.hash"
+              :label="`${item.short_hash} ${item.subject}`"
+              :value="item.hash"
+            />
+          </el-select>
           <el-segmented
             v-model="diffMode"
             :options="[
@@ -35,11 +77,11 @@
       </div>
     </template>
 
-    <div v-if="!store.hasChanges" class="empty-state">
+    <div v-if="changeSource === 'agent' && !store.hasChanges" class="empty-state">
       <p>当前会话没有文件变更</p>
     </div>
 
-    <div v-else class="file-list">
+    <div v-if="changeSource === 'agent' && store.hasChanges" class="file-list">
       <div
         v-for="file in store.files"
         :key="file.file_path"
@@ -145,61 +187,64 @@
       </div>
     </div>
 
-    <!-- Git diff modal: load the file list first, then load one file on demand -->
-    <el-dialog
-      v-model="showGitDiff"
-      title="Git Diff (完整变更)"
-      width="80%"
-      :append-to-body="true"
-      destroy-on-close
-      class="git-diff-dialog"
-    >
+    <div v-if="changeSource === 'git'" class="git-view">
       <div v-if="gitDiffLoading" class="diff-loading">
-        <el-icon class="is-loading"><Loading /></el-icon> 加载文件列表...
+        <el-icon class="is-loading"><Loading /></el-icon> 加载 Git 文件列表...
       </div>
       <div v-else-if="gitDiffError" class="git-diff-error">{{ gitDiffError }}</div>
-      <div v-else-if="gitDiffFiles.length === 0" class="diff-empty">没有可显示的文件变更</div>
-      <div v-else class="git-diff-file-list">
-        <div
-          v-for="file in gitDiffFiles"
-          :key="file.file_path"
-          class="git-diff-file-item"
-        >
+      <div v-else-if="gitDiffFiles.length === 0" class="diff-empty">当前基准下没有可显示的文件变更</div>
+      <template v-else>
+        <div class="git-summary">
+          <span>{{ gitDiffFiles.length }} 个文件</span>
+          <span class="git-additions">+{{ gitTotalAdditions }}</span>
+          <span class="git-deletions">-{{ gitTotalDeletions }}</span>
+        </div>
+        <div class="git-diff-file-list">
           <div
-            class="git-diff-file-header"
-            role="button"
-            tabindex="0"
-            :aria-expanded="expandedGitFiles.has(file.file_path)"
-            @click="toggleGitFile(file.file_path)"
-            @keydown.enter="toggleGitFile(file.file_path)"
-            @keydown.space.prevent="toggleGitFile(file.file_path)"
+            v-for="file in gitDiffFiles"
+            :key="file.file_path"
+            class="git-diff-file-item"
           >
-            <span class="expand-icon">{{ expandedGitFiles.has(file.file_path) ? '▼' : '▶' }}</span>
-            <span :class="['change-tag', `change-tag--${file.change_type}`]">
-              {{ changeTypeLabels[file.change_type] || '?' }}
-            </span>
-            <span class="file-name" :title="file.file_path">{{ getFileName(file.file_path) }}</span>
-            <span class="file-dir" :title="file.file_path">{{ getFileDir(file.file_path) }}</span>
-          </div>
-          <div v-if="expandedGitFiles.has(file.file_path)" class="file-diff-container">
-            <div v-if="loadingGitFiles.has(file.file_path)" class="diff-loading">
-              <el-icon class="is-loading"><Loading /></el-icon> 加载中...
-            </div>
             <div
-              v-else-if="gitFileDiffs[file.file_path]"
-              class="diff-content"
-              v-html="gitFileDiffs[file.file_path]"
-            />
-            <div v-else class="diff-empty">无法生成 diff</div>
+              class="git-diff-file-header"
+              role="button"
+              tabindex="0"
+              :aria-expanded="expandedGitFiles.has(file.file_path)"
+              @click="toggleGitFile(file.file_path)"
+              @keydown.enter="toggleGitFile(file.file_path)"
+              @keydown.space.prevent="toggleGitFile(file.file_path)"
+            >
+              <span class="expand-icon">{{ expandedGitFiles.has(file.file_path) ? '▼' : '▶' }}</span>
+              <span :class="['change-tag', `change-tag--${file.change_type}`]">
+                {{ changeTypeLabels[file.change_type] || '?' }}
+              </span>
+              <span class="file-name" :title="file.file_path">{{ getFileName(file.file_path) }}</span>
+              <span class="file-dir" :title="file.file_path">{{ getFileDir(file.file_path) }}</span>
+              <span class="line-stats">
+                <span v-if="file.additions" class="git-additions">+{{ file.additions }}</span>
+                <span v-if="file.deletions" class="git-deletions">-{{ file.deletions }}</span>
+              </span>
+            </div>
+            <div v-if="expandedGitFiles.has(file.file_path)" class="file-diff-container">
+              <div v-if="loadingGitFiles.has(file.file_path)" class="diff-loading">
+                <el-icon class="is-loading"><Loading /></el-icon> 加载中...
+              </div>
+              <div
+                v-else-if="gitFileDiffs[file.file_path]"
+                class="diff-content"
+                v-html="gitFileDiffs[file.file_path]"
+              />
+              <div v-else class="diff-empty">无法生成 diff</div>
+            </div>
           </div>
         </div>
-      </div>
-    </el-dialog>
+      </template>
+    </div>
   </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import { useFileChangesStore } from '@/stores/file-changes'
 import { useSessionsStore } from '@/stores/sessions'
@@ -210,6 +255,10 @@ import 'diff2html/bundles/css/diff2html.min.css'
 const store = useFileChangesStore()
 const sessionsStore = useSessionsStore()
 
+type ChangeSource = 'agent' | 'git'
+type GitBaseline = 'session' | 'head' | 'staged' | 'commit'
+
+const changeSource = ref<ChangeSource>('agent')
 const diffMode = ref<'unified' | 'side-by-side'>('unified')
 const expandedFiles = reactive(new Set<string>())
 const expandedSubSessions = reactive(new Set<string>())
@@ -217,8 +266,11 @@ const loadingDiffs = reactive(new Set<string>())
 const fileDiffs = reactive<Record<string, string>>({})
 
 const gitDiffLoading = ref(false)
-const showGitDiff = ref(false)
 const gitDiffError = ref('')
+const gitBaseline = ref<GitBaseline>('session')
+const gitBaselineLabel = ref('')
+const selectedCommit = ref('')
+const gitCommits = ref<Array<{ hash: string; short_hash: string; subject: string }>>([])
 const gitDiffFiles = ref<Array<{
   file_path: string
   change_type: string
@@ -229,6 +281,13 @@ const expandedGitFiles = reactive(new Set<string>())
 const loadingGitFiles = reactive(new Set<string>())
 const gitFileDiffs = reactive<Record<string, string>>({})
 const gitRawFileDiffs = reactive<Record<string, string>>({})
+
+const gitTotalAdditions = computed(() =>
+  gitDiffFiles.value.reduce((sum, file) => sum + file.additions, 0),
+)
+const gitTotalDeletions = computed(() =>
+  gitDiffFiles.value.reduce((sum, file) => sum + file.deletions, 0),
+)
 
 const isMobile = ref(window.innerWidth <= 900)
 const handleResize = () => { isMobile.value = window.innerWidth <= 900 }
@@ -381,9 +440,45 @@ watch(diffMode, () => {
   }
 })
 
+function clearGitDiffState() {
+  gitDiffError.value = ''
+  gitDiffFiles.value = []
+  gitBaselineLabel.value = ''
+  expandedGitFiles.clear()
+  loadingGitFiles.clear()
+  Object.keys(gitFileDiffs).forEach(key => delete gitFileDiffs[key])
+  Object.keys(gitRawFileDiffs).forEach(key => delete gitRawFileDiffs[key])
+}
+
+async function loadGitCommits() {
+  const sessionId = sessionsStore.currentSessionId
+  if (!sessionId) return
+  try {
+    const data = await api.getGitCommits(sessionId)
+    gitCommits.value = data.commits || []
+  } catch {
+    gitCommits.value = []
+  }
+}
+
+async function handleBaselineChange() {
+  clearGitDiffState()
+  if (gitBaseline.value === 'commit') {
+    gitDiffError.value = '请选择一个提交作为基准'
+    await loadGitCommits()
+    return
+  }
+  await loadGitDiff()
+}
+
 async function loadGitDiff() {
   const sessionId = sessionsStore.currentSessionId
   if (!sessionId) return
+  if (gitBaseline.value === 'commit' && !selectedCommit.value) {
+    gitDiffError.value = '请选择一个提交作为基准'
+    await loadGitCommits()
+    return
+  }
 
   gitDiffLoading.value = true
   gitDiffError.value = ''
@@ -393,17 +488,19 @@ async function loadGitDiff() {
   Object.keys(gitRawFileDiffs).forEach(key => delete gitRawFileDiffs[key])
 
   try {
-    const data = await api.getGitDiffFiles(sessionId)
+    const data = await api.getGitDiffFiles(
+      sessionId,
+      gitBaseline.value,
+      gitBaseline.value === 'commit' ? selectedCommit.value : undefined,
+    )
     if (data.available && data.files) {
       gitDiffFiles.value = data.files
-      showGitDiff.value = true
+      gitBaselineLabel.value = data.baseline_label || ''
     } else {
       gitDiffError.value = data.reason || '无法获取 Git Diff 文件列表'
-      showGitDiff.value = true
     }
   } catch (e: any) {
     gitDiffError.value = e.message || '请求失败'
-    showGitDiff.value = true
   } finally {
     gitDiffLoading.value = false
   }
@@ -424,7 +521,12 @@ async function toggleGitFile(filePath: string) {
   if (!sessionId) return
   loadingGitFiles.add(filePath)
   try {
-    const data = await api.getGitFileDiff(sessionId, filePath)
+    const data = await api.getGitFileDiff(
+      sessionId,
+      filePath,
+      gitBaseline.value,
+      gitBaseline.value === 'commit' ? selectedCommit.value : undefined,
+    )
     if (data.available && data.diff) {
       gitRawFileDiffs[filePath] = data.diff
       gitFileDiffs[filePath] = renderUnifiedDiff(data.diff, filePath)
@@ -467,6 +569,10 @@ async function toggleExpandSubFile(subSessionId: string, filePath: string) {
 }
 
 watch(() => store.loadedSessionId, () => {
+  changeSource.value = 'agent'
+  gitBaseline.value = 'session'
+  selectedCommit.value = ''
+  gitCommits.value = []
   expandedFiles.clear()
   expandedSubSessions.clear()
   loadingDiffs.clear()
@@ -475,6 +581,12 @@ watch(() => store.loadedSessionId, () => {
   loadingGitFiles.clear()
   Object.keys(gitFileDiffs).forEach(k => delete gitFileDiffs[k])
   Object.keys(gitRawFileDiffs).forEach(k => delete gitRawFileDiffs[k])
+  gitDiffError.value = ''
+  gitBaselineLabel.value = ''
+})
+
+watch(changeSource, (source) => {
+  if (source === 'git') void loadGitDiff()
 })
 
 watch(() => store.isDrawerOpen, async (open) => {
@@ -492,7 +604,16 @@ watch(() => store.isDrawerOpen, async (open) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   width: 100%;
+}
+
+.drawer-heading {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 8px;
 }
 
 .drawer-title {
@@ -504,7 +625,25 @@ watch(() => store.isDrawerOpen, async (open) => {
 .drawer-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.baseline-label {
+  overflow: hidden;
+  max-width: 180px;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-baseline-select {
+  width: 150px;
+}
+
+.git-commit-select {
+  width: 220px;
 }
 
 .empty-state {
@@ -715,9 +854,31 @@ watch(() => store.isDrawerOpen, async (open) => {
 }
 
 .git-diff-file-list {
-  max-height: 70vh;
+  max-height: calc(100vh - 170px);
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.git-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.git-additions {
+  color: var(--el-color-success);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 650;
+}
+
+.git-deletions {
+  color: var(--el-color-danger);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 650;
 }
 
 .git-diff-file-item {
@@ -736,6 +897,14 @@ watch(() => store.isDrawerOpen, async (open) => {
 
 .git-diff-file-header:hover {
   background: var(--el-fill-color-light);
+}
+
+.line-stats {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 11px;
 }
 
 .git-diff-file-list .file-diff-container {
@@ -798,11 +967,6 @@ watch(() => store.isDrawerOpen, async (open) => {
   white-space: pre-wrap !important;
   word-break: break-all !important;
 }
-
-.git-diff-dialog :deep(.el-dialog__body) {
-  padding-top: 0;
-}
-
 
 .sub-agent-section {
   border-top: 2px solid var(--el-border-color);
