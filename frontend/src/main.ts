@@ -1,11 +1,8 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
-// Element Plus 基础 CSS 变量 + 按需组件样式（由 unplugin-vue-components + ElementPlusResolver 处理）
-import 'element-plus/theme-chalk/base.css'
+import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
-import 'element-plus/es/components/message/style/css'
-import 'element-plus/es/components/message-box/style/css'
 import App from './App.vue'
 import router from './router'
 import './style.css'

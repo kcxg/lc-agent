@@ -9,10 +9,10 @@ export default defineConfig({
   plugins: [
     vue(),
     AutoImport({
-      resolvers: [ElementPlusResolver({ importStyle: 'css' })],
+      resolvers: [ElementPlusResolver()],
     }),
     Components({
-      resolvers: [ElementPlusResolver({ importStyle: 'css' })],
+      resolvers: [ElementPlusResolver()],
     }),
   ],
   resolve: {
