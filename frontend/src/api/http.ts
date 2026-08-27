@@ -82,6 +82,27 @@ export const api = {
   getMessageTraces: (sessionId: string, messageId: string) =>
     fetchApi<{ traces: any[] }>(`/sessions/${sessionId}/messages/${messageId}/traces`),
 
+  // Automation tasks
+  getAutomationTasks: () => fetchApi<any[]>('/automation/tasks'),
+  getAutomationTimezone: () => fetchApi<{ timezone: string }>('/automation/timezone'),
+  createAutomationTask: (data: object) =>
+    fetchApi<any>('/automation/tasks', { method: 'POST', body: JSON.stringify(data) }),
+  updateAutomationTask: (id: string, data: object) =>
+    fetchApi<any>(`/automation/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAutomationTask: (id: string) =>
+    fetchApi<void>(`/automation/tasks/${id}`, { method: 'DELETE' }),
+  pauseAutomationTask: (id: string) =>
+    fetchApi<any>(`/automation/tasks/${id}/pause`, { method: 'POST' }),
+  resumeAutomationTask: (id: string) =>
+    fetchApi<any>(`/automation/tasks/${id}/resume`, { method: 'POST' }),
+  runAutomationTask: (id: string) =>
+    fetchApi<any>(`/automation/tasks/${id}/run`, { method: 'POST' }),
+  getAutomationTaskRuns: (id: string) =>
+    fetchApi<any[]>(`/automation/tasks/${id}/runs`),
+  getAutomationRuns: () => fetchApi<any[]>('/automation/runs'),
+  rerunAutomation: (id: string) =>
+    fetchApi<any>(`/automation/runs/${id}/rerun`, { method: 'POST' }),
+
   getSummarization: () => fetchApi<{ enabled: boolean; default_model: string; trigger: any; keep: any }>('/settings/summarization'),
   updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>
     fetchApi<any>('/settings/summarization', { method: 'PUT', body: JSON.stringify(data) }),

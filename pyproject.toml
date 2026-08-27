@@ -24,6 +24,7 @@ dependencies = [
     "langchain-agentskills>=0.4",
     "mcp>=1.0",
     "langmem",
+    "apscheduler>=3.11,<4",
   
 ]
 

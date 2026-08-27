@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlmodel import SQLModel, Field
-from sqlalchemy import Boolean, Column, Integer, JSON, false
+from sqlalchemy import Boolean, Column, Index, Integer, JSON, false, text
 
 
 def utcnow():
@@ -18,6 +18,48 @@ class PromptTemplateDB(SQLModel, table=True):
     content: str = ""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class AutomationTask(SQLModel, table=True):
+    __tablename__ = "automation_tasks"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    user_id: str = Field(default="", index=True)
+    name: str
+    agent_id: str = Field(index=True)
+    prompt: str
+    schedule_type: str
+    schedule_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    timezone: str = ""
+    enabled: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, server_default=false()))
+    next_run_at: datetime | None = Field(default=None, index=True)
+    last_run_at: datetime | None = Field(default=None)
+    last_status: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class AutomationRun(SQLModel, table=True):
+    __tablename__ = "automation_runs"
+    __table_args__ = (
+        Index(
+            "uq_automation_runs_active_task",
+            "task_id",
+            unique=True,
+            sqlite_where=text("status IN ('pending', 'running')"),
+        ),
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    task_id: str = Field(index=True)
+    user_id: str = Field(default="", index=True)
+    session_id: str | None = Field(default=None, index=True)
+    status: str = "pending"
+    scheduled_at: datetime
+    started_at: datetime | None = Field(default=None)
+    finished_at: datetime | None = Field(default=None)
+    error: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class AgentPromptBindingDB(SQLModel, table=True):

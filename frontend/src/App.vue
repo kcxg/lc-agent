@@ -59,6 +59,7 @@
         class="mobile-right-panel"
         :class="{ 'is-mobile-open': mobileRightOpen }"
         :panel-width="rightWidth"
+        @open-automation="openAutomationDrawer"
       />
     </div>
 
@@ -66,6 +67,7 @@
     <CleanupDialog ref="cleanupDialogRef" @cleaned="handleCleanupDone" />
     <ChangePasswordDialog ref="changePasswordRef" />
     <FileChangesDrawer />
+    <AutomationDrawer ref="automationDrawerRef" />
     </div>
   </ConfigProvider>
 </template>
@@ -88,6 +90,7 @@ import AgentManagerDialog from '@/components/dialogs/AgentManagerDialog.vue'
 import CleanupDialog from '@/components/dialogs/CleanupDialog.vue'
 import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
 import FileChangesDrawer from '@/components/chat/FileChangesDrawer.vue'
+import AutomationDrawer from '@/components/automation/AutomationDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const { isDark } = useTheme()
@@ -105,6 +108,7 @@ const authStore = useAuthStore()
 const agentManagerRef = ref<InstanceType<typeof AgentManagerDialog>>()
 const cleanupDialogRef = ref<InstanceType<typeof CleanupDialog>>()
 const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
+const automationDrawerRef = ref<InstanceType<typeof AutomationDrawer>>()
 const sidebarCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
@@ -279,6 +283,10 @@ async function handleAgentChange(agentId: string) {
 
 function openAgentManager() {
   agentManagerRef.value?.open(agentsStore.currentAgentId)
+}
+
+function openAutomationDrawer() {
+  automationDrawerRef.value?.open()
 }
 
 function openCleanupDialog() {

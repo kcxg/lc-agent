@@ -196,6 +196,20 @@
         </el-select>
       </div>
 
+      <div class="panel-section automation-section appearance-section">
+        <div class="section-header compact-section-header">
+          <h4>自动化任务</h4>
+          <span class="theme-current">{{ enabledAutomationTaskCount }}/{{ automationStore.taskCount }}</span>
+        </div>
+        <button class="automation-entry-btn" type="button" @click="emit('open-automation')">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          创建定时任务
+        </button>
+      </div>
+
       </template>
 
       <div v-if="chatStore.todos.length > 0" class="panel-section todo-section">
@@ -425,11 +439,13 @@
 import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
 defineProps<{ panelWidth?: number }>()
+const emit = defineEmits<{ 'open-automation': [] }>()
 
 import { useToolsStore } from '@/stores/tools'
 import { api, fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
+import { useAutomationStore } from '@/stores/automation'
 import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '@/composables/useMarkdownTheme'
 import { useMarkdownLayout, MARKDOWN_LAYOUT_OPTIONS, type MarkdownLayoutId } from '@/composables/useMarkdownLayout'
 import { useInputAnimation, INPUT_ANIMATION_OPTIONS, type InputAnimationType } from '@/composables/useInputAnimation'
@@ -445,6 +461,8 @@ const ansiUp = new AnsiUp()
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
+const automationStore = useAutomationStore()
+const enabledAutomationTaskCount = computed(() => automationStore.tasks.filter(task => task.enabled).length)
 const fixedCollapsed = ref(false)
 
 const presetLlmParams = computed(() => agentsStore.currentAgent?.llm_params ?? null)
@@ -491,6 +509,7 @@ onMounted(async () => {
     summModel.value = conf.default_model || ''
   } catch { /* ignore */ }
   fetchProcesses()
+  automationStore.loadTasks()
   window.addEventListener('bg-process-changed', onBgProcessChanged)
 })
 
@@ -679,8 +698,34 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 
 .window-trim-section,
 .markdown-layout-section,
-.markdown-theme-section {
+.markdown-theme-section,
+.automation-section {
   margin-bottom: 14px;
+}
+
+.automation-section {
+  background: color-mix(in srgb, var(--el-fill-color-extra-light) 92%, var(--el-color-primary) 8%);
+}
+
+.automation-entry-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 34px;
+  gap: 7px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--el-color-primary) 10%, transparent);
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background .15s, border-color .15s;
+}
+
+.automation-entry-btn:hover {
+  border-color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 16%, transparent);
 }
 
 .llm-params-controls {

@@ -19,6 +19,7 @@ from lc_agent.db.engine import get_async_session, init_db
 from lc_agent.db.models_auth import User
 from lc_agent.mcp.manager import McpManager
 from lc_agent.server.app import create_app, mount_static_files
+from lc_agent.server.automation import AutomationScheduler
 from lc_agent.server import sse as sse_module
 from lc_agent.skills.filtered_loader import FilteredSkillLoader
 from lc_agent.skills.script_executor import patch_windows_script_executor
@@ -109,6 +110,8 @@ class LcAgentApp:
         self.fastapi_app.state.db_url = self._db_url
         self.fastapi_app.state.checkpoint_path = self._checkpoint_path
         sse_module.configure(self.engine, self._db_url)
+        self.automation_scheduler = AutomationScheduler(self.engine, self._db_url, self.fastapi_app)
+        self.fastapi_app.state.automation_scheduler = self.automation_scheduler
         mount_static_files(self.fastapi_app)
 
     def _on_mcp_state_change(self):
@@ -148,6 +151,7 @@ class LcAgentApp:
                 self.engine._store = memory_store
 
             await self._load_presets_from_db()
+            await self.automation_scheduler.start()
 
             async def _connect_mcp_background():
                 try:
@@ -161,6 +165,7 @@ class LcAgentApp:
             asyncio.create_task(_connect_mcp_background())
             yield
         finally:
+            await self.automation_scheduler.stop()
             if memory_store is not None:
                 await aclose_memory_store(memory_store)
                 self.engine._store = None

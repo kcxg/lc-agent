@@ -1,9 +1,22 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from lc_agent.db.models import AgentPresetDB, AgentPromptBindingDB, ChatUiMessage, FileChange, PromptTemplateDB, SessionMeta
+from lc_agent.db.models import (
+    AgentPresetDB,
+    AgentPromptBindingDB,
+    AutomationRun,
+    AutomationTask,
+    ChatUiMessage,
+    FileChange,
+    PromptTemplateDB,
+    SessionMeta,
+)
+
+
+AUTOMATION_ACTIVE_STATUSES = ("pending", "running")
 
 
 class PromptRepository:
@@ -179,6 +192,113 @@ class SessionRepository:
             sess.message_count += 1
             sess.updated_at = datetime.now(timezone.utc)
             await self.session.commit()
+
+
+class AutomationTaskRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def list_all(self, user_id: str | None = None) -> list[AutomationTask]:
+        stmt = select(AutomationTask).order_by(AutomationTask.updated_at.desc())
+        if user_id:
+            stmt = stmt.where(AutomationTask.user_id == user_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_id(self, task_id: str) -> AutomationTask | None:
+        return await self.session.get(AutomationTask, task_id)
+
+    async def create(self, **kwargs) -> AutomationTask:
+        task = AutomationTask(**kwargs)
+        self.session.add(task)
+        await self.session.commit()
+        await self.session.refresh(task)
+        return task
+
+    async def update(self, task_id: str, **kwargs) -> AutomationTask | None:
+        task = await self.get_by_id(task_id)
+        if task is None:
+            return None
+        for key, value in kwargs.items():
+            if hasattr(task, key):
+                setattr(task, key, value)
+        task.updated_at = datetime.now(timezone.utc)
+        await self.session.commit()
+        await self.session.refresh(task)
+        return task
+
+    async def delete(self, task_id: str) -> bool:
+        task = await self.get_by_id(task_id)
+        if task is None:
+            return False
+        await self.session.delete(task)
+        await self.session.commit()
+        return True
+
+
+class AutomationRunRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def list_by_task(self, task_id: str, limit: int = 50) -> list[AutomationRun]:
+        result = await self.session.execute(
+            select(AutomationRun)
+            .where(AutomationRun.task_id == task_id)
+            .order_by(AutomationRun.scheduled_at.desc(), AutomationRun.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def list_active(self) -> list[AutomationRun]:
+        result = await self.session.execute(
+            select(AutomationRun).where(AutomationRun.status.in_(AUTOMATION_ACTIVE_STATUSES))
+        )
+        return list(result.scalars().all())
+
+    async def list_active_by_task(self, task_id: str) -> list[AutomationRun]:
+        result = await self.session.execute(
+            select(AutomationRun).where(
+                AutomationRun.task_id == task_id,
+                AutomationRun.status.in_(AUTOMATION_ACTIVE_STATUSES),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def list_all(self, user_id: str | None = None, limit: int = 100) -> list[AutomationRun]:
+        stmt = (
+            select(AutomationRun)
+            .order_by(AutomationRun.scheduled_at.desc(), AutomationRun.created_at.desc())
+            .limit(limit)
+        )
+        if user_id:
+            stmt = stmt.where(AutomationRun.user_id == user_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_id(self, run_id: str) -> AutomationRun | None:
+        return await self.session.get(AutomationRun, run_id)
+
+    async def create(self, **kwargs) -> AutomationRun | None:
+        run = AutomationRun(**kwargs)
+        self.session.add(run)
+        try:
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            return None
+        await self.session.refresh(run)
+        return run
+
+    async def update(self, run_id: str, **kwargs) -> AutomationRun | None:
+        run = await self.get_by_id(run_id)
+        if run is None:
+            return None
+        for key, value in kwargs.items():
+            if hasattr(run, key):
+                setattr(run, key, value)
+        await self.session.commit()
+        await self.session.refresh(run)
+        return run
 
 
 class ChatUiMessageRepository:

@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AgentManagerDialog: typeof import('./src/components/dialogs/AgentManagerDialog.vue')['default']
     AppHeader: typeof import('./src/components/layout/AppHeader.vue')['default']
+    AutomationDrawer: typeof import('./src/components/automation/AutomationDrawer.vue')['default']
     ChangePasswordDialog: typeof import('./src/components/dialogs/ChangePasswordDialog.vue')['default']
     ChatBubble: typeof import('./src/components/chat/ChatBubble.vue')['default']
     ChatInput: typeof import('./src/components/chat/ChatInput.vue')['default']
