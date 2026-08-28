@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, delete
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -139,6 +139,30 @@ class SessionRepository:
         if user_id:
             stmt = stmt.where(SessionMeta.user_id == user_id)
         stmt = stmt.order_by(SessionMeta.updated_at.desc()).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_recent_for_sidebar(
+        self,
+        user_id: str | None = None,
+        days: int = 30,
+        include_session_id: str | None = None,
+    ) -> list[SessionMeta]:
+        """List sidebar sessions from a rolling window without a global row cap."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        conditions = [
+            ~SessionMeta.id.contains("--sa--"),
+            SessionMeta.updated_at >= cutoff,
+        ]
+        if include_session_id:
+            conditions[-1] = or_(
+                SessionMeta.updated_at >= cutoff,
+                SessionMeta.id == include_session_id,
+            )
+        stmt = select(SessionMeta).where(*conditions)
+        if user_id:
+            stmt = stmt.where(SessionMeta.user_id == user_id)
+        stmt = stmt.order_by(SessionMeta.updated_at.desc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

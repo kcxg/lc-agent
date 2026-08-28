@@ -46,12 +46,19 @@ def _check_session_access(sess, user: User) -> None:
 async def list_sessions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
+    days: int | None = Query(default=None, ge=1, le=3650),
+    include_session_id: str | None = Query(default=None, max_length=200),
 ):
     repo = SessionRepository(db)
-    if user.role == "admin":
-        sessions = await repo.list_all()
+    user_id = None if user.role == "admin" else user.id
+    if days is None:
+        sessions = await repo.list_all(user_id=user_id)
     else:
-        sessions = await repo.list_all(user_id=user.id)
+        sessions = await repo.list_recent_for_sidebar(
+            user_id=user_id,
+            days=days,
+            include_session_id=include_session_id,
+        )
     return [serialize_session(s) for s in sessions]
 
 

@@ -5,7 +5,9 @@
     direction="rtl"
     size="min(560px, 100vw)"
     class="automation-drawer"
+    :show-close="false"
     :destroy-on-close="false"
+    @close="handleDrawerClose"
   >
     <template #header>
       <div class="automation-drawer-header">
@@ -13,12 +15,16 @@
           <h3>自动化任务</h3>
           <p>让 Agent 按计划自动执行任务</p>
         </div>
-        <button class="create-task-btn" type="button" @click="startCreate">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          新建
-        </button>
+        <div class="automation-header-actions">
+          <button class="create-task-btn" type="button" @click="startCreate">
+            <el-icon><Plus /></el-icon>
+            新建
+          </button>
+          <button class="drawer-close-btn" type="button" title="关闭自动化任务面板" aria-label="关闭自动化任务面板" @click="closeDrawer">
+            <el-icon><Close /></el-icon>
+            <span>关闭</span>
+          </button>
+        </div>
       </div>
     </template>
 
@@ -55,7 +61,16 @@
           <span class="form-kicker">{{ editingTaskId ? '编辑任务' : '新建任务' }}</span>
           <h4>{{ editingTaskId ? form.name || '自动化任务' : '配置一个自动执行任务' }}</h4>
         </div>
-        <button class="icon-close-btn" type="button" title="关闭表单" aria-label="关闭表单" @click="cancelForm">×</button>
+        <button
+          class="form-cancel-btn"
+          type="button"
+          :title="editingTaskId ? '取消编辑' : '取消创建'"
+          :aria-label="editingTaskId ? '取消编辑' : '取消创建'"
+          @click="cancelForm"
+      >
+          <el-icon><Close /></el-icon>
+          <span>{{ editingTaskId ? '取消编辑' : '取消创建' }}</span>
+        </button>
       </div>
 
       <label class="field-label" for="automation-task-name">任务名称</label>
@@ -122,9 +137,7 @@
       </div>
 
       <div class="timezone-hint">
-        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
-        </svg>
+        <el-icon><Clock /></el-icon>
         使用后端运行环境时区{{ automationStore.timezone ? `（${automationStore.timezone}）` : '' }}
       </div>
 
@@ -152,9 +165,7 @@
       <div v-if="automationStore.loading" class="automation-loading">加载中...</div>
       <div v-else-if="automationStore.tasks.length === 0" class="automation-empty">
         <div class="empty-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
-          </svg>
+          <el-icon :size="25"><Clock /></el-icon>
         </div>
         <strong>还没有自动化任务</strong>
         <span>选择一个 Agent，让它按计划自动工作</span>
@@ -184,15 +195,16 @@
             <span v-else-if="!task.enabled">已暂停</span>
           </div>
           <div class="task-actions">
-            <button type="button" title="立即执行" :disabled="actionTaskId === task.id" @click="runTask(task)">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 14 9-14 9V3z" /></svg>
+            <button class="run-action" type="button" title="立即执行" :disabled="actionTaskId === task.id" @click="runTask(task)">
+              <el-icon><VideoPlay /></el-icon>
               {{ actionTaskId === task.id && actionType === 'run' ? '执行中...' : '立即执行' }}
             </button>
-            <button type="button" title="编辑任务" :disabled="actionTaskId === task.id" @click="startEdit(task)">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+            <button class="edit-action" type="button" title="编辑任务" :disabled="actionTaskId === task.id" @click="startEdit(task)">
+              <el-icon><EditPen /></el-icon>
               编辑
             </button>
             <button class="danger-action" type="button" title="删除任务" :disabled="actionTaskId === task.id" @click="deleteTask(task)">
+              <el-icon><Delete /></el-icon>
               删除
             </button>
           </div>
@@ -219,8 +231,11 @@
             <span v-if="run.finished_at">完成于 {{ formatDate(run.finished_at) }}</span>
             <span v-else>执行中</span>
             <div class="run-actions">
-              <button v-if="run.session_id" type="button" @click="openRunSession(run)">查看会话</button>
-              <button v-if="run.status === 'failed'" type="button" :disabled="actionRunId === run.id" @click="rerun(run)">
+              <button v-if="run.session_id" class="view-action" type="button" @click="openRunSession(run)">
+                <el-icon><View /></el-icon>
+                查看会话
+              </button>
+              <button v-if="run.status === 'failed'" class="rerun-action" type="button" :disabled="actionRunId === run.id" @click="rerun(run)">
                 {{ actionRunId === run.id ? '重新执行中...' : '重新执行' }}
               </button>
             </div>
@@ -234,6 +249,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Clock, Close, Delete, EditPen, Plus, VideoPlay, View } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useAgentsStore } from '@/stores/agents'
 import { useAutomationStore, type AutomationRun, type AutomationScheduleType, type AutomationTask } from '@/stores/automation'
@@ -286,9 +302,10 @@ const canSave = computed(() => {
 
 function open() {
   visible.value = true
-  activeTab.value = 'tasks'
+  activeTab.value = 'tasks' 
   automationStore.error = ''
   void automationStore.loadTasks()
+  void automationStore.loadRuns()
   void automationStore.loadTimezone()
 }
 
@@ -328,6 +345,16 @@ function startEdit(task: AutomationTask) {
 }
 
 function cancelForm() {
+  resetForm()
+  formVisible.value = false
+}
+
+function closeDrawer() {
+  visible.value = false
+  handleDrawerClose()
+}
+
+function handleDrawerClose() {
   resetForm()
   formVisible.value = false
 }
@@ -480,6 +507,20 @@ defineExpose({ open })
 </script>
 
 <style>
+/* 按操作语义分配实心底色：运行=绿、修改=橙、删除=红、中止=青、主行动/查看=蓝。
+   底色统一与 #000 混合压深，保证白色文字在亮色与暗色主题下都有足够对比度
+   （Element Plus 的 *-dark-2 / *-light-3 在两个主题下明暗方向相反，不能直接用作实心底）。 */
+.automation-drawer {
+  --automation-run-bg: color-mix(in srgb, var(--el-color-success) 74%, #000);
+  --automation-run-bg-hover: color-mix(in srgb, var(--el-color-success) 90%, #000);
+  --automation-edit-bg: color-mix(in srgb, var(--el-color-warning) 72%, #000);
+  --automation-edit-bg-hover: color-mix(in srgb, var(--el-color-warning) 88%, #000);
+  --automation-danger-bg: color-mix(in srgb, var(--el-color-danger) 82%, #000);
+  --automation-danger-bg-hover: var(--el-color-danger);
+  --automation-cancel-bg: #0e7490;
+  --automation-cancel-bg-hover: #0891b2;
+}
+
 .automation-drawer .el-drawer__header {
   margin-bottom: 0;
   padding: 20px 22px 16px;
@@ -497,6 +538,13 @@ defineExpose({ open })
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+}
+
+.automation-header-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
 }
 
 .automation-drawer-header h3 {
@@ -520,58 +568,128 @@ defineExpose({ open })
   align-items: center;
   justify-content: center;
   gap: 5px;
-  border: 1px solid transparent;
+  border: 1px solid var(--el-border-color);
   border-radius: 6px;
   cursor: pointer;
-  transition: border-color .15s, background .15s, color .15s, opacity .15s;
+  transition: border-color .15s, background .15s, color .15s, box-shadow .15s, opacity .15s;
 }
 
 .create-task-btn {
   min-height: 30px;
   padding: 0 11px;
+  border-color: var(--el-color-primary);
   background: var(--el-color-primary);
   color: #fff;
   font-size: 12px;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--el-color-primary) 24%, transparent);
+}
+
+.drawer-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--el-color-danger);
+  border-radius: 6px;
+  background: var(--el-color-danger);
+  color: #fff;
+  white-space: nowrap;
+  cursor: pointer;
+  font-size: 12px;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--el-color-danger) 30%, transparent);
+  transition: border-color .15s, background .15s, color .15s, box-shadow .15s;
+}
+
+.drawer-close-btn:hover {
+  border-color: var(--el-color-danger-dark-2);
+  background: var(--el-color-danger-dark-2);
+}
+
+.form-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--automation-cancel-bg);
+  border-radius: 6px;
+  background: var(--automation-cancel-bg);
+  color: #fff;
+  white-space: nowrap;
+  cursor: pointer;
+  font-size: 12px;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--automation-cancel-bg) 30%, transparent);
+  transition: border-color .15s, background .15s, color .15s, box-shadow .15s;
+}
+
+.form-cancel-btn:hover {
+  border-color: var(--automation-cancel-bg-hover);
+  background: var(--automation-cancel-bg-hover);
+}
+
+.drawer-close-btn:active,
+.form-cancel-btn:active,
+.secondary-btn:active,
+.task-actions button:active,
+.run-actions button:active {
+  transform: translateY(1px);
 }
 
 .create-task-btn:hover,
 .primary-btn:hover:not(:disabled) {
+  border-color: var(--el-color-primary-dark-2);
   background: var(--el-color-primary-dark-2);
 }
 
+.create-task-btn:active,
+.primary-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
 .automation-tabs {
-  display: flex;
-  gap: 20px;
-  height: 48px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-height: 42px;
+  padding: 4px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
 }
 
 .automation-tabs button {
-  position: relative;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 32px;
   gap: 6px;
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
+  padding: 0 10px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 5px;
+  background: var(--el-fill-color);
   color: var(--el-text-color-secondary);
   font-size: 13px;
   cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s, box-shadow .15s;
+}
+
+.automation-tabs button:hover:not(.active) {
+  border-color: var(--el-color-primary-light-5);
+  background: var(--el-fill-color-blank);
+  color: var(--el-text-color-primary);
 }
 
 .automation-tabs button.active {
-  color: var(--el-color-primary);
-  font-weight: 600;
-}
-
-.automation-tabs button.active::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
+  border-color: var(--el-color-primary);
   background: var(--el-color-primary);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--el-color-primary) 24%, transparent);
 }
 
 .tab-count {
@@ -581,6 +699,11 @@ defineExpose({ open })
   background: var(--el-fill-color);
   font-size: 11px;
   text-align: center;
+}
+
+.automation-tabs button.active .tab-count {
+  background: var(--el-color-primary-dark-2);
+  color: #fff;
 }
 
 .automation-error {
@@ -616,23 +739,6 @@ defineExpose({ open })
   margin: 4px 0 0;
   color: var(--el-text-color-primary);
   font-size: 16px;
-}
-
-.icon-close-btn {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--el-text-color-secondary);
-  font-size: 21px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.icon-close-btn:hover {
-  background: var(--el-fill-color);
-  color: var(--el-text-color-primary);
 }
 
 .field-label {
@@ -723,19 +829,31 @@ defineExpose({ open })
 }
 
 .primary-btn {
+  border-color: var(--el-color-primary);
   background: var(--el-color-primary);
   color: #fff;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
 }
 
 .secondary-btn {
-  border-color: var(--el-border-color);
-  background: var(--el-fill-color-blank);
-  color: var(--el-text-color-regular);
+  border-color: var(--automation-cancel-bg);
+  background: var(--automation-cancel-bg);
+  color: #fff;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--automation-cancel-bg) 26%, transparent);
 }
 
 .secondary-btn:hover:not(:disabled) {
-  border-color: var(--el-color-primary-light-3);
-  color: var(--el-color-primary);
+  border-color: var(--automation-cancel-bg-hover);
+  background: var(--automation-cancel-bg-hover);
+}
+
+.secondary-btn:active:not(:disabled) {
+  box-shadow: none;
+}
+
+.automation-drawer button:focus-visible {
+  outline: 2px solid var(--el-color-primary-light-3);
+  outline-offset: 2px;
 }
 
 .primary-btn:disabled,
@@ -889,27 +1007,60 @@ defineExpose({ open })
 .task-actions button,
 .run-actions button {
   padding: 3px 7px;
-  border-color: var(--el-border-color);
-  background: var(--el-fill-color-blank);
-  color: var(--el-text-color-regular);
+  color: #fff;
   font-size: 11px;
 }
 
-.task-actions button:hover:not(:disabled),
-.run-actions button:hover:not(:disabled) {
-  border-color: var(--el-color-primary-light-3);
-  color: var(--el-color-primary);
+.task-actions .run-action,
+.run-actions .rerun-action {
+  border-color: var(--automation-run-bg);
+  background: var(--automation-run-bg);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--automation-run-bg) 30%, transparent);
+}
+
+.task-actions .run-action:hover:not(:disabled),
+.run-actions .rerun-action:hover:not(:disabled) {
+  border-color: var(--automation-run-bg-hover);
+  background: var(--automation-run-bg-hover);
+}
+
+.task-actions .edit-action {
+  border-color: var(--automation-edit-bg);
+  background: var(--automation-edit-bg);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--automation-edit-bg) 30%, transparent);
+}
+
+.task-actions .edit-action:hover:not(:disabled) {
+  border-color: var(--automation-edit-bg-hover);
+  background: var(--automation-edit-bg-hover);
+}
+
+.run-actions .view-action {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--el-color-primary) 26%, transparent);
+}
+
+.run-actions .view-action:hover:not(:disabled) {
+  border-color: var(--el-color-primary-dark-2);
+  background: var(--el-color-primary-dark-2);
 }
 
 .task-actions .danger-action {
   margin-left: auto;
-  border-color: transparent;
-  background: transparent;
-  color: var(--el-color-danger);
+  border-color: var(--automation-danger-bg);
+  background: var(--automation-danger-bg);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--el-color-danger) 26%, transparent);
 }
 
 .task-actions .danger-action:hover:not(:disabled) {
-  background: var(--el-color-danger-light-9);
+  border-color: var(--automation-danger-bg-hover);
+  background: var(--automation-danger-bg-hover);
+}
+
+.task-actions button:active:not(:disabled),
+.run-actions button:active:not(:disabled) {
+  box-shadow: none;
 }
 
 .run-list {
@@ -925,6 +1076,10 @@ defineExpose({ open })
 .run-actions {
   display: flex;
   gap: 7px;
+}
+
+.run-actions button {
+  min-height: 26px;
 }
 
 .run-error {
@@ -951,6 +1106,16 @@ defineExpose({ open })
 
   .task-actions {
     flex-wrap: wrap;
+  }
+
+  .automation-header-actions {
+    gap: 6px;
+  }
+
+  .drawer-close-btn,
+  .create-task-btn {
+    padding-right: 9px;
+    padding-left: 9px;
   }
 }
 </style>

@@ -66,9 +66,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     return completedUnseenSessionIds.value.has(id)
   }
 
-  async function init() {
+  async function init(includeSessionId?: string) {
     try {
-      sessions.value = await api.getSessions()
+      sessions.value = await api.getSessions({ days: 30, includeSessionId })
     } catch (e) {
       console.error('[SessionsStore] Failed to fetch:', e)
     }
@@ -179,7 +179,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   async function refreshSessionTitle(id: string) {
     try {
-      const allSessions = await api.getSessions()
+      const allSessions = await api.getSessions({ days: 30, includeSessionId: id })
       const fresh = allSessions.find((s: any) => s.id === id)
       if (fresh) {
         const sess = sessions.value.find(s => s.id === id)

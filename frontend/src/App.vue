@@ -121,10 +121,11 @@ async function initApp() {
   if (appInitialized.value || isPublicRoute.value) return
   appInitialized.value = true
 
+  const initialSessionId = typeof route.params.sessionId === 'string' ? route.params.sessionId : undefined
   await Promise.all([
     toolsStore.init(),
     agentsStore.init(),
-    sessionsStore.init(),
+    sessionsStore.init(initialSessionId),
   ])
 
   try {

@@ -1,11 +1,12 @@
 <template>
   <aside class="right-panel" :style="panelWidth !== undefined ? { width: panelWidth + 'px' } : {}">
     <div class="right-panel-fixed">
-      <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
-        <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '折叠设置' }}</span>
-        <span class="collapse-arrow">{{ fixedCollapsed ? '▸' : '▾' }}</span>
-      </div>
-      <template v-if="!fixedCollapsed">
+      <div class="settings-collapsible" :class="{ collapsed: fixedCollapsed }">
+        <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
+          <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '折叠设置' }}</span>
+          <span class="collapse-arrow">{{ fixedCollapsed ? '▸' : '▾' }}</span>
+        </div>
+        <template v-if="!fixedCollapsed">
       <template v-if="!agentsStore.isCodeAgent">
         <div class="panel-section">
           <h4>模型</h4>
@@ -196,21 +197,8 @@
         </el-select>
       </div>
 
-      <div class="panel-section automation-section appearance-section">
-        <div class="section-header compact-section-header">
-          <h4>自动化任务</h4>
-          <span class="theme-current">{{ enabledAutomationTaskCount }}/{{ automationStore.taskCount }}</span>
-        </div>
-        <button class="automation-entry-btn" type="button" @click="emit('open-automation')">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 7v5l3 2" />
-          </svg>
-          创建定时任务
-        </button>
+        </template>
       </div>
-
-      </template>
 
       <div v-if="chatStore.todos.length > 0" class="panel-section todo-section">
         <TodoList :todos="chatStore.todos" />
@@ -218,6 +206,17 @@
     </div>
 
     <div class="right-panel-scroll">
+      <div class="panel-section automation-section appearance-section">
+        <div class="section-header compact-section-header">
+          <h4>自动化任务</h4>
+          <span class="theme-current">{{ enabledAutomationTaskCount }}/{{ automationStore.taskCount }}</span>
+        </div>
+        <button class="automation-entry-btn" type="button" @click="emit('open-automation')">
+          <el-icon><Clock /></el-icon>
+          创建定时任务
+        </button>
+      </div>
+
       <div v-if="agentsStore.isCodeAgent" class="panel-section code-agent-hint">
         <div class="hint-box code-agent-box">
           <span class="hint-icon">⚙️</span>
@@ -450,6 +449,7 @@ import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '
 import { useMarkdownLayout, MARKDOWN_LAYOUT_OPTIONS, type MarkdownLayoutId } from '@/composables/useMarkdownLayout'
 import { useInputAnimation, INPUT_ANIMATION_OPTIONS, type InputAnimationType } from '@/composables/useInputAnimation'
 import { AnsiUp } from 'ansi_up'
+import { Clock } from '@element-plus/icons-vue'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
 import DetailModal from '@/components/panels/DetailModal.vue'
@@ -647,12 +647,24 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   padding: 14px 16px 0;
 }
 
+.settings-collapsible {
+  margin-bottom: 14px;
+  padding: 10px 10px 0;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--el-fill-color) 86%, var(--el-color-primary) 14%);
+}
+
+.settings-collapsible.collapsed {
+  padding-bottom: 10px;
+}
+
 .panel-collapse-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 6px 9px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 999px;
   background: var(--el-fill-color-light);
@@ -714,18 +726,30 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   width: 100%;
   min-height: 34px;
   gap: 7px;
-  border: 1px solid var(--el-color-primary-light-5);
+  border: 1px solid var(--el-color-primary);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--el-color-primary) 10%, transparent);
-  color: var(--el-color-primary);
+  background: var(--el-color-primary);
+  color: #fff;
   cursor: pointer;
   font-size: 12px;
-  transition: background .15s, border-color .15s;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+  transition: background .15s, border-color .15s, box-shadow .15s, transform .15s;
 }
 
 .automation-entry-btn:hover {
-  border-color: var(--el-color-primary);
-  background: color-mix(in srgb, var(--el-color-primary) 16%, transparent);
+  border-color: var(--el-color-primary-dark-2);
+  background: var(--el-color-primary-dark-2);
+  box-shadow: 0 3px 8px color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+}
+
+.automation-entry-btn:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.automation-entry-btn:focus-visible {
+  outline: 2px solid var(--el-color-primary-light-3);
+  outline-offset: 2px;
 }
 
 .llm-params-controls {

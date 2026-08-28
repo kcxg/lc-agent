@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -49,6 +51,59 @@ async def test_create_and_list_sessions(app_and_headers):
         list_resp = await client.get("/api/sessions", headers=headers)
         assert list_resp.status_code == 200
         assert len(list_resp.json()) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_sidebar_window_does_not_hide_other_agents(app_and_headers):
+    app, headers = app_and_headers
+    from lc_agent.db.engine import get_async_session
+    from lc_agent.db.models import SessionMeta
+
+    db_url = app.config["database"]["url"]
+    now = datetime.now(timezone.utc)
+    async with get_async_session(db_url) as session:
+        for index in range(55):
+            session.add(SessionMeta(
+                id=f"agent-a-{index}",
+                title=f"Agent A {index}",
+                agent_id="agent-a",
+                user_id="test-admin",
+                updated_at=now - timedelta(minutes=index),
+            ))
+        session.add(SessionMeta(
+            id="agent-b-recent",
+            title="Agent B recent",
+            agent_id="agent-b",
+            user_id="test-admin",
+            updated_at=now,
+        ))
+        session.add(SessionMeta(
+            id="agent-b-old",
+            title="Agent B old",
+            agent_id="agent-b",
+            user_id="test-admin",
+            updated_at=now - timedelta(days=31),
+        ))
+        await session.commit()
+
+    transport = ASGITransport(app=app.fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        recent_resp = await client.get("/api/sessions?days=30", headers=headers)
+        included_resp = await client.get(
+            "/api/sessions?days=30&include_session_id=agent-b-old",
+            headers=headers,
+        )
+
+    assert recent_resp.status_code == 200
+    recent_sessions = recent_resp.json()
+    recent_ids = {item["id"] for item in recent_sessions}
+    assert len(recent_sessions) == 56
+    assert "agent-b-recent" in recent_ids
+    assert "agent-b-old" not in recent_ids
+
+    assert included_resp.status_code == 200
+    included_ids = {item["id"] for item in included_resp.json()}
+    assert "agent-b-old" in included_ids
 
 
 @pytest.mark.asyncio

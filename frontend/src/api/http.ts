@@ -63,7 +63,13 @@ export const api = {
     body: JSON.stringify({ paths }),
   }),
 
-  getSessions: () => fetchApi<any[]>('/sessions'),
+  getSessions: (params?: { days?: number; includeSessionId?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.days !== undefined) qs.set('days', String(params.days))
+    if (params?.includeSessionId) qs.set('include_session_id', params.includeSessionId)
+    const query = qs.toString()
+    return fetchApi<any[]>(`/sessions${query ? '?' + query : ''}`)
+  },
   createSession: (data: { title?: string; agent_id?: string; model?: string }) =>
     fetchApi<{ id: string; title: string }>('/sessions', { method: 'POST', body: JSON.stringify(data) }),
   updateSession: (id: string, data: { title?: string; model?: string; is_pinned?: boolean }) =>
