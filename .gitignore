@@ -254,3 +254,7 @@ openspec/
 # (kept from main) test artifact
 gitigonre_file1.txt
 docs/superpowers/
+
+# Claude Code local settings
+.claude/settings.local.json
+
