@@ -16,22 +16,41 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "prompt_templates",
-        sa.Column("id", sa.String(), primary_key=True),
-        sa.Column("name", sa.String(), nullable=False),
-        sa.Column("content", sa.String(), nullable=False, server_default=""),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-    )
+    inspector = sa.inspect(op.get_bind())
 
-    op.create_table(
-        "agent_prompt_bindings",
-        sa.Column("id", sa.String(), primary_key=True),
-        sa.Column("agent_id", sa.String(), nullable=False, index=True),
-        sa.Column("prompt_id", sa.String(), nullable=False, index=True),
-        sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),
-    )
+    if not inspector.has_table("prompt_templates"):
+        op.create_table(
+            "prompt_templates",
+            sa.Column("id", sa.String(), primary_key=True),
+            sa.Column("name", sa.String(), nullable=False),
+            sa.Column("content", sa.String(), nullable=False, server_default=""),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+            sa.Column("updated_at", sa.DateTime(), nullable=False),
+        )
+
+    if not inspector.has_table("agent_prompt_bindings"):
+        op.create_table(
+            "agent_prompt_bindings",
+            sa.Column("id", sa.String(), primary_key=True),
+            sa.Column("agent_id", sa.String(), nullable=False),
+            sa.Column("prompt_id", sa.String(), nullable=False),
+            sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),
+        )
+
+    inspector = sa.inspect(op.get_bind())
+    binding_indexes = {index["name"] for index in inspector.get_indexes("agent_prompt_bindings")}
+    if "ix_agent_prompt_bindings_agent_id" not in binding_indexes:
+        op.create_index(
+            "ix_agent_prompt_bindings_agent_id",
+            "agent_prompt_bindings",
+            ["agent_id"],
+        )
+    if "ix_agent_prompt_bindings_prompt_id" not in binding_indexes:
+        op.create_index(
+            "ix_agent_prompt_bindings_prompt_id",
+            "agent_prompt_bindings",
+            ["prompt_id"],
+        )
 
 
 def downgrade() -> None:

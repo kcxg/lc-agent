@@ -83,26 +83,23 @@ async def init_db(url: str = "sqlite+aiosqlite:///./lc_agent_data.db"):
 
     sync_url = _to_sync_url(url)
 
-    try:
-        from alembic.config import Config
-        from alembic import command
-        from alembic.script import ScriptDirectory
+    from alembic.config import Config
+    from alembic import command
+    from alembic.script import ScriptDirectory
 
-        alembic_cfg = Config()
-        alembic_cfg.set_main_option("script_location", _MIGRATIONS_DIR)
-        alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
+    alembic_cfg = Config()
+    alembic_cfg.set_main_option("script_location", _MIGRATIONS_DIR)
+    alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
 
-        script = ScriptDirectory.from_config(alembic_cfg)
-        has_revisions = bool(list(script.walk_revisions()))
+    script = ScriptDirectory.from_config(alembic_cfg)
+    has_revisions = bool(list(script.walk_revisions()))
 
-        if has_revisions:
-            command.upgrade(alembic_cfg, "head")
-            engine = get_async_engine(url)
-            async with engine.begin() as conn:
-                await conn.run_sync(_add_missing_columns)
-            return
-    except Exception as e:
-        db_logger.exception("Alembic migration failed, falling back to create_all")
+    if has_revisions:
+        command.upgrade(alembic_cfg, "head")
+        engine = get_async_engine(url)
+        async with engine.begin() as conn:
+            await conn.run_sync(_add_missing_columns)
+        return
 
     engine = get_async_engine(url)
     async with engine.begin() as conn:
