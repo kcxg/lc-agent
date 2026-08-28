@@ -2,7 +2,7 @@
 
 > Open-source AI Agent workbench & framework built on LangChain / LangGraph — visual, hot-swappable, fully extensible.
 >
-> 基于 LangChain / LangGraph 的 AI Agent 可视化工作台 & Python 框架，运行时热切换模型/工具/MCP/技能，无需重启。
+> 基于 LangChain / LangGraph 的 AI Agent 可视化工作台 & Python 框架，运行时热切换模型/工具/MCP/技能，无需重启，lc-agent既是产品又是框架。
 
 [![PyPI package](https://img.shields.io/badge/pypi-lc--agent--app-blue)](https://pypi.org/project/lc-agent-app/)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
@@ -10,7 +10,10 @@
 
 `lc-agent` 是一套开箱即用的 AI Agent 工作台，也是一个能被业务项目直接 `import` 的 Python 框架——不用从零搭建模型调用、工具注册、会话持久化这些基础能力。
 
-它把 **模型、思考参数、Tools、MCP、Skills、子 Agent、长期记忆、知识库、人工审批** 统一放进一个 Web UI，运行时即可在前端切换配置，无需重启服务。
+`lc-agent` 把 **模型、思考参数、Tools、MCP、Skills、子 Agent、长期记忆、知识库、人工审批、自动化任务** 统一放进一个 Web UI，运行时即可在前端切换配置，无需重启服务。
+
+`lc-agent` 对和模型的底层交互原理可视化做的超级强，让你很清楚看到harness和model的交互，极其清楚的看到每个部分的请求内容，对调试 看清楚自己的agent帮助很大，也就是对agent开发者更好，而不是只偏向于只用agent产品完成任务而对agent自身原理毫无感兴趣的普通用户。
+
 
 演示项目：[lc-agent-bfzs](https://github.com/ydf0509/lc-agent-bfzs)
 
@@ -47,6 +50,7 @@
 | ai coding | 内置工具组和第三方mcp例如serena mcp都能使lc-aegnt 实现ai coding |
 | Context Management | 内置 SummarizationMiddleware，长对话自动压缩摘要，避免上下文溢出 |
 | Streaming & Diff | 命令执行实时流式输出、文件编辑 diff 预览、写入预览，过程全程可视 |
+| 自动化任务 | 用户可以配置定时任务，agent自动运行 |
 
 ### 完整功能清单请阅读 [FEATURES.md](https://github.com/ydf0509/lc-agent/blob/main/FEATURES.md)
 

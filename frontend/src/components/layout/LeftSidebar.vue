@@ -1,5 +1,5 @@
 <template>
-  <aside class="left-sidebar" :class="{ collapsed }">
+  <aside class="left-sidebar" :class="{ collapsed }" :style="panelWidth !== undefined ? { width: panelWidth + 'px' } : {}">
     <div class="sidebar-header">
       <transition name="fade">
         <div v-if="!collapsed" class="sidebar-brand-wrap">
@@ -162,7 +162,7 @@ import { useAgentsStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 
-const props = defineProps<{ collapsed: boolean }>()
+const props = defineProps<{ collapsed: boolean; panelWidth?: number }>()
 
 const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()
@@ -216,6 +216,7 @@ interface SidebarGroup {
   agentIcon: string
   agentSource: 'builtin' | 'code' | 'user' | 'deleted'
   isProjectMode: boolean
+  lastActivityAt: number
   badgeText: string
   visibleSessions: Session[]
   hiddenCount: number
@@ -293,24 +294,34 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
       const sorted = sessions.slice().sort(compareSessions)
       const visibleCount = getVisibleCount(agentId)
       const totalCount = sessionsStore.sessions.filter(s => (s.agent_id || 'chat') === agentId).length
+      const lastActivityAt = sorted.length > 0 ? new Date(sorted[0].updated_at).getTime() : 0
       return {
         agentId,
         agentName,
         agentIcon: getAgentIcon(agentInfo ?? null),
         agentSource: (agentInfo?.source ?? 'deleted') as SidebarGroup['agentSource'],
         isProjectMode: agentInfo?.project_mode ?? false,
+        lastActivityAt,
         badgeText: normalizedQuery.value ? `${sorted.length}/${totalCount}` : String(sorted.length),
         visibleSessions: sorted.slice(0, visibleCount),
         hiddenCount: Math.max(sorted.length - visibleCount, 0),
       }
     })
-    .sort((a, b) => a.agentName.localeCompare(b.agentName, 'zh-CN'))
+    .sort((a, b) => {
+      const aIsActive = a.agentId === activeAgentId.value
+      const bIsActive = b.agentId === activeAgentId.value
+      if (aIsActive !== bIsActive) return aIsActive ? -1 : 1
+      if (a.lastActivityAt !== b.lastActivityAt) return b.lastActivityAt - a.lastActivityAt
+      return a.agentName.localeCompare(b.agentName, 'zh-CN')
+    })
 })
 
 const allCollapsed = computed(() => {
   const groupNames = renderedGroups.value.map(group => group.agentName)
   return groupNames.length > 0 && groupNames.every(name => collapsedGroups.value.has(name))
 })
+
+const collapseDefaultsApplied = ref(false)
 
 watch(normalizedQuery, () => {
   visibleCountByAgent.value = {}
@@ -319,9 +330,16 @@ watch(normalizedQuery, () => {
 
 watch(renderedGroups, groups => {
   const groupNames = new Set(groups.map(group => group.agentName))
-  const pruned = new Set([...collapsedGroups.value].filter(name => groupNames.has(name)))
-  if (pruned.size !== collapsedGroups.value.size) {
-    collapsedGroups.value = pruned
+  const next = new Set([...collapsedGroups.value].filter(name => groupNames.has(name)))
+  if (!collapseDefaultsApplied.value && groups.length > 0) {
+    for (const group of groups) {
+      if (group.agentId === activeAgentId.value) next.delete(group.agentName)
+      else next.add(group.agentName)
+    }
+    collapseDefaultsApplied.value = true
+  }
+  if (next.size !== collapsedGroups.value.size || [...next].some(name => !collapsedGroups.value.has(name))) {
+    collapsedGroups.value = next
     persistCollapsedGroups()
   }
 }, { immediate: true })
@@ -337,6 +355,9 @@ watch(() => sessionsStore.currentSessionId, async (sessionId) => {
 
   const agentName = agentsStore.getAgentName(session.agent_id || 'chat')
   const nextCollapsedGroups = new Set(collapsedGroups.value)
+  for (const group of renderedGroups.value) {
+    if (group.agentId !== (session.agent_id || 'chat')) nextCollapsedGroups.add(group.agentName)
+  }
   nextCollapsedGroups.delete(agentName)
   collapsedGroups.value = nextCollapsedGroups
   persistCollapsedGroups()

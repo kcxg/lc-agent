@@ -63,7 +63,13 @@ export const api = {
     body: JSON.stringify({ paths }),
   }),
 
-  getSessions: () => fetchApi<any[]>('/sessions'),
+  getSessions: (params?: { days?: number; includeSessionId?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.days !== undefined) qs.set('days', String(params.days))
+    if (params?.includeSessionId) qs.set('include_session_id', params.includeSessionId)
+    const query = qs.toString()
+    return fetchApi<any[]>(`/sessions${query ? '?' + query : ''}`)
+  },
   createSession: (data: { title?: string; agent_id?: string; model?: string }) =>
     fetchApi<{ id: string; title: string }>('/sessions', { method: 'POST', body: JSON.stringify(data) }),
   updateSession: (id: string, data: { title?: string; model?: string; is_pinned?: boolean }) =>
@@ -81,6 +87,27 @@ export const api = {
   },
   getMessageTraces: (sessionId: string, messageId: string) =>
     fetchApi<{ traces: any[] }>(`/sessions/${sessionId}/messages/${messageId}/traces`),
+
+  // Automation tasks
+  getAutomationTasks: () => fetchApi<any[]>('/automation/tasks'),
+  getAutomationTimezone: () => fetchApi<{ timezone: string }>('/automation/timezone'),
+  createAutomationTask: (data: object) =>
+    fetchApi<any>('/automation/tasks', { method: 'POST', body: JSON.stringify(data) }),
+  updateAutomationTask: (id: string, data: object) =>
+    fetchApi<any>(`/automation/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAutomationTask: (id: string) =>
+    fetchApi<void>(`/automation/tasks/${id}`, { method: 'DELETE' }),
+  pauseAutomationTask: (id: string) =>
+    fetchApi<any>(`/automation/tasks/${id}/pause`, { method: 'POST' }),
+  resumeAutomationTask: (id: string) =>
+    fetchApi<any>(`/automation/tasks/${id}/resume`, { method: 'POST' }),
+  runAutomationTask: (id: string) =>
+    fetchApi<any>(`/automation/tasks/${id}/run`, { method: 'POST' }),
+  getAutomationTaskRuns: (id: string) =>
+    fetchApi<any[]>(`/automation/tasks/${id}/runs`),
+  getAutomationRuns: () => fetchApi<any[]>('/automation/runs'),
+  rerunAutomation: (id: string) =>
+    fetchApi<any>(`/automation/runs/${id}/rerun`, { method: 'POST' }),
 
   getSummarization: () => fetchApi<{ enabled: boolean; default_model: string; trigger: any; keep: any }>('/settings/summarization'),
   updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>
@@ -101,21 +128,36 @@ export const api = {
 
   // File changes
   getFileChanges: (sessionId: string) =>
-    fetchApi<{ session_id: string; git_base_hash: string | null; files: any[] }>(
+    fetchApi<{ session_id: string; git_base_hash: string | null; files: any[]; sub_sessions?: any[] }>(
       `/sessions/${sessionId}/file-changes`
     ),
   getFileDiff: (sessionId: string, filePath: string) =>
     fetchApi<{ file_path: string; final_type: string; hunks: any[]; change_count: number }>(
       `/sessions/${sessionId}/file-changes/diff?file_path=${encodeURIComponent(filePath)}`
     ),
-  getGitDiff: (sessionId: string) =>
-    fetchApi<{ available: boolean; base_hash?: string; diff?: string; reason?: string }>(
-      `/sessions/${sessionId}/git-diff`
-    ),
-  getGitDiffFiles: (sessionId: string) =>
+  getGitDiff: (sessionId: string, baseline: string = 'session', commit?: string) =>
     fetchApi<{
       available: boolean
       base_hash?: string
+      baseline?: string
+      baseline_label?: string
+      diff?: string
+      reason?: string
+    }>(
+      `/sessions/${sessionId}/git-diff?baseline=${encodeURIComponent(baseline)}${commit ? `&commit=${encodeURIComponent(commit)}` : ''}`
+    ),
+  getGitCommits: (sessionId: string) =>
+    fetchApi<{
+      available: boolean
+      commits: Array<{ hash: string; short_hash: string; subject: string }>
+      reason?: string
+    }>(`/sessions/${sessionId}/git-diff/commits`),
+  getGitDiffFiles: (sessionId: string, baseline: string = 'session', commit?: string) =>
+    fetchApi<{
+      available: boolean
+      base_hash?: string
+      baseline?: string
+      baseline_label?: string
       files?: Array<{
         file_path: string
         change_type: string
@@ -123,15 +165,17 @@ export const api = {
         deletions: number
       }>
       reason?: string
-    }>(`/sessions/${sessionId}/git-diff/files`),
-  getGitFileDiff: (sessionId: string, filePath: string) =>
+    }>(`/sessions/${sessionId}/git-diff/files?baseline=${encodeURIComponent(baseline)}${commit ? `&commit=${encodeURIComponent(commit)}` : ''}`),
+  getGitFileDiff: (sessionId: string, filePath: string, baseline: string = 'session', commit?: string) =>
     fetchApi<{
       available: boolean
       file_path?: string
+      baseline?: string
+      baseline_label?: string
       diff?: string
       reason?: string
     }>(
-      `/sessions/${sessionId}/git-diff/file?file_path=${encodeURIComponent(filePath)}`
+      `/sessions/${sessionId}/git-diff/file?file_path=${encodeURIComponent(filePath)}&baseline=${encodeURIComponent(baseline)}${commit ? `&commit=${encodeURIComponent(commit)}` : ''}`
     ),
 
   // 数据清理 / 瘦身（参见 docs/adr/adr-001-data-cleanup.md）

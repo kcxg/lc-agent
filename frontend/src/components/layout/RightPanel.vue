@@ -1,5 +1,5 @@
 <template>
-  <aside class="right-panel" :class="{ collapsed }">
+  <aside class="right-panel" :class="{ collapsed }" :style="panelWidth !== undefined && !collapsed ? { width: panelWidth + 'px' } : {}">
     <div class="panel-header">
       <transition name="fade">
         <span v-if="!collapsed" class="panel-title">工具</span>
@@ -11,11 +11,12 @@
 
     <div v-if="!collapsed" class="panel-body">
     <div class="right-panel-fixed">
-      <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
-        <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '折叠设置' }}</span>
-        <span class="collapse-arrow">{{ fixedCollapsed ? '▸' : '▾' }}</span>
-      </div>
-      <template v-if="!fixedCollapsed">
+      <div class="settings-collapsible" :class="{ collapsed: fixedCollapsed }">
+        <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
+          <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '折叠设置' }}</span>
+          <span class="collapse-arrow">{{ fixedCollapsed ? '▸' : '▾' }}</span>
+        </div>
+        <template v-if="!fixedCollapsed">
       <template v-if="!agentsStore.isCodeAgent">
         <div class="panel-section">
           <h4>模型</h4>
@@ -206,7 +207,8 @@
         </el-select>
       </div>
 
-      </template>
+        </template>
+      </div>
 
       <div v-if="chatStore.todos.length > 0" class="panel-section todo-section">
         <TodoList :todos="chatStore.todos" />
@@ -214,6 +216,17 @@
     </div>
 
     <div class="right-panel-scroll">
+      <div class="panel-section automation-section appearance-section">
+        <div class="section-header compact-section-header">
+          <h4>自动化任务</h4>
+          <span class="theme-current">{{ enabledAutomationTaskCount }}/{{ automationStore.taskCount }}</span>
+        </div>
+        <button class="automation-entry-btn" type="button" @click="emit('open-automation')">
+          <el-icon><Clock /></el-icon>
+          创建定时任务
+        </button>
+      </div>
+
       <div v-if="agentsStore.isCodeAgent" class="panel-section code-agent-hint">
         <div class="hint-box code-agent-box">
           <span class="hint-icon">⚙️</span>
@@ -434,27 +447,34 @@
 
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
+
+
+
 import { useToolsStore } from '@/stores/tools'
 import { api, fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
+import { useAutomationStore } from '@/stores/automation'
 import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '@/composables/useMarkdownTheme'
 import { useMarkdownLayout, MARKDOWN_LAYOUT_OPTIONS, type MarkdownLayoutId } from '@/composables/useMarkdownLayout'
 import { useInputAnimation, INPUT_ANIMATION_OPTIONS, type InputAnimationType } from '@/composables/useInputAnimation'
 import { AnsiUp } from 'ansi_up'
+import { Clock } from '@element-plus/icons-vue'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
 import DetailModal from '@/components/panels/DetailModal.vue'
 import TodoList from '@/components/panels/TodoList.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 
-const props = defineProps<{ collapsed: boolean }>()
-const emit = defineEmits<{ toggleCollapse: [] }>()
+const props = defineProps<{ collapsed: boolean; panelWidth?: number }>()
+const emit = defineEmits<{ toggleCollapse: []; 'open-automation': [] }>()
 const ansiUp = new AnsiUp()
 
 const toolsStore = useToolsStore()
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
+const automationStore = useAutomationStore()
+const enabledAutomationTaskCount = computed(() => automationStore.tasks.filter(task => task.enabled).length)
 const fixedCollapsed = ref(false)
 
 const presetLlmParams = computed(() => agentsStore.currentAgent?.llm_params ?? null)
@@ -501,6 +521,7 @@ onMounted(async () => {
     summModel.value = conf.default_model || ''
   } catch { /* ignore */ }
   fetchProcesses()
+  automationStore.loadTasks()
   window.addEventListener('bg-process-changed', onBgProcessChanged)
 })
 
@@ -701,12 +722,24 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   padding: 14px 16px 0;
 }
 
+.settings-collapsible {
+  margin-bottom: 14px;
+  padding: 10px 10px 0;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--el-fill-color) 86%, var(--el-color-primary) 14%);
+}
+
+.settings-collapsible.collapsed {
+  padding-bottom: 10px;
+}
+
 .panel-collapse-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 6px 9px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 999px;
   background: var(--el-fill-color-light);
@@ -762,8 +795,46 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 
 .window-trim-section,
 .markdown-layout-section,
-.markdown-theme-section {
+.markdown-theme-section,
+.automation-section {
   margin-bottom: 14px;
+}
+
+.automation-section {
+  background: color-mix(in srgb, var(--el-fill-color-extra-light) 92%, var(--el-color-primary) 8%);
+}
+
+.automation-entry-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 34px;
+  gap: 7px;
+  border: 1px solid var(--el-color-primary);
+  border-radius: 6px;
+  background: var(--el-color-primary);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+  transition: background .15s, border-color .15s, box-shadow .15s, transform .15s;
+}
+
+.automation-entry-btn:hover {
+  border-color: var(--el-color-primary-dark-2);
+  background: var(--el-color-primary-dark-2);
+  box-shadow: 0 3px 8px color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+}
+
+.automation-entry-btn:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.automation-entry-btn:focus-visible {
+  outline: 2px solid var(--el-color-primary-light-3);
+  outline-offset: 2px;
 }
 
 .llm-params-controls {

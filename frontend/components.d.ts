@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AgentManagerDialog: typeof import('./src/components/dialogs/AgentManagerDialog.vue')['default']
     AppHeader: typeof import('./src/components/layout/AppHeader.vue')['default']
+    AutomationDrawer: typeof import('./src/components/automation/AutomationDrawer.vue')['default']
     ChangePasswordDialog: typeof import('./src/components/dialogs/ChangePasswordDialog.vue')['default']
     ChatBubble: typeof import('./src/components/chat/ChatBubble.vue')['default']
     ChatInput: typeof import('./src/components/chat/ChatInput.vue')['default']
@@ -22,6 +23,7 @@ declare module 'vue' {
     DetailModal: typeof import('./src/components/panels/DetailModal.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElButton: typeof import('element-plus/es')['ElButton']
+    ElButtonGroup: typeof import('element-plus/es')['ElButtonGroup']
     ElCard: typeof import('element-plus/es')['ElCard']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
     ElCheckboxGroup: typeof import('element-plus/es')['ElCheckboxGroup']
