@@ -93,7 +93,17 @@
             </div>
           </div>
         </div>
+      </template>
+        </template>
+      </div>
 
+      <div v-if="chatStore.todos.length > 0" class="panel-section todo-section">
+        <TodoList :todos="chatStore.todos" />
+      </div>
+    </div>
+
+    <div class="right-panel-scroll">
+      <template v-if="!agentsStore.isCodeAgent">
         <div class="panel-section window-trim-section">
           <div class="window-trim-control">
             <h4>窗口裁剪模型</h4>
@@ -207,15 +217,6 @@
         </el-select>
       </div>
 
-        </template>
-      </div>
-
-      <div v-if="chatStore.todos.length > 0" class="panel-section todo-section">
-        <TodoList :todos="chatStore.todos" />
-      </div>
-    </div>
-
-    <div class="right-panel-scroll">
       <div class="panel-section automation-section appearance-section">
         <div class="section-header compact-section-header">
           <h4>自动化任务</h4>

@@ -9,6 +9,7 @@ export interface SessionState {
   totalMessageCount: Ref<number>
   hasOlderMessages: Ref<boolean>
   loadingOlder: Ref<boolean>
+  isHistoryLoading: Ref<boolean>
 
   // Streaming state
   isStreaming: Ref<boolean>
@@ -29,6 +30,7 @@ export function createSessionState(): SessionState {
     totalMessageCount: ref(0),
     hasOlderMessages: ref(false),
     loadingOlder: ref(false),
+    isHistoryLoading: ref(false),
     isStreaming: ref(false),
     inThinking: false,
     streamStartTime: 0,

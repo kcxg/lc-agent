@@ -181,14 +181,22 @@ class SessionRepository:
         if sess is None:
             return None
 
+        changed = False
         if "is_pinned" in kwargs:
             is_pinned = bool(kwargs.pop("is_pinned"))
-            sess.is_pinned = is_pinned
-            sess.pinned_at = datetime.now(timezone.utc) if is_pinned else None
+            if sess.is_pinned != is_pinned:
+                sess.is_pinned = is_pinned
+                sess.pinned_at = datetime.now(timezone.utc) if is_pinned else None
+                changed = True
 
         for key, value in kwargs.items():
-            if hasattr(sess, key):
+            if hasattr(sess, key) and getattr(sess, key) != value:
                 setattr(sess, key, value)
+                changed = True
+
+        if not changed:
+            return sess
+
         sess.updated_at = datetime.now(timezone.utc)
         await self.session.commit()
         await self.session.refresh(sess)

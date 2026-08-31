@@ -209,6 +209,8 @@ const searchQuery = ref('')
 const openMenuSessionId = ref<string | null>(null)
 const visibleCountByAgent = ref<Record<string, number>>({})
 const sessionListRef = ref<HTMLElement | null>(null)
+// 首次渲染时按最近会话活动排序一次，之后冻结顺序，切换会话不再重排
+const frozenOrder = ref<string[] | null>(null)
 
 interface SidebarGroup {
   agentId: string
@@ -287,7 +289,7 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
     buckets.set(agentId, list)
   }
 
-  return [...buckets.entries()]
+  const groups = [...buckets.entries()]
     .map(([agentId, sessions]) => {
       const agentInfo = agentsStore.agents.find(a => a.id === agentId)
       const agentName = agentsStore.getAgentName(agentId)
@@ -307,13 +309,26 @@ const renderedGroups = computed<SidebarGroup[]>(() => {
         hiddenCount: Math.max(sorted.length - visibleCount, 0),
       }
     })
-    .sort((a, b) => {
-      const aIsActive = a.agentId === activeAgentId.value
-      const bIsActive = b.agentId === activeAgentId.value
-      if (aIsActive !== bIsActive) return aIsActive ? -1 : 1
-      if (a.lastActivityAt !== b.lastActivityAt) return b.lastActivityAt - a.lastActivityAt
-      return a.agentName.localeCompare(b.agentName, 'zh-CN')
-    })
+
+  if (frozenOrder.value === null && groups.length > 0) {
+    frozenOrder.value = groups
+      .slice()
+      .sort((a, b) => {
+        if (a.lastActivityAt !== b.lastActivityAt) return b.lastActivityAt - a.lastActivityAt
+        return a.agentName.localeCompare(b.agentName, 'zh-CN')
+      })
+      .map(group => group.agentId)
+  }
+
+  const order = frozenOrder.value ?? []
+  return groups.slice().sort((a, b) => {
+    const ia = order.indexOf(a.agentId)
+    const ib = order.indexOf(b.agentId)
+    if (ia === -1 && ib === -1) return a.agentName.localeCompare(b.agentName, 'zh-CN')
+    if (ia === -1) return 1
+    if (ib === -1) return -1
+    return ia - ib
+  })
 })
 
 const allCollapsed = computed(() => {
@@ -355,9 +370,6 @@ watch(() => sessionsStore.currentSessionId, async (sessionId) => {
 
   const agentName = agentsStore.getAgentName(session.agent_id || 'chat')
   const nextCollapsedGroups = new Set(collapsedGroups.value)
-  for (const group of renderedGroups.value) {
-    if (group.agentId !== (session.agent_id || 'chat')) nextCollapsedGroups.add(group.agentName)
-  }
   nextCollapsedGroups.delete(agentName)
   collapsedGroups.value = nextCollapsedGroups
   persistCollapsedGroups()

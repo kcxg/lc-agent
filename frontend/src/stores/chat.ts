@@ -604,6 +604,7 @@ export const useChatStore = defineStore('chat', () => {
   const totalMessageCount = computed(() => _active()?.totalMessageCount.value ?? 0)
   const hasOlderMessages = computed(() => _active()?.hasOlderMessages.value ?? false)
   const loadingOlder = computed(() => _active()?.loadingOlder.value ?? false)
+  const isHistoryLoading = computed(() => _active()?.isHistoryLoading.value ?? false)
   const isConnected = computed(() => !!activeSessionId.value)
   const threadId = computed(() => activeSessionId.value)
   const lastMessage = computed(() => {
@@ -1179,14 +1180,17 @@ export const useChatStore = defineStore('chat', () => {
 
   async function _loadMessagesIntoState(sessionId: string, state: SessionState): Promise<void> {
     const sessionsStore = useSessionsStore()
-    if (sessionsStore.isLocalSession(sessionId)) {
-      state.totalMessageCount.value = 0
-      sessionOffsets.set(sessionId, 0)
-      state.messages.value = []
-      state.hasOlderMessages.value = false
-      return
-    }
+    state.isHistoryLoading.value = true
     try {
+      if (sessionsStore.isLocalSession(sessionId)) {
+        state.totalMessageCount.value = 0
+        sessionOffsets.set(sessionId, 0)
+        state.messages.value = []
+        state.hasOlderMessages.value = false
+        state.errorMessage.value = null
+        return
+      }
+
       const resp = await api.getSessionMessages(sessionId, { limit: INITIAL_MESSAGE_LIMIT })
       const total = resp?.total ?? 0
       const rawMessages = resp?.messages ?? resp
@@ -1199,9 +1203,28 @@ export const useChatStore = defineStore('chat', () => {
         Array.isArray(rawMessages) ? rawMessages : []
       )
       state.hasOlderMessages.value = total > state.messages.value.length
+      const session = sessionsStore.sessions.find(item => item.id === sessionId)
+      if (session && session.message_count > 0 && state.messages.value.length === 0) {
+        state.errorMessage.value = {
+          title: '会话内容未返回',
+          detail: '该会话已有保存的消息，但本次没有读取到内容。内容未被删除。',
+          suggestions: ['请重新加载会话内容。'],
+          errorCode: 'HISTORY_EMPTY',
+        }
+      } else {
+        state.errorMessage.value = null
+      }
     } catch (e) {
-      // On API failure keep current messages (graceful degradation)
       console.error('[Chat] Failed to load messages:', e)
+      state.errorMessage.value = {
+        title: '会话内容加载失败',
+        detail: '无法读取已保存的会话内容。内容未被删除。',
+        suggestions: ['请重新加载会话内容。'],
+        techDetail: e instanceof Error ? e.message : String(e),
+        errorCode: 'HISTORY_LOAD_FAILED',
+      }
+    } finally {
+      state.isHistoryLoading.value = false
     }
   }
 
@@ -1280,6 +1303,7 @@ export const useChatStore = defineStore('chat', () => {
     totalMessageCount,
     hasOlderMessages,
     loadingOlder,
+    isHistoryLoading,
     switchToSession,
     isSessionStreaming,
     getStreamingSessionIds,

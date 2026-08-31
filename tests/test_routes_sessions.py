@@ -122,6 +122,32 @@ async def test_update_session_title(app_and_headers):
 
 
 @pytest.mark.asyncio
+async def test_updating_session_with_identical_values_keeps_activity_time(app_and_headers):
+    app, headers = app_and_headers
+    transport = ASGITransport(app=app.fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        create_resp = await client.post(
+            "/api/sessions",
+            json={"title": "No-op", "model": "gpt-4"},
+            headers=headers,
+        )
+        assert create_resp.status_code == 201
+        session_id = create_resp.json()["id"]
+
+        before = await client.get("/api/sessions", headers=headers)
+        before_item = next(item for item in before.json() if item["id"] == session_id)
+
+        update_resp = await client.put(
+            f"/api/sessions/{session_id}",
+            json={"model": "gpt-4"},
+            headers=headers,
+        )
+
+    assert update_resp.status_code == 200
+    assert update_resp.json()["updated_at"] == before_item["updated_at"]
+
+
+@pytest.mark.asyncio
 async def test_list_sessions_includes_default_pin_fields(app_and_headers):
     app, headers = app_and_headers
     transport = ASGITransport(app=app.fastapi_app)
@@ -200,7 +226,11 @@ async def test_get_session_messages_returns_persisted_ui_metadata(app_and_header
 
     db_url = app.config["database"]["url"]
     async with get_async_session(db_url) as session:
-        session.add(SessionMeta(id="thread-ui", title="UI test", user_id="test-admin"))
+        session.add(SessionMeta(
+            id="thread-ui",
+            title="UI test",
+            user_id="test-admin",
+        ))
         repo = ChatUiMessageRepository(session)
         await repo.create(session_id="thread-ui", role="user", content="funboost怎么样")
         await repo.create(
@@ -225,3 +255,35 @@ async def test_get_session_messages_returns_persisted_ui_metadata(app_and_header
     assert msgs[1]["content"] == "不错。\n<!--TOOL:0-->\n适合任务队列。"
     assert msgs[1]["tool_calls"][0]["runId"] == "run-1"
     assert msgs[1]["usage"]["rounds"][0]["total_tokens"] == 15
+
+
+@pytest.mark.asyncio
+async def test_get_session_messages_does_not_turn_checkpoint_failure_into_empty_history(app_and_headers):
+    app, headers = app_and_headers
+    from lc_agent.db.engine import get_async_session
+    from lc_agent.db.models import SessionMeta
+
+    db_url = app.config["database"]["url"]
+    async with get_async_session(db_url) as session:
+        session.add(SessionMeta(
+            id="thread-checkpoint-failure",
+            title="Checkpoint failure",
+            user_id="test-admin",
+            message_count=1,
+        ))
+        await session.commit()
+
+    original_checkpointer = app.engine._checkpointer
+    app.engine._checkpointer = None
+    try:
+        transport = ASGITransport(app=app.fastapi_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/sessions/thread-checkpoint-failure/messages",
+                headers=headers,
+            )
+    finally:
+        app.engine._checkpointer = original_checkpointer
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "会话历史暂时无法读取，请稍后重试"

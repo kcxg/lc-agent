@@ -274,8 +274,12 @@ export const useToolsStore = defineStore('tools', () => {
     }
   }
 
-  function setModel(modelId: string) {
+  function applyModel(modelId: string) {
     currentModel.value = modelId
+  }
+
+  function setModel(modelId: string) {
+    applyModel(modelId)
     const sessionsStore = useSessionsStore()
     const sessionId = sessionsStore.currentSessionId
     if (sessionId) {
@@ -289,6 +293,6 @@ export const useToolsStore = defineStore('tools', () => {
     groups, models, mcpServers, skills, currentModel, llmParams, mcpRefreshing,
     filteredGroups, filteredMcp, filteredSkills,
     init, refreshMcpServers, refreshMcpServer, isMcpRefreshing, refreshRuntimeToggles, toggleGroup, toggleMcp, toggleSkill,
-    setModel, setLlmParam, resetLlmParams, syncModelWithAgentDefault,
+    applyModel, setModel, setLlmParam, resetLlmParams, syncModelWithAgentDefault,
   }
 })
