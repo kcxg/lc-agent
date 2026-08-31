@@ -21,6 +21,8 @@ export const useSessionsStore = defineStore('sessions', () => {
   const currentSessionId = ref<string | null>(null)
   const localSessionIds = ref<Set<string>>(new Set())
   const completedUnseenSessionIds = ref<Set<string>>(new Set())
+  const isLoaded = ref(false)
+  const lastLoadFailed = ref(false)
 
   const currentSession = computed(() =>
     sessions.value.find(s => s.id === currentSessionId.value)
@@ -66,11 +68,23 @@ export const useSessionsStore = defineStore('sessions', () => {
     return completedUnseenSessionIds.value.has(id)
   }
 
-  async function init(includeSessionId?: string) {
+  async function init(includeSessionId?: string): Promise<boolean> {
+    isLoaded.value = false
+    lastLoadFailed.value = false
     try {
-      sessions.value = await api.getSessions({ days: 30, includeSessionId })
+      const loadedSessions = await api.getSessions({ days: 30, includeSessionId })
+      sessions.value = loadedSessions
+      const serverSessionIds = new Set(loadedSessions.map(session => session.id))
+      localSessionIds.value = new Set(
+        [...localSessionIds.value].filter(id => !serverSessionIds.has(id)),
+      )
+      isLoaded.value = true
+      return true
     } catch (e) {
+      lastLoadFailed.value = true
+      isLoaded.value = true
       console.error('[SessionsStore] Failed to fetch:', e)
+      return false
     }
   }
 
@@ -249,5 +263,5 @@ export const useSessionsStore = defineStore('sessions', () => {
     markSessionViewed(id)
   }
 
-  return { sessions, currentSessionId, currentSession, sessionNavStack, effectiveThreadId, pushSubSession, popSubSession, popToRoot, groupedByAgent, init, createSession, createLocalSession, ensureLocalSession, persistSession, isLocalSession, markCompletedUnseen, markSessionViewed, isCompletedUnseen, deleteSession, updateTitle, updateTitleLocal, refreshSessionTitle, updateModel, updateModelLocal, setPinned, selectSession }
+  return { sessions, currentSessionId, currentSession, sessionNavStack, effectiveThreadId, pushSubSession, popSubSession, popToRoot, groupedByAgent, isLoaded, lastLoadFailed, init, createSession, createLocalSession, ensureLocalSession, persistSession, isLocalSession, markCompletedUnseen, markSessionViewed, isCompletedUnseen, deleteSession, updateTitle, updateTitleLocal, refreshSessionTitle, updateModel, updateModelLocal, setPinned, selectSession }
 })

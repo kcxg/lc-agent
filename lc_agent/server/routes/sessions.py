@@ -182,12 +182,16 @@ async def get_session_messages(
     engine = request.app.state.engine
     checkpointer = engine._checkpointer
     if checkpointer is None:
+        if sess.message_count > 0:
+            raise HTTPException(status_code=503, detail="会话历史暂时无法读取，请稍后重试")
         return {"total": 0, "offset": effective_offset, "limit": limit, "messages": []}
 
     try:
         config = {"configurable": {"thread_id": session_id}}
         checkpoint_tuple = await checkpointer.aget_tuple(config)
         if checkpoint_tuple is None:
+            if sess.message_count > 0:
+                raise HTTPException(status_code=503, detail="会话历史暂时无法读取，请稍后重试")
             return {"total": 0, "offset": effective_offset, "limit": limit, "messages": []}
 
         checkpoint = checkpoint_tuple.checkpoint
@@ -223,9 +227,11 @@ async def get_session_messages(
         checkpoint_offset = effective_offset if effective_offset < len(result) else max(0, len(result) - limit)
         paginated = result[checkpoint_offset:checkpoint_offset + limit]
         return {"total": len(result), "offset": checkpoint_offset, "limit": limit, "messages": paginated}
+    except HTTPException:
+        raise
     except Exception as e:
         server_logger.exception("Failed to load messages for session %s", session_id)
-        return {"total": 0, "offset": effective_offset, "limit": limit, "messages": []}
+        raise HTTPException(status_code=503, detail="会话历史暂时无法读取，请稍后重试") from e
 
 
 @router.get("/sessions/{session_id}/messages/{message_id}/traces")

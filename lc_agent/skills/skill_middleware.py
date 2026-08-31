@@ -26,7 +26,8 @@ _RUN_SKILL_SCRIPT_DESCRIPTION = (
     "- skill_name: the skill name (from '## Available Skills' in the system prompt)\n"
     "- script_name: the script filename to run — must be one of the scripts "
     "listed by load_skill, do not guess.\n"
-    "- script_args: optional list of string arguments passed to the script."
+    "- script_args: optional list of string arguments passed to the script.\n"
+    "请记住：run_skill_script 工具的三个入参分别是 `skill_name` `script_name` `script_args` ,别传错入参名字"
 )
 
 _SKILL_TOOL_DESCRIPTIONS: dict[str, str] = {

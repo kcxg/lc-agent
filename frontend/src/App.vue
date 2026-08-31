@@ -177,7 +177,7 @@ function getCurrentRightPanelModelForAgent(agentId: string): string {
 
 function applySessionModel(model: string) {
   if (model) {
-    toolsStore.setModel(model)
+    toolsStore.applyModel(model)
   }
 }
 
@@ -200,6 +200,8 @@ watch(() => route.params.sessionId, (newId) => {
 
 async function restoreSession(sessionId: string) {
   if (chatStore.threadId === sessionId && chatStore.isConnected) return
+  if (!sessionsStore.isLoaded) return
+
   const session = sessionsStore.sessions.find(s => s.id === sessionId)
   if (session) {
     sessionsStore.selectSession(sessionId)
@@ -210,8 +212,14 @@ async function restoreSession(sessionId: string) {
     if (sessionAgent?.source === 'code') {
       toolsStore.syncModelWithAgentDefault()
     } else if (session.model) {
-      toolsStore.setModel(session.model)
+      toolsStore.applyModel(session.model)
     }
+    await chatStore.switchToSession(sessionId)
+    return
+  }
+
+  if (sessionsStore.lastLoadFailed) {
+    sessionsStore.selectSession(sessionId)
     await chatStore.switchToSession(sessionId)
     return
   }
@@ -249,7 +257,7 @@ async function handleSwitchSession(sessionId: string) {
     if (sessionAgent?.source === 'code') {
       toolsStore.syncModelWithAgentDefault()
     } else if (session?.model) {
-      toolsStore.setModel(session.model)
+      toolsStore.applyModel(session.model)
     }
     router.push({ name: 'chat', params: { sessionId }, query: { agent: agentId } })
     closeMobileDrawers()
@@ -262,7 +270,7 @@ async function handleSwitchSession(sessionId: string) {
   if (sessionAgent?.source === 'code') {
     toolsStore.syncModelWithAgentDefault()
   } else if (session?.model) {
-    toolsStore.setModel(session.model)
+    toolsStore.applyModel(session.model)
   }
   await chatStore.switchToSession(sessionId)
   if (session?.agent_id && session.agent_id !== agentsStore.currentAgentId) {

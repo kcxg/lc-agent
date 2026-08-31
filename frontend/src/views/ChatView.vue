@@ -24,14 +24,30 @@
       </template>
     </div>
     <div ref="messagesContainerRef" class="messages-container">
+      <Thinking
+        v-if="isHistoryLoading"
+        status="thinking"
+        content=""
+      />
       <Welcome
-        v-if="messages.length === 0 && !isLoading"
+        v-else-if="messages.length === 0 && !isLoading && !errorMessage"
         title="Start a conversation"
         description="Ask me anything"
         variant="borderless"
       />
       <template v-else>
+        <div v-if="messages.length === 0 && errorMessage" class="history-load-error">
+          <el-alert
+            :title="errorMessage.title"
+            :description="errorMessage.detail"
+            type="error"
+            :closable="false"
+            show-icon
+          />
+          <el-button type="primary" @click="handleRetryHistoryLoad">重新加载</el-button>
+        </div>
         <BubbleList
+          v-else
           :list="bubbleList"
           max-height="100%"
           :auto-scroll="isStreaming"
@@ -399,7 +415,7 @@ const chatStore = useChatStore()
 const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()
 const toolsStore = useToolsStore()
-const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder } = storeToRefs(chatStore)
+const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder, isHistoryLoading } = storeToRefs(chatStore)
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
 const editingAttachments = ref<Attachment[]>([])
@@ -514,6 +530,11 @@ const isLoading = computed(() => {
   const last = msgs[msgs.length - 1]
   return last.role === 'user' && !isStreaming.value
 })
+
+async function handleRetryHistoryLoad() {
+  const sessionId = sessionsStore.effectiveThreadId || sessionsStore.currentSessionId
+  if (sessionId) await chatStore.loadMessages(sessionId)
+}
 
 function createLoadOlderItem(): LoadOlderBubbleItem {
   return {
