@@ -6,7 +6,8 @@ import pytest
 from lc_agent.db.engine import get_async_session, init_db, reset_engine
 from lc_agent.db.repository import AutomationRunRepository, AutomationTaskRepository
 from lc_agent.server.agent_runner import AgentRunService
-from lc_agent.server.automation import AutomationScheduleError, AutomationScheduler, normalize_schedule
+from lc_agent.server.automation import AutomationRunner, AutomationScheduleError, AutomationScheduler, normalize_schedule
+from lc_agent.server.automation_notifications import NotificationDeliverySummary
 
 
 @pytest.fixture
@@ -86,8 +87,92 @@ async def test_automation_repositories_preserve_task_and_run_history(db_url):
         )
         assert (await task_repo.get_by_id(task_id)).agent_id == "power"
         assert run_id in {item.id for item in await run_repo.list_by_task(task_id)}
+        assert await run_repo.count_all(user_id="user-1") == 2
+        assert await run_repo.count_by_task(task_id) == 2
         assert active_run is not None
         assert duplicate_active is None
+
+
+@pytest.mark.asyncio
+async def test_automation_runner_persists_notification_delivery_summary(db_url, monkeypatch):
+    task = None
+    async with get_async_session(db_url) as db:
+        task = await AutomationTaskRepository(db).create(
+            user_id="user-1",
+            name="每日摘要",
+            agent_id="power",
+            prompt="整理今天的摘要",
+            schedule_type="daily",
+            schedule_config={"time": "09:00"},
+            notification_targets=[{
+                "platform": "wecom",
+                "name": "研发群",
+                "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key",
+            }],
+        )
+        run = await AutomationRunRepository(db).create(
+            task_id=task.id,
+            user_id=task.user_id,
+            status="success",
+            scheduled_at=datetime(2026, 8, 27, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        )
+
+    async def fake_deliver_run(self, targets, **kwargs):
+        assert targets == task.notification_targets
+        assert kwargs["final_output"] == "摘要正文"
+        return NotificationDeliverySummary(status="partial_failed", error="研发群: 请求超时")
+
+    monkeypatch.setattr(
+        "lc_agent.server.automation.AutomationNotificationService.deliver_run",
+        fake_deliver_run,
+    )
+    runner = AutomationRunner(object(), db_url, object())
+    await runner._notify_run(task, run.id, "success", final_output="摘要正文")
+
+    async with get_async_session(db_url) as db:
+        updated = await AutomationRunRepository(db).get_by_id(run.id)
+        assert updated.notification_status == "partial_failed"
+        assert updated.notification_error == "研发群: 请求超时"
+
+
+@pytest.mark.asyncio
+async def test_automation_runner_contains_unexpected_notification_errors(db_url, monkeypatch):
+    async with get_async_session(db_url) as db:
+        task = await AutomationTaskRepository(db).create(
+            user_id="user-1",
+            name="每日摘要",
+            agent_id="power",
+            prompt="整理今天的摘要",
+            schedule_type="daily",
+            schedule_config={"time": "09:00"},
+            notification_targets=[{
+                "platform": "wecom",
+                "name": "研发群",
+                "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key",
+            }],
+        )
+        run = await AutomationRunRepository(db).create(
+            task_id=task.id,
+            user_id=task.user_id,
+            status="success",
+            scheduled_at=datetime(2026, 8, 27, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        )
+
+    async def raise_unexpected_error(self, targets, **kwargs):
+        raise RuntimeError("unexpected notifier error")
+
+    monkeypatch.setattr(
+        "lc_agent.server.automation.AutomationNotificationService.deliver_run",
+        raise_unexpected_error,
+    )
+    runner = AutomationRunner(object(), db_url, object())
+    await runner._notify_run(task, run.id, "success", final_output="摘要正文")
+
+    async with get_async_session(db_url) as db:
+        updated = await AutomationRunRepository(db).get_by_id(run.id)
+        assert updated.status == "success"
+        assert updated.notification_status == "failed"
+        assert updated.notification_error == "通知服务异常"
 
 
 @pytest.mark.asyncio
@@ -154,6 +239,7 @@ async def test_agent_run_service_persists_a_standalone_execution(db_url):
         assert messages[-1].content[0]["text"] == "自动化结果"
         assert messages[-1].usage["rounds"][0]["total_tokens"] == 5
         assert session.message_count == 1
+    assert result.final_output == "自动化结果"
 
 
 @pytest.mark.asyncio

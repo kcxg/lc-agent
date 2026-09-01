@@ -23,6 +23,10 @@ from lc_agent.db.repository import (
     AutomationTaskRepository,
     SessionRepository,
 )
+from lc_agent.server.automation_notifications import (
+    AutomationNotificationService,
+    NotificationDeliverySummary,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -195,6 +199,7 @@ def serialize_task(task: AutomationTask, engine: AgentEngine | None = None) -> d
         "prompt": task.prompt,
         "schedule_type": task.schedule_type,
         "schedule_config": task.schedule_config,
+        "notification_targets": task.notification_targets or [],
         "timezone": task.timezone,
         "enabled": task.enabled,
         "next_run_at": _iso(task.next_run_at),
@@ -223,6 +228,8 @@ def serialize_run(run: AutomationRun) -> dict[str, Any]:
         "started_at": _iso(run.started_at),
         "finished_at": _iso(run.finished_at),
         "error": run.error,
+        "notification_status": run.notification_status,
+        "notification_error": run.notification_error,
         "created_at": _iso(run.created_at),
     }
 
@@ -322,6 +329,7 @@ class AutomationRunner:
                 scheduled_at=scheduled_at,
                 finished_at=datetime.now(timezone.utc),
                 error="上一次执行尚未完成",
+                notification_status="not_sent" if task.notification_targets else "not_configured",
             )
             await AutomationTaskRepository(db).update(
                 task.id,
@@ -399,6 +407,7 @@ class AutomationRunner:
 
         if setup_error is not None:
             await self._finish(run.id, task.id, "failed", setup_error, now)
+            await self._notify_run(task, run.id, "failed")
             if task.schedule_type == "one_time":
                 db = get_async_session(self.db_url)
                 try:
@@ -424,9 +433,16 @@ class AutomationRunner:
                 result.error,
                 datetime.now(timezone.utc),
             )
+            await self._notify_run(
+                task,
+                run.id,
+                "failed" if result.error else "success",
+                final_output=result.final_output,
+            )
         except Exception as exc:
             logger.exception("Automation run failed: task=%s run=%s", task.id, run.id)
             await self._finish(run.id, task.id, "failed", str(exc), datetime.now(timezone.utc))
+            await self._notify_run(task, run.id, "failed")
 
         if task.schedule_type == "one_time":
             db = get_async_session(self.db_url)
@@ -465,6 +481,36 @@ class AutomationRunner:
                 task_id,
                 last_status=status,
                 last_run_at=finished_at,
+            )
+        finally:
+            await db.close()
+
+    async def _notify_run(
+        self,
+        task: AutomationTask,
+        run_id: str,
+        run_status: str,
+        *,
+        final_output: str = "",
+    ) -> None:
+        try:
+            app_config = getattr(self.app, "config", {})
+            app_name = app_config.get("ui", {}).get("app_name", "lc-agent")
+            summary = await AutomationNotificationService(app_name=app_name).deliver_run(
+                task.notification_targets or [],
+                task_name=task.name,
+                run_status=run_status,
+                final_output=final_output,
+            )
+        except Exception:
+            logger.exception("Automation notification failed unexpectedly: task=%s run=%s", task.id, run_id)
+            summary = NotificationDeliverySummary(status="failed", error="通知服务异常")
+        db = get_async_session(self.db_url)
+        try:
+            await AutomationRunRepository(db).update(
+                run_id,
+                notification_status=summary.status,
+                notification_error=summary.error,
             )
         finally:
             await db.close()

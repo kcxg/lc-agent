@@ -104,10 +104,15 @@ export const api = {
   runAutomationTask: (id: string) =>
     fetchApi<any>(`/automation/tasks/${id}/run`, { method: 'POST' }),
   getAutomationTaskRuns: (id: string) =>
-    fetchApi<any[]>(`/automation/tasks/${id}/runs`),
-  getAutomationRuns: () => fetchApi<any[]>('/automation/runs'),
+    fetchApi<{ items: any[]; total: number }>(`/automation/tasks/${id}/runs`),
+  getAutomationRuns: () => fetchApi<{ items: any[]; total: number }>('/automation/runs'),
   rerunAutomation: (id: string) =>
     fetchApi<any>(`/automation/runs/${id}/rerun`, { method: 'POST' }),
+  testAutomationNotification: (target: object) =>
+    fetchApi<{ status: 'sent' | 'failed'; error: string | null }>('/automation/notifications/test', {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    }),
 
   getSummarization: () => fetchApi<{ enabled: boolean; default_model: string; trigger: any; keep: any }>('/settings/summarization'),
   updateSummarization: (data: { enabled?: boolean; default_model?: string; trigger?: any; keep?: any }) =>

@@ -19,6 +19,7 @@ from lc_agent.server.subagent_tracker import SubAgentRunTracker
 class AgentRunResult:
     error: str | None = None
     interrupted: bool = False
+    final_output: str = ""
 
 
 class AgentRunService:
@@ -167,11 +168,12 @@ class AgentRunService:
                     return AgentRunResult(
                         error="任务需要人工审批，自动化执行无法继续",
                         interrupted=True,
+                        final_output="".join(content_parts),
                     )
             except Exception:
                 # Graphs compiled without a checkpointer cannot expose interrupt state.
                 # The completed stream remains a successful run in that case.
                 pass
-            return AgentRunResult()
+            return AgentRunResult(final_output="".join(content_parts))
         except Exception as exc:
-            return AgentRunResult(error=str(exc))
+            return AgentRunResult(error=str(exc), final_output="".join(content_parts))

@@ -1,7 +1,7 @@
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lc_agent.core.engine import AgentEngine
@@ -19,9 +19,54 @@ from lc_agent.server.automation import (
     serialize_task,
 )
 from lc_agent.server.dependencies import get_db_session, get_engine
+from lc_agent.server.automation_notifications import (
+    AutomationNotificationService,
+    NotificationConfigurationError,
+    validate_notification_target,
+)
 
 
 router = APIRouter(prefix="/automation", tags=["automation"])
+
+
+class NotificationTargetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    platform: Literal["wecom", "feishu", "dingtalk"]
+    name: str = Field(min_length=1, max_length=120)
+    webhook: str = Field(min_length=1, max_length=2_000)
+    dingtalk_secret: str | None = Field(default=None, max_length=1_000)
+
+    @field_validator("name", "webhook")
+    @classmethod
+    def strip_required_target_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("字段不能为空")
+        return value
+
+    @field_validator("dingtalk_secret")
+    @classmethod
+    def strip_optional_target_text(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        try:
+            normalized = validate_notification_target(self.model_dump())
+        except NotificationConfigurationError as exc:
+            raise ValueError(str(exc)) from exc
+        self.platform = normalized["platform"]
+        self.name = normalized["name"]
+        self.webhook = normalized["webhook"]
+        self.dingtalk_secret = normalized.get("dingtalk_secret")
+        return self
+
+
+class NotificationTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: NotificationTargetRequest
 
 
 class AutomationTaskCreateRequest(BaseModel):
@@ -32,6 +77,7 @@ class AutomationTaskCreateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=100_000)
     schedule_type: Literal["one_time", "interval", "daily", "weekly"]
     schedule_config: dict[str, Any] = Field(default_factory=dict)
+    notification_targets: list[NotificationTargetRequest] = Field(default_factory=list, max_length=20)
     timezone: str | None = None
     enabled: bool = True
 
@@ -52,6 +98,7 @@ class AutomationTaskUpdateRequest(BaseModel):
     prompt: str | None = Field(default=None, min_length=1, max_length=100_000)
     schedule_type: Literal["one_time", "interval", "daily", "weekly"] | None = None
     schedule_config: dict[str, Any] | None = None
+    notification_targets: list[NotificationTargetRequest] | None = Field(default=None, max_length=20)
     timezone: str | None = None
     enabled: bool | None = None
 
@@ -104,6 +151,10 @@ def _normalize_or_raise(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _notification_targets_payload(targets: list[NotificationTargetRequest]) -> list[dict[str, str]]:
+    return [target.model_dump(exclude_none=True) for target in targets]
+
+
 async def _get_task_or_404(
     task_id: str,
     user: User,
@@ -153,6 +204,7 @@ async def create_task(
         prompt=body.prompt,
         schedule_type=body.schedule_type,
         schedule_config=normalized_config,
+        notification_targets=_notification_targets_payload(body.notification_targets),
         timezone=normalized_timezone,
         enabled=body.enabled,
         next_run_at=_as_utc(next_run_at) if body.enabled else None,
@@ -184,6 +236,8 @@ async def update_task(
 ):
     task = await _get_task_or_404(task_id, user, db)
     updates = body.model_dump(exclude_unset=True)
+    if "notification_targets" in updates:
+        updates["notification_targets"] = _notification_targets_payload(body.notification_targets or [])
     target_agent = updates.get("agent_id", task.agent_id)
     await _check_agent_access(target_agent, user, engine, db)
 
@@ -210,6 +264,20 @@ async def update_task(
         raise HTTPException(status_code=404, detail="自动化任务不存在")
     await scheduler.refresh_task(task_id)
     return serialize_task(updated, engine)
+
+
+@router.post("/notifications/test")
+async def test_notification_target(
+    body: NotificationTestRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    del user
+    app_name = request.app.state.config.get("ui", {}).get("app_name", "lc-agent")
+    delivery = await AutomationNotificationService(app_name=app_name).send_test(
+        body.target.model_dump(exclude_none=True),
+    )
+    return {"status": "sent" if delivery.sent else "failed", "error": delivery.error}
 
 
 @router.delete("/tasks/{task_id}", status_code=204)
@@ -286,8 +354,10 @@ async def list_task_runs(
     db: AsyncSession = Depends(get_db_session),
 ):
     task = await _get_task_or_404(task_id, user, db)
-    runs = await AutomationRunRepository(db).list_by_task(task.id)
-    return [serialize_run(run) for run in runs]
+    run_repo = AutomationRunRepository(db)
+    runs = await run_repo.list_by_task(task.id)
+    total = await run_repo.count_by_task(task.id)
+    return {"items": [serialize_run(run) for run in runs], "total": total}
 
 
 @router.get("/runs")
@@ -296,8 +366,10 @@ async def list_runs(
     db: AsyncSession = Depends(get_db_session),
 ):
     user_id = None if user.role == "admin" else user.id
-    runs = await AutomationRunRepository(db).list_all(user_id=user_id)
-    return [serialize_run(run) for run in runs]
+    run_repo = AutomationRunRepository(db)
+    runs = await run_repo.list_all(user_id=user_id)
+    total = await run_repo.count_all(user_id=user_id)
+    return {"items": [serialize_run(run) for run in runs], "total": total}
 
 
 @router.post("/runs/{run_id}/rerun")

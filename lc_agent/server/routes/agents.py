@@ -296,11 +296,12 @@ async def create_agent(
 async def list_available_subagents(
     engine: AgentEngine = Depends(get_engine),
     db=Depends(get_db),
-    admin: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ):
-    """Return all presets that can be used as sub-agents.
+    """Return presets visible to the current user for sub-agent selection.
 
-    Excludes __chat__ builtin. Includes code agents and web presets.
+    Excludes the ``chat`` builtin. Admins see all presets; regular users only
+    see presets explicitly granted through ``UserAgentAccess``.
     """
     result = []
 
@@ -334,6 +335,12 @@ async def list_available_subagents(
             "source": "user",
             "description": "",
         })
+
+    if user.role != "admin":
+        access_stmt = select(UserAgentAccess.agent_id).where(UserAgentAccess.user_id == user.id)
+        access_rows = await db.execute(access_stmt)
+        allowed_ids = set(access_rows.scalars().all())
+        result = [agent for agent in result if agent["id"] in allowed_ids]
 
     return result
 

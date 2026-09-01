@@ -13,8 +13,9 @@
             class="dialog-mode-tab"
             :class="{ 'is-active': viewMode === 'agents' }"
             @click="switchToAgentsView"
-          >🤖 Agents 管理</button>
+          >🤖 {{ isReadOnly ? 'Agents 查看' : 'Agents 管理' }}</button>
           <button
+            v-if="!isReadOnly"
             class="dialog-mode-tab"
             :class="{ 'is-active': viewMode === 'prompts' }"
             @click="switchToPromptsView"
@@ -30,7 +31,7 @@
         <template v-if="viewMode === 'agents'">
           <!-- Desktop -->
           <template v-if="!isMobile">
-            <button class="sidebar-new-btn" @click="handleNewAgent">
+            <button v-if="!isReadOnly" class="sidebar-new-btn" @click="handleNewAgent">
               <el-icon><Plus /></el-icon>
               <span>新建 Agent</span>
             </button>
@@ -78,7 +79,7 @@
                 :value="opt.value"
               />
             </el-select>
-            <button class="sidebar-new-btn mobile-new-btn" @click="handleNewAgent">
+            <button v-if="!isReadOnly" class="sidebar-new-btn mobile-new-btn" @click="handleNewAgent">
               <el-icon><Plus /></el-icon>
             </button>
           </div>
@@ -204,7 +205,13 @@
 
           <!-- Editable form -->
           <div v-else class="form-scroll">
-            <el-form :model="form" label-width="100px" label-position="top">
+            <el-alert
+              v-if="isReadOnly"
+              type="info"
+              :closable="false"
+              style="margin: 12px 0 0;"
+            >当前账号仅有查看权限，Agent 配置不可修改。</el-alert>
+            <el-form :model="form" label-width="100px" label-position="top" :disabled="isReadOnly">
               <el-tabs v-model="activeTab" :stretch="isMobile">
                 <el-tab-pane label="基本设置" name="basic">
 
@@ -531,7 +538,7 @@
                         :image-size="60"
                       />
                       <div style="text-align:center; margin-top: -8px;">
-                        <el-button text type="primary" @click="switchToPromptsView">
+                        <el-button v-if="!isReadOnly" text type="primary" @click="switchToPromptsView">
                           前往提示词管理
                         </el-button>
                       </div>
@@ -546,9 +553,9 @@
           <div class="form-footer">
             <el-button @click="visible = false">关闭</el-button>
             <div class="form-footer-right">
-              <el-button v-if="canCopy" plain @click="handleCopy">复制</el-button>
-              <el-button v-if="canDelete" type="danger" plain @click="handleDelete">删除</el-button>
-              <el-button v-if="!isCodeAgent" type="primary" :loading="saving" @click="handleSave">
+              <el-button v-if="!isReadOnly && canCopy" plain @click="handleCopy">复制</el-button>
+              <el-button v-if="!isReadOnly && canDelete" type="danger" plain @click="handleDelete">删除</el-button>
+              <el-button v-if="!isReadOnly && !isCodeAgent" type="primary" :loading="saving" @click="handleSave">
                 {{ isPendingNew ? '创建' : '保存' }}
               </el-button>
             </div>
@@ -614,12 +621,14 @@ import { fetchAvailableSubagents, api } from '@/api/http'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore, type AgentPreset, type AgentSubagentConfig } from '@/stores/agents'
 import { usePromptsStore } from '@/stores/prompts'
+import { useAuthStore } from '@/stores/auth'
 
 const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
 const promptsStore = usePromptsStore()
+const authStore = useAuthStore()
 
 const visible = ref(false)
 const saving = ref(false)
@@ -814,6 +823,8 @@ const canCopy = computed(() =>
 const canDelete = computed(() =>
   !isPendingNew.value && !isCodeAgent.value && !isSelectedBuiltin.value
 )
+
+const isReadOnly = computed(() => authStore.authRequired === true && !authStore.isAdmin)
 
 // ===== Form state =====
 
@@ -1047,20 +1058,27 @@ async function _loadAgentIntoForm(agent: AgentPreset) {
   formLoading.value = true
   activeTab.value = 'basic'
 
-  const [{ subagents }] = await Promise.all([
-    _populateFormFromAgent(agent, { excludeAgentId: agent.id }),
-    _loadBoundPrompts(agent.id, seq),
-    promptsStore.prompts.length === 0 ? promptsStore.fetchPrompts() : Promise.resolve(),
-  ])
-  if (seq !== _loadSeq) return  // a newer load started; discard stale result
+  try {
+    const [{ subagents }] = await Promise.all([
+      _populateFormFromAgent(agent, { excludeAgentId: agent.id }),
+      _loadBoundPrompts(agent.id, seq),
+      promptsStore.prompts.length === 0 ? promptsStore.fetchPrompts() : Promise.resolve(),
+    ])
+    if (seq !== _loadSeq) return  // a newer load started; discard stale result
 
-  availableSubagents.value = subagents
-  _distributeAllowedSkills(agent.allowed_skills)
+    availableSubagents.value = subagents
+    _distributeAllowedSkills(agent.allowed_skills)
 
-  await nextTick()
-  if (seq !== _loadSeq) return
-  formLoading.value = false
-  isDirty.value = false
+    await nextTick()
+    if (seq !== _loadSeq) return
+    isDirty.value = false
+  } catch (err: any) {
+    if (seq !== _loadSeq) return
+    availableSubagents.value = []
+    ElMessage.error(err?.message || '加载 Agent 失败，请重试')
+  } finally {
+    if (seq === _loadSeq) formLoading.value = false
+  }
 }
 
 async function _loadNewForm() {
@@ -1161,7 +1179,7 @@ async function trySelectAgent(agentId: string) {
 }
 
 async function handleNewAgent() {
-  if (formLoading.value) return
+  if (isReadOnly.value || formLoading.value) return
   if (!await _confirmDiscardIfDirty()) return
   selectedAgentId.value = null
   isPendingNew.value = true
@@ -1170,7 +1188,7 @@ async function handleNewAgent() {
 }
 
 async function handleCopy() {
-  if (!selectedAgentId.value) return
+  if (isReadOnly.value || !selectedAgentId.value) return
   const agent = agentsStore.agents.find(a => a.id === selectedAgentId.value)
   if (!agent) return
   if (!await _confirmDiscardIfDirty()) return
@@ -1205,7 +1223,7 @@ async function handleCopy() {
 }
 
 async function handleDelete() {
-  if (!selectedAgentId.value) return
+  if (isReadOnly.value || !selectedAgentId.value) return
   try {
     await ElMessageBox.confirm(
       '确定要删除此 Agent 吗？此操作不可撤销。',
@@ -1224,6 +1242,7 @@ async function handleDelete() {
 }
 
 async function handleSave() {
+  if (isReadOnly.value) return
   saving.value = true
   try {
     const namePattern = /^[a-zA-Z][a-zA-Z0-9_-]*$/

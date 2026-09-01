@@ -3,6 +3,7 @@ from httpx import ASGITransport, AsyncClient
 
 from lc_agent.app import LcAgentApp
 from lc_agent.db.engine import init_db, reset_engine
+from lc_agent.server.automation_notifications import NotificationDelivery
 from tests.conftest import setup_test_auth
 
 
@@ -66,9 +67,51 @@ async def test_automation_task_crud_and_forbidden_duplicate_config(app_and_heade
         assert task["timezone"] == "Asia/Shanghai"
         assert task["next_run_at"]
 
+        response = await client.post(
+            "/api/automation/tasks",
+            json={
+                "name": "带通知任务",
+                "agent_id": "power",
+                "prompt": "整理今日摘要",
+                "schedule_type": "daily",
+                "schedule_config": {"time": "09:00"},
+                "notification_targets": [{
+                    "platform": "wecom",
+                    "name": "研发群",
+                    "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key",
+                }],
+            },
+            headers=headers,
+        )
+        assert response.status_code == 201
+        assert response.json()["notification_targets"][0]["name"] == "研发群"
+
+        invalid_target = await client.post(
+            "/api/automation/tasks",
+            json={
+                "name": "非法通知任务",
+                "agent_id": "power",
+                "prompt": "整理今日摘要",
+                "schedule_type": "daily",
+                "schedule_config": {"time": "09:00"},
+                "notification_targets": [{
+                    "platform": "wecom",
+                    "name": "研发群",
+                    "webhook": "https://example.com/webhook?key=test-key",
+                }],
+            },
+            headers=headers,
+        )
+        assert invalid_target.status_code == 422
+
         listed = await client.get("/api/automation/tasks", headers=headers)
         assert listed.status_code == 200
-        assert listed.json()[0]["id"] == task["id"]
+        assert task["id"] in {item["id"] for item in listed.json()}
+
+        runs = await client.get("/api/automation/runs", headers=headers)
+        assert runs.status_code == 200
+        assert isinstance(runs.json()["items"], list)
+        assert runs.json()["total"] >= 0
 
         paused = await client.post(f"/api/automation/tasks/{task['id']}/pause", headers=headers)
         assert paused.status_code == 200
@@ -80,4 +123,27 @@ async def test_automation_task_crud_and_forbidden_duplicate_config(app_and_heade
 
         deleted = await client.delete(f"/api/automation/tasks/{task['id']}", headers=headers)
         assert deleted.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_notification_target_test_endpoint_uses_real_target_shape(app_and_headers, monkeypatch):
+    async def fake_send_test(self, target):
+        assert target["name"] == "研发群"
+        return NotificationDelivery(target_name="研发群", sent=True)
+
+    monkeypatch.setattr("lc_agent.server.routes.automation.AutomationNotificationService.send_test", fake_send_test)
+    app, headers = app_and_headers
+    transport = ASGITransport(app=app.fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/automation/notifications/test",
+            json={"target": {
+                "platform": "wecom",
+                "name": "研发群",
+                "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key",
+            }},
+            headers=headers,
+        )
+    assert response.status_code == 200
+    assert response.json() == {"status": "sent", "error": None}
 

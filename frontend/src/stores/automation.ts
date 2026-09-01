@@ -4,6 +4,15 @@ import { api } from '@/api/http'
 
 export type AutomationScheduleType = 'one_time' | 'interval' | 'daily' | 'weekly'
 export type AutomationRunStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped'
+export type AutomationNotificationPlatform = 'wecom' | 'feishu' | 'dingtalk'
+export type AutomationNotificationStatus = 'not_configured' | 'not_sent' | 'sent' | 'partial_failed' | 'failed'
+
+export interface AutomationNotificationTarget {
+  platform: AutomationNotificationPlatform
+  name: string
+  webhook: string
+  dingtalk_secret?: string
+}
 
 export interface AutomationTask {
   id: string
@@ -14,6 +23,7 @@ export interface AutomationTask {
   prompt: string
   schedule_type: AutomationScheduleType
   schedule_config: Record<string, unknown>
+  notification_targets: AutomationNotificationTarget[]
   timezone: string
   enabled: boolean
   next_run_at: string | null
@@ -33,12 +43,15 @@ export interface AutomationRun {
   started_at: string | null
   finished_at: string | null
   error: string | null
+  notification_status: AutomationNotificationStatus
+  notification_error: string | null
   created_at: string
 }
 
 export const useAutomationStore = defineStore('automation', () => {
   const tasks = ref<AutomationTask[]>([])
   const runs = ref<AutomationRun[]>([])
+  const runTotal = ref(0)
   const loading = ref(false)
   const error = ref('')
   const saving = ref(false)
@@ -59,7 +72,9 @@ export const useAutomationStore = defineStore('automation', () => {
 
   async function loadRuns() {
     try {
-      runs.value = await api.getAutomationRuns()
+      const response = await api.getAutomationRuns()
+      runs.value = response.items
+      runTotal.value = response.total
     } catch (e) {
       error.value = e instanceof Error ? e.message : '加载执行历史失败'
     }
@@ -122,6 +137,10 @@ export const useAutomationStore = defineStore('automation', () => {
     return run as AutomationRun
   }
 
+  async function testNotificationTarget(target: AutomationNotificationTarget) {
+    return api.testAutomationNotification(target)
+  }
+
   function replaceTask(updated: AutomationTask) {
     const index = tasks.value.findIndex(task => task.id === updated.id)
     if (index >= 0) tasks.value[index] = updated
@@ -134,6 +153,7 @@ export const useAutomationStore = defineStore('automation', () => {
   return {
     tasks,
     runs,
+    runTotal,
     loading,
     error,
     saving,
@@ -149,6 +169,7 @@ export const useAutomationStore = defineStore('automation', () => {
     resumeTask,
     runTask,
     rerun,
+    testNotificationTarget,
     getTaskName,
   }
 })

@@ -47,7 +47,7 @@
         @click="switchToRuns"
       >
         执行历史
-        <span class="tab-count">{{ automationStore.runs.length }}</span>
+        <span class="tab-count">{{ automationStore.runTotal }}</span>
       </button>
     </div>
 
@@ -153,6 +153,87 @@
         placeholder="请描述 Agent 需要自动完成的任务，以及期望的输出格式。"
       />
 
+      <section class="notification-section" aria-label="群通知">
+        <div class="notification-section-header">
+          <div>
+            <span class="form-kicker">群通知</span>
+            <p>任务完成或失败后，发送结果到指定群。</p>
+          </div>
+          <button class="add-target-btn" type="button" @click="addNotificationTarget">
+            <el-icon><Plus /></el-icon>
+            添加群
+          </button>
+        </div>
+
+        <div v-if="form.notification_targets.length === 0" class="notification-empty">
+          未配置群通知
+        </div>
+
+        <article v-for="(target, index) in form.notification_targets" :key="index" class="notification-target">
+          <div class="notification-target-header">
+            <strong>通知目标 {{ index + 1 }}</strong>
+            <button
+              class="remove-target-btn"
+              type="button"
+              title="移除通知目标"
+              :aria-label="`移除通知目标 ${index + 1}`"
+              @click="removeNotificationTarget(index)"
+            >
+              <el-icon><Delete /></el-icon>
+            </button>
+          </div>
+          <div class="notification-target-grid">
+            <div>
+              <label class="field-label" :for="`notification-platform-${index}`">平台</label>
+              <el-select
+                :id="`notification-platform-${index}`"
+                v-model="target.platform"
+                class="full-control"
+                @change="clearUnusedTargetFields(target)"
+              >
+                <el-option label="企业微信" value="wecom" />
+                <el-option label="飞书" value="feishu" />
+                <el-option label="钉钉" value="dingtalk" />
+              </el-select>
+            </div>
+            <div>
+              <label class="field-label" :for="`notification-name-${index}`">群名称</label>
+              <el-input :id="`notification-name-${index}`" v-model="target.name" maxlength="120" placeholder="例如：研发日报群" />
+            </div>
+            <div class="notification-target-wide">
+              <label class="field-label" :for="`notification-webhook-${index}`">Webhook</label>
+              <el-input
+                :id="`notification-webhook-${index}`"
+                v-model="target.webhook"
+                maxlength="2000"
+                placeholder="粘贴该群机器人的官方 Webhook 地址"
+              />
+            </div>
+            <div v-if="target.platform === 'dingtalk'" class="notification-target-wide">
+              <label class="field-label" :for="`notification-secret-${index}`">钉钉签名密钥（可选）</label>
+              <el-input
+                :id="`notification-secret-${index}`"
+                v-model="target.dingtalk_secret"
+                maxlength="1000"
+                show-password
+                placeholder="机器人启用签名校验时填写"
+              />
+            </div>
+          </div>
+          <div class="notification-target-actions">
+            <button
+              class="test-notification-btn"
+              type="button"
+              :disabled="testingTargetIndex === index || !canTestNotificationTarget(target)"
+              @click="testNotificationTarget(target, index)"
+            >
+              <el-icon><Promotion /></el-icon>
+              {{ testingTargetIndex === index ? '发送中...' : '测试发送' }}
+            </button>
+          </div>
+        </article>
+      </section>
+
       <div class="form-actions">
         <button class="secondary-btn" type="button" @click="cancelForm">取消</button>
         <button class="primary-btn" type="submit" :disabled="automationStore.saving || !canSave">
@@ -191,6 +272,7 @@
           <p class="task-prompt">{{ task.prompt }}</p>
           <div class="task-meta">
             <span :class="['run-status', task.last_status || 'none']">{{ statusLabel(task.last_status) }}</span>
+            <span v-if="task.notification_targets.length">群通知 {{ task.notification_targets.length }} 个</span>
             <span v-if="task.next_run_at">下次 {{ formatDate(task.next_run_at) }}</span>
             <span v-else-if="!task.enabled">已暂停</span>
           </div>
@@ -227,6 +309,10 @@
             <span :class="['run-status', run.status]">{{ statusLabel(run.status) }}</span>
           </div>
           <p v-if="run.error" class="run-error">{{ run.error }}</p>
+          <p v-if="run.notification_status !== 'not_configured'" :class="['notification-result', run.notification_status]">
+            {{ notificationStatusLabel(run.notification_status) }}
+            <span v-if="run.notification_error">：{{ run.notification_error }}</span>
+          </p>
           <div class="run-item-bottom">
             <span v-if="run.finished_at">完成于 {{ formatDate(run.finished_at) }}</span>
             <span v-else>执行中</span>
@@ -249,10 +335,16 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Clock, Close, Delete, EditPen, Plus, VideoPlay, View } from '@element-plus/icons-vue'
+import { Clock, Close, Delete, EditPen, Plus, Promotion, VideoPlay, View } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useAgentsStore } from '@/stores/agents'
-import { useAutomationStore, type AutomationRun, type AutomationScheduleType, type AutomationTask } from '@/stores/automation'
+import {
+  useAutomationStore,
+  type AutomationNotificationTarget,
+  type AutomationRun,
+  type AutomationScheduleType,
+  type AutomationTask,
+} from '@/stores/automation'
 import { useSessionsStore } from '@/stores/sessions'
 
 const visible = ref(false)
@@ -262,6 +354,7 @@ const editingTaskId = ref<string | null>(null)
 const actionTaskId = ref<string | null>(null)
 const actionType = ref<'run' | 'toggle' | null>(null)
 const actionRunId = ref<string | null>(null)
+const testingTargetIndex = ref<number | null>(null)
 
 const agentsStore = useAgentsStore()
 const automationStore = useAutomationStore()
@@ -289,12 +382,14 @@ const form = reactive({
   start_at: '',
   time: '09:00',
   day_of_week: 0,
+  notification_targets: [] as AutomationNotificationTarget[],
 })
 
 const availableAgents = computed(() => agentsStore.agents)
 const showForm = computed(() => formVisible.value)
 const canSave = computed(() => {
   if (!form.name.trim() || !form.agent_id || !form.prompt.trim()) return false
+  if (!form.notification_targets.every(canTestNotificationTarget)) return false
   if (form.schedule_type === 'one_time') return Boolean(form.run_at)
   if (form.schedule_type === 'interval') return form.interval_value > 0
   return Boolean(form.time)
@@ -321,6 +416,7 @@ function resetForm() {
   form.start_at = ''
   form.time = '09:00'
   form.day_of_week = 0
+  form.notification_targets = []
 }
 
 function startCreate() {
@@ -342,6 +438,7 @@ function startEdit(task: AutomationTask) {
   form.start_at = String(task.schedule_config.start_at || '').slice(0, 16)
   form.time = String(task.schedule_config.time || '09:00')
   form.day_of_week = Number(task.schedule_config.day_of_week || 0)
+  form.notification_targets = (task.notification_targets || []).map(target => ({ ...target }))
 }
 
 function cancelForm() {
@@ -387,6 +484,10 @@ async function saveTask() {
       prompt: form.prompt,
       schedule_type: form.schedule_type,
       schedule_config: buildScheduleConfig(),
+      notification_targets: form.notification_targets.map(target => ({
+        ...target,
+        dingtalk_secret: target.dingtalk_secret || undefined,
+      })),
     }
     if (editingTaskId.value) {
       await automationStore.updateTask(editingTaskId.value, payload)
@@ -399,6 +500,44 @@ async function saveTask() {
     formVisible.value = false
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '保存自动化任务失败')
+  }
+}
+
+function addNotificationTarget() {
+  form.notification_targets.push({
+    platform: 'wecom',
+    name: '',
+    webhook: '',
+    dingtalk_secret: '',
+  })
+}
+
+function removeNotificationTarget(index: number) {
+  form.notification_targets.splice(index, 1)
+}
+
+function clearUnusedTargetFields(target: AutomationNotificationTarget) {
+  if (target.platform !== 'dingtalk') target.dingtalk_secret = ''
+}
+
+function canTestNotificationTarget(target: AutomationNotificationTarget) {
+  return Boolean(target.name.trim() && target.webhook.trim())
+}
+
+async function testNotificationTarget(target: AutomationNotificationTarget, index: number) {
+  if (!canTestNotificationTarget(target)) return
+  testingTargetIndex.value = index
+  try {
+    const result = await automationStore.testNotificationTarget({
+      ...target,
+      dingtalk_secret: target.dingtalk_secret || undefined,
+    })
+    if (result.status === 'sent') ElMessage.success(`已发送测试消息到“${target.name}”`)
+    else ElMessage.error(result.error || '测试消息发送失败')
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '测试消息发送失败')
+  } finally {
+    testingTargetIndex.value = null
   }
 }
 
@@ -501,6 +640,15 @@ function statusLabel(status: string | null) {
     skipped: '已跳过',
     none: '尚未执行',
   }[status || 'none'] || status || '尚未执行'
+}
+
+function notificationStatusLabel(status: string) {
+  return {
+    not_sent: '未推送（任务已跳过）',
+    sent: '群通知已发送',
+    partial_failed: '群通知部分失败',
+    failed: '群通知发送失败',
+  }[status] || '未配置群通知'
 }
 
 defineExpose({ open })
@@ -812,6 +960,136 @@ defineExpose({ open })
   font-size: 11px;
 }
 
+.notification-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.notification-section-header,
+.notification-target-header,
+.notification-target-actions {
+  display: flex;
+  align-items: center;
+}
+
+.notification-section-header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notification-section-header p {
+  margin: 4px 0 0;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+}
+
+.add-target-btn,
+.test-notification-btn,
+.remove-target-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 5px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  transition: border-color .15s, background .15s, box-shadow .15s, opacity .15s;
+}
+
+.add-target-btn {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--el-color-primary);
+  background: var(--el-color-primary);
+  box-shadow: 0 2px 5px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+}
+
+.add-target-btn:hover {
+  border-color: var(--el-color-primary-dark-2);
+  background: var(--el-color-primary-dark-2);
+}
+
+.notification-empty {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.notification-target {
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 7px;
+  background: var(--el-fill-color-extra-light);
+}
+
+.notification-target-header {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notification-target-header strong {
+  color: var(--el-text-color-primary);
+  font-size: 12px;
+}
+
+.remove-target-btn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  border: 1px solid var(--el-color-danger);
+  background: var(--el-color-danger);
+  box-shadow: 0 2px 5px color-mix(in srgb, var(--el-color-danger) 20%, transparent);
+}
+
+.remove-target-btn:hover {
+  border-color: var(--el-color-danger-dark-2);
+  background: var(--el-color-danger-dark-2);
+}
+
+.notification-target-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 10px;
+}
+
+.notification-target-grid .field-label {
+  margin-top: 11px;
+}
+
+.notification-target-wide {
+  grid-column: 1 / -1;
+}
+
+.notification-target-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.test-notification-btn {
+  min-height: 29px;
+  padding: 0 10px;
+  border: 1px solid var(--el-color-success);
+  background: var(--el-color-success);
+  box-shadow: 0 2px 5px color-mix(in srgb, var(--el-color-success) 20%, transparent);
+}
+
+.test-notification-btn:hover:not(:disabled) {
+  border-color: var(--el-color-success-dark-2);
+  background: var(--el-color-success-dark-2);
+}
+
+.test-notification-btn:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
 .form-actions {
   display: flex;
   justify-content: flex-end;
@@ -1089,6 +1367,24 @@ defineExpose({ open })
   line-height: 1.5;
 }
 
+.notification-result {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.notification-result.sent {
+  color: var(--el-color-success);
+}
+
+.notification-result.partial_failed {
+  color: var(--el-color-warning);
+}
+
+.notification-result.failed {
+  color: var(--el-color-danger);
+}
+
 @media (max-width: 520px) {
   .automation-drawer .el-drawer__body {
     padding-right: 16px;
@@ -1096,11 +1392,13 @@ defineExpose({ open })
   }
 
   .interval-fields,
-  .calendar-fields {
+  .calendar-fields,
+  .notification-target-grid {
     grid-template-columns: 1fr;
   }
 
-  .interval-start-field {
+  .interval-start-field,
+  .notification-target-wide {
     grid-column: auto;
   }
 
