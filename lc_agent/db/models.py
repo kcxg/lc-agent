@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlmodel import SQLModel, Field
-from sqlalchemy import Boolean, Column, Index, Integer, JSON, false, text
+from sqlalchemy import Boolean, Column, Index, Integer, JSON, String, false, text
 
 
 def utcnow():
@@ -30,6 +30,10 @@ class AutomationTask(SQLModel, table=True):
     prompt: str
     schedule_type: str
     schedule_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    notification_targets: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False, server_default=text("'[]'")),
+    )
     timezone: str = ""
     enabled: bool = Field(default=True, sa_column=Column(Boolean, nullable=False, server_default=false()))
     next_run_at: datetime | None = Field(default=None, index=True)
@@ -59,6 +63,11 @@ class AutomationRun(SQLModel, table=True):
     started_at: datetime | None = Field(default=None)
     finished_at: datetime | None = Field(default=None)
     error: str | None = Field(default=None)
+    notification_status: str = Field(
+        default="not_configured",
+        sa_column=Column(String, nullable=False, server_default="not_configured"),
+    )
+    notification_error: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=utcnow)
 
 

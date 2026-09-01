@@ -2,7 +2,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from lc_agent.app import LcAgentApp
-from lc_agent.db.engine import init_db, reset_engine
+from lc_agent.db.engine import get_async_session, init_db, reset_engine
+from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.tools.registry import ToolRegistry
 from tests.conftest import setup_test_auth
 
@@ -45,6 +46,47 @@ async def test_list_agents_returns_default(app_and_headers):
         data = resp.json()
         assert len(data) >= 1
         assert any(a["id"] == "chat" for a in data)
+
+
+@pytest.mark.asyncio
+async def test_authorized_user_can_list_available_subagents(app_and_headers, setup):
+    app, admin_headers = app_and_headers
+    transport = ASGITransport(app=app.fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        create_resp = await client.post("/api/agents", json={
+            "name": "shared-agent",
+            "system_prompt": "Shared agent",
+            "default_model": "gpt-4",
+        }, headers=admin_headers)
+        assert create_resp.status_code == 201
+        agent_id = create_resp.json()["id"]
+
+    auth_service = app.fastapi_app.state.auth_service
+    user_id = "user2-id"
+    async with get_async_session(setup) as db:
+        db.add(User(
+            id=user_id,
+            username="user2",
+            password_hash=auth_service.hash_password("pass"),
+            role="user",
+        ))
+        db.add_all([
+            UserAgentAccess(user_id=user_id, agent_id="chat"),
+            UserAgentAccess(user_id=user_id, agent_id=agent_id),
+        ])
+        await db.commit()
+
+    user2_headers = {
+        "Authorization": f"Bearer {auth_service.create_token(user_id=user_id, username='user2', role='user')}"
+    }
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        agents_resp = await client.get("/api/agents", headers=user2_headers)
+        available_resp = await client.get("/api/agents/available-subagents", headers=user2_headers)
+
+    assert agents_resp.status_code == 200
+    assert any(agent["id"] == agent_id for agent in agents_resp.json())
+    assert available_resp.status_code == 200
+    assert {item["id"] for item in available_resp.json()} == {agent_id}
 
 
 @pytest.mark.asyncio

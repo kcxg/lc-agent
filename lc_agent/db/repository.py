@@ -281,6 +281,12 @@ class AutomationRunRepository:
         )
         return list(result.scalars().all())
 
+    async def count_by_task(self, task_id: str) -> int:
+        result = await self.session.execute(
+            select(func.count(AutomationRun.id)).where(AutomationRun.task_id == task_id)
+        )
+        return int(result.scalar_one())
+
     async def list_active(self) -> list[AutomationRun]:
         result = await self.session.execute(
             select(AutomationRun).where(AutomationRun.status.in_(AUTOMATION_ACTIVE_STATUSES))
@@ -306,6 +312,13 @@ class AutomationRunRepository:
             stmt = stmt.where(AutomationRun.user_id == user_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def count_all(self, user_id: str | None = None) -> int:
+        stmt = select(func.count(AutomationRun.id))
+        if user_id:
+            stmt = stmt.where(AutomationRun.user_id == user_id)
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one())
 
     async def get_by_id(self, run_id: str) -> AutomationRun | None:
         return await self.session.get(AutomationRun, run_id)
