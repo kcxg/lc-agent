@@ -76,6 +76,17 @@
       <label class="field-label" for="automation-task-name">任务名称</label>
       <el-input id="automation-task-name" v-model="form.name" maxlength="120" placeholder="例如：每日 AI 新闻" />
 
+      <div v-if="isCopying" class="copy-task-banner">
+        <div>
+          <strong>已复制任务配置</strong>
+          <p>执行历史不会复制，创建后默认暂停。</p>
+        </div>
+        <label class="copy-task-toggle">
+          <span>创建后启用</span>
+          <el-switch v-model="form.enabled" size="small" />
+        </label>
+      </div>
+
       <label class="field-label" for="automation-agent">选择 Agent</label>
       <el-select id="automation-agent" v-model="form.agent_id" class="full-control" filterable>
         <el-option
@@ -285,6 +296,10 @@
               <el-icon><EditPen /></el-icon>
               编辑
             </button>
+            <button class="copy-action" type="button" title="复制任务" :disabled="actionTaskId === task.id" @click="startCopy(task)">
+              <el-icon><CopyDocument /></el-icon>
+              复制
+            </button>
             <button class="danger-action" type="button" title="删除任务" :disabled="actionTaskId === task.id" @click="deleteTask(task)">
               <el-icon><Delete /></el-icon>
               删除
@@ -335,7 +350,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Clock, Close, Delete, EditPen, Plus, Promotion, VideoPlay, View } from '@element-plus/icons-vue'
+import { Clock, Close, CopyDocument, Delete, EditPen, Plus, Promotion, VideoPlay, View } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useAgentsStore } from '@/stores/agents'
 import {
@@ -355,6 +370,7 @@ const actionTaskId = ref<string | null>(null)
 const actionType = ref<'run' | 'toggle' | null>(null)
 const actionRunId = ref<string | null>(null)
 const testingTargetIndex = ref<number | null>(null)
+const isCopying = ref(false)
 
 const agentsStore = useAgentsStore()
 const automationStore = useAutomationStore()
@@ -382,6 +398,7 @@ const form = reactive({
   start_at: '',
   time: '09:00',
   day_of_week: 0,
+  enabled: true,
   notification_targets: [] as AutomationNotificationTarget[],
 })
 
@@ -416,7 +433,9 @@ function resetForm() {
   form.start_at = ''
   form.time = '09:00'
   form.day_of_week = 0
+  form.enabled = true
   form.notification_targets = []
+  isCopying.value = false
 }
 
 function startCreate() {
@@ -428,6 +447,21 @@ function startCreate() {
 function startEdit(task: AutomationTask) {
   formVisible.value = true
   editingTaskId.value = task.id
+  isCopying.value = false
+  fillFormFromTask(task)
+}
+
+function startCopy(task: AutomationTask) {
+  formVisible.value = true
+  editingTaskId.value = null
+  isCopying.value = true
+  fillFormFromTask(task)
+  form.name = getCopyName(task.name)
+  form.enabled = false
+  activeTab.value = 'tasks'
+}
+
+function fillFormFromTask(task: AutomationTask) {
   form.name = task.name
   form.agent_id = task.agent_id
   form.prompt = task.prompt
@@ -438,7 +472,17 @@ function startEdit(task: AutomationTask) {
   form.start_at = String(task.schedule_config.start_at || '').slice(0, 16)
   form.time = String(task.schedule_config.time || '09:00')
   form.day_of_week = Number(task.schedule_config.day_of_week || 0)
+  form.enabled = task.enabled
   form.notification_targets = (task.notification_targets || []).map(target => ({ ...target }))
+}
+
+function getCopyName(name: string) {
+  const baseName = `${name} - 副本`
+  const names = new Set(automationStore.tasks.map(task => task.name))
+  if (!names.has(baseName)) return baseName
+  let suffix = 2
+  while (names.has(`${baseName} ${suffix}`)) suffix += 1
+  return `${baseName} ${suffix}`
 }
 
 function cancelForm() {
@@ -488,6 +532,7 @@ async function saveTask() {
         ...target,
         dingtalk_secret: target.dingtalk_secret || undefined,
       })),
+      ...(editingTaskId.value ? {} : { enabled: form.enabled }),
     }
     if (editingTaskId.value) {
       await automationStore.updateTask(editingTaskId.value, payload)
@@ -667,6 +712,8 @@ defineExpose({ open })
   --automation-danger-bg-hover: var(--el-color-danger);
   --automation-cancel-bg: #0e7490;
   --automation-cancel-bg-hover: #0891b2;
+  --automation-copy-bg: #2563a8;
+  --automation-copy-bg-hover: #1d4f87;
 }
 
 .automation-drawer .el-drawer__header {
@@ -887,6 +934,41 @@ defineExpose({ open })
   margin: 4px 0 0;
   color: var(--el-text-color-primary);
   font-size: 16px;
+}
+
+.copy-task-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: -6px;
+  margin-bottom: 14px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 45%, var(--el-border-color));
+  border-radius: 7px;
+  background: var(--el-fill-color-light);
+}
+
+.copy-task-banner strong {
+  color: var(--el-text-color-primary);
+  font-size: 12px;
+}
+
+.copy-task-banner p {
+  margin: 3px 0 0;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.copy-task-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  color: var(--el-text-color-regular);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .field-label {
@@ -1313,6 +1395,17 @@ defineExpose({ open })
   background: var(--automation-edit-bg-hover);
 }
 
+.task-actions .copy-action {
+  border-color: var(--automation-copy-bg);
+  background: var(--automation-copy-bg);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--automation-copy-bg) 30%, transparent);
+}
+
+.task-actions .copy-action:hover:not(:disabled) {
+  border-color: var(--automation-copy-bg-hover);
+  background: var(--automation-copy-bg-hover);
+}
+
 .run-actions .view-action {
   border-color: var(--el-color-primary);
   background: var(--el-color-primary);
@@ -1404,6 +1497,16 @@ defineExpose({ open })
 
   .task-actions {
     flex-wrap: wrap;
+  }
+
+  .copy-task-banner {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .copy-task-toggle {
+    justify-content: space-between;
   }
 
   .automation-header-actions {

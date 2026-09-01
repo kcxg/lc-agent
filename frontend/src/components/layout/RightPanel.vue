@@ -224,7 +224,7 @@
         </div>
         <button class="automation-entry-btn" type="button" @click="emit('open-automation')">
           <el-icon><Clock /></el-icon>
-          创建定时任务
+          管理定时任务
         </button>
       </div>
 
