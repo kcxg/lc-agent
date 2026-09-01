@@ -117,17 +117,24 @@ async def test_automation_runner_persists_notification_delivery_summary(db_url, 
             scheduled_at=datetime(2026, 8, 27, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
         )
 
+    service_app_names = []
+
     async def fake_deliver_run(self, targets, **kwargs):
         assert targets == task.notification_targets
         assert kwargs["final_output"] == "摘要正文"
+        service_app_names.append(self.app_name)
         return NotificationDeliverySummary(status="partial_failed", error="研发群: 请求超时")
 
     monkeypatch.setattr(
         "lc_agent.server.automation.AutomationNotificationService.deliver_run",
         fake_deliver_run,
     )
-    runner = AutomationRunner(object(), db_url, object())
+    from types import SimpleNamespace
+
+    app = SimpleNamespace(state=SimpleNamespace(config={"ui": {"app_name": "心有灵犀"}}))
+    runner = AutomationRunner(object(), db_url, app)
     await runner._notify_run(task, run.id, "success", final_output="摘要正文")
+    assert service_app_names == ["心有灵犀"]
 
     async with get_async_session(db_url) as db:
         updated = await AutomationRunRepository(db).get_by_id(run.id)

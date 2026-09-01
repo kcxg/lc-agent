@@ -494,7 +494,7 @@ class AutomationRunner:
         final_output: str = "",
     ) -> None:
         try:
-            app_config = getattr(self.app, "config", {})
+            app_config = getattr(getattr(self.app, "state", None), "config", {})
             app_name = app_config.get("ui", {}).get("app_name", "lc-agent")
             summary = await AutomationNotificationService(app_name=app_name).deliver_run(
                 task.notification_targets or [],
