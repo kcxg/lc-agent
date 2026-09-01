@@ -258,3 +258,6 @@ docs/superpowers/
 # Claude Code local settings
 .claude/settings.local.json
 
+# Local skill symlinks (aionui etc.)
+.claude/skills/session-message
+
