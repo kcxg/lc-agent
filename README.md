@@ -50,7 +50,7 @@
 | ai coding | 内置工具组和第三方mcp例如serena mcp都能使lc-aegnt 实现ai coding |
 | Context Management | 内置 SummarizationMiddleware，长对话自动压缩摘要，避免上下文溢出 |
 | Streaming & Diff | 命令执行实时流式输出、文件编辑 diff 预览、写入预览，过程全程可视 |
-| 自动化任务 | 用户可以配置定时任务，agent自动运行 |
+| 自动化任务 | 用户可以配置定时任务，agent自动定时运行任务，并发送通知到钉钉 企业微信 飞书中 |
 
 ### 完整功能清单请阅读 [FEATURES.md](https://github.com/ydf0509/lc-agent/blob/main/FEATURES.md)
 
@@ -131,15 +131,15 @@ lc-agent
 ### 注册 Python 工具
 
 ```python
-from lc_agent import LcAgentApp, load_config, tool
+from lc_agent import LcAgentApp, set_config_path, tool
 
 @tool(group="my_tools", group_description="我的工具")
 def my_tool(query: str) -> str:
     """工具描述，会展示给 Agent 判断何时使用。"""
     return f"result: {query}"
 
-config = load_config(config_path="./config.jsonc")
-app = LcAgentApp(config, host="127.0.0.1", port=8001)
+set_config_path("./config.jsonc")   # 注册一次，框架内全局可取
+app = LcAgentApp(host="127.0.0.1", port=8001)
 app.run()
 ```
 
@@ -148,12 +148,12 @@ app.run()
 你可以把自己写好的 LangGraph `CompiledStateGraph` 注册到 lc-agent，复用现成前端、会话、权限、审批和可观测能力。
 
 ```python
-from lc_agent import LcAgentApp, load_config
+from lc_agent import LcAgentApp, get_config, set_config_path
 from my_agents import build_my_agent
 
-config = load_config("./config.jsonc")
-app = LcAgentApp(config, host="127.0.0.1", port=8001)
-app.add_agent("my_agent", build_my_agent(config), description="自定义 Agent")
+set_config_path("./config.jsonc")
+app = LcAgentApp(host="127.0.0.1", port=8001)
+app.add_agent("my_agent", build_my_agent(get_config()), description="自定义 Agent")
 app.run()
 ```
 

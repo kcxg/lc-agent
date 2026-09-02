@@ -6,6 +6,8 @@ from typing import Any
 import commentjson
 from dotenv import load_dotenv
 
+from lc_agent.config.utils import ENV_CONFIG_PATH
+
 ENV_PATTERN = re.compile(r"\{env:([^}]+)\}")
 
 
@@ -49,7 +51,11 @@ def load_config(
     config_path: str | None = None,
     dotenv_path: str | None = None,
 ) -> dict:
-    """Load configuration with priority: explicit path > ./config.jsonc > ~/.lc_agent/config.jsonc > defaults."""
+    """Load configuration.
+
+    Priority: explicit path > LC_AGENT_CONFIG_PATH env (set via set_config_path)
+    > ./config.jsonc > ~/.lc_agent/config.jsonc. Raises RuntimeError when none found.
+    """
     if dotenv_path:
         load_dotenv(dotenv_path)
     else:
@@ -58,6 +64,9 @@ def load_config(
     search_paths = []
     if config_path:
         search_paths.append(Path(config_path))
+    env_path = os.environ.get(ENV_CONFIG_PATH)
+    if env_path:
+        search_paths.append(Path(env_path))
     search_paths.append(Path.cwd() / "config.jsonc")
     search_paths.append(Path.home() / ".lc_agent" / "config.jsonc")
 
@@ -68,33 +77,9 @@ def load_config(
             config["_project_root"] = str(p.parent)
             return config
 
-    return {
-        "provider": {},
-        "agent": {
-            "system_prompt": "You are a helpful assistant.",
-            "default_model": "",
-            "streaming": True,
-        },
-        "database": {
-            "url": "sqlite+aiosqlite:///./lc_agent_data.db",
-            "checkpoint_path": "./lc_agent_checkpoints.db",
-        },
-        "memory": {
-            "enabled": True,
-            "type": "sqlite",
-            "path": "./lc_agent_memory.db",
-            "save_policy": "explicit",
-            "retrieval_policy": "manual",
-            "semantic_search": {
-                "enabled": True,
-                "api_key": "{env:NBRAG_API_KEY}",
-                "base_url": "https://api.siliconflow.cn/v1",
-                "model": "BAAI/bge-m3",
-                "dims": 1024,
-            },
-        },
-        "skills": ["./skills"],
-        "mcpServers": {},
-        "_config_path": None,
-        "_project_root": str(Path.cwd()),
-    }
+    raise RuntimeError(
+        "未找到任何配置文件，已搜索: "
+        + "; ".join(str(p) for p in search_paths)
+        + "。请通过 set_config_path() 注册路径、设置 LC_AGENT_CONFIG_PATH 环境变量、"
+        "或在当前目录/ ~/.lc_agent/ 下提供 config.jsonc。"
+    )

@@ -45,12 +45,14 @@ cd D:\codes\lc-agent && pip install -e ".[dev,desktop]"
 
 ```
 lc_agent/
-├── __init__.py          # 公开 API: LcAgentApp, load_config, tool, ToolRegistry
+├── __init__.py          # 公开 API: LcAgentApp, set_config_path, get_config, tool, ToolRegistry
 ├── app.py               # LcAgentApp 主编排器
 ├── main.py              # CLI 入口 (lc-agent 命令)
 ├── desktop.py           # pywebview 桌面客户端（独立启动）
 ├── config/
 │   ├── loader.py        # JSONC 配置加载 + {env:VAR} 替换
+│   ├── runtime.py       # 全局配置单例: set_config_path / get_config / get_app_name / get_database_url
+│   ├── utils.py         # get_config_value 点路径读取 + 默认值常量
 │   └── schema.py        # Pydantic 配置 schema
 ├── core/
 │   ├── engine.py        # AgentEngine — create_agent + 预设 + 流式
@@ -184,8 +186,9 @@ def build_my_agent(config: dict):
 
 在 `bfzs/main.py` 注册:
 ```python
+from lc_agent import get_config
 from bfzs.agents.my_agent import build_my_agent
-my_graph = build_my_agent(config)
+my_graph = build_my_agent(get_config())
 app.add_agent(name="my_agent", graph=my_graph, description="描述")
 ```
 
@@ -198,7 +201,7 @@ app.add_agent(name="my_agent", graph=my_graph, description="描述")
 | 修改 WebSocket 协议 | `lc_agent/server/websocket.py` |
 | 修改 Agent 构建逻辑 | `lc_agent/core/engine.py` |
 | 新增数据库表 | `lc_agent/db/models.py` (启动时自动 Alembic 迁移) |
-| 修改配置解析 | `lc_agent/config/loader.py` + `schema.py` |
+| 修改配置解析 | `lc_agent/config/loader.py` + `runtime.py` + `schema.py` |
 | 修改 MCP 集成 | `lc_agent/mcp/manager.py` |
 
 ### 4.4 修改前端
@@ -272,6 +275,8 @@ import bfzs.tools.file_tools  # 导入 = 注册
 - JSONC 注释
 - `{env:VAR}` 环境变量替换
 - `.env` 文件加载
+
+**全局配置单例：** 应用入口调用一次 `set_config_path()` 注册配置路径（写入 `LC_AGENT_CONFIG_PATH` 环境变量并失效缓存），之后框架内任何地方用 `get_config()` 无参获取同一份配置（同一 dict 引用，运行时修改立即生效）；`get_app_name()` / `get_database_url()` 是高频字段的快捷 getter。找不到任何配置文件时 `load_config` 直接 raise RuntimeError（CLI 入口会打印错误并退出），不再回退到内置默认空壳配置。
 
 **重要：** 修改或新增配置项时，必须同时更新以下两个文件：
 1. `D:\codes\lc-agent\config.example.jsonc` — 框架示例配置，用户复制的唯一参考
@@ -431,13 +436,26 @@ from langchain_agentskills.loaders import DirectorySkillLoader, CompositeSkillLo
 ## 11. 快速参考: 公开 API
 
 ```python
-from lc_agent import LcAgentApp, load_config, tool, ToolRegistry
+from lc_agent import LcAgentApp, set_config_path, get_config, tool, ToolRegistry
 
-# 框架入口
-config = load_config(config_path="./config.jsonc")
-app = LcAgentApp(config, host="127.0.0.1", port=8001)
+# 框架入口（推荐：注册一次，全局无参取配置）
+set_config_path("./config.jsonc")
+app = LcAgentApp(host="127.0.0.1", port=8001)
 app.add_agent(name, graph, description)
 app.run()
+
+# 任何地方无参获取配置（路由、工具、自定义 Agent 内部）
+from lc_agent import get_app_name, get_database_url
+from lc_agent.config import get_config_value
+config = get_config()
+app_name = get_app_name()
+db_url = get_database_url()
+value = get_config_value(config, "agent.default_model", "")  # 点路径读取
+
+# 兼容写法：显式加载并传 dict（会同步注册为全局）
+from lc_agent import load_config
+config = load_config(config_path="./config.jsonc")
+app = LcAgentApp(config, host="127.0.0.1", port=8001)
 
 # 工具注册
 @tool(group="ascii_group_name", group_description="中文显示名")

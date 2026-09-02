@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from lc_agent import __version__
+from lc_agent.config import get_config, set_config
 from lc_agent.server.routes.health import router as health_router
 from lc_agent.server.routes.tools import router as tools_router
 from lc_agent.server.routes.models import router as models_router
@@ -27,8 +28,15 @@ from lc_agent.server.routes.automation import router as automation_router
 from lc_agent.server.sse import router as sse_router
 
 
-def create_app(config: dict, lifespan=None) -> FastAPI:
-    """Create and configure the FastAPI application."""
+def create_app(config: dict | None = None, lifespan=None) -> FastAPI:
+    """Create and configure the FastAPI application.
+
+    config 为 None 时取全局配置（get_config()）；显式传入时同步注册为全局。
+    """
+    if config is None:
+        config = get_config()
+    else:
+        set_config(config)
     app = FastAPI(
         title="lc_agent",
         version=__version__,

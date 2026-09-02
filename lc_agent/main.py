@@ -12,7 +12,11 @@ def main():
 
     from lc_agent.config.loader import load_config
 
-    config = load_config(config_path=args.config, dotenv_path=args.dotenv)
+    try:
+        config = load_config(config_path=args.config, dotenv_path=args.dotenv)
+    except RuntimeError as e:
+        # SystemExit 携带字符串会打印到 stderr 并以退出码 1 退出
+        raise SystemExit(f"启动失败: {e}") from None
 
     from lc_agent.app import LcAgentApp
 

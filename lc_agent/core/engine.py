@@ -12,6 +12,7 @@ from langchain_core.tools import InjectedToolCallId
 from langchain_core.tools import tool as lc_tool
 from pydantic import Field as _PydanticField
 
+from lc_agent.config import get_config_value
 from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, _convert_text_file_blocks
 from lc_agent.core.engine_helpers.project_context import _build_project_context_text
 from lc_agent.skills.skill_middleware import _LcAgentSkillMiddleware
@@ -55,7 +56,7 @@ class AgentEngine:
         ] = {}
         self._agent_mcp_gen: dict[str, int] = {}
         self._mcp_generation: int = 0
-        self.recursion_limit: int = config.get("agent", {}).get("recursion_limit", 100)
+        self.recursion_limit: int = get_config_value(config, "agent.recursion_limit", 100)
         # Cache for project git/OS context text, keyed by resolved project_root.
         # Populated asynchronously in chat_stream; cleared on agent cache invalidation.
         self._project_ctx_text_cache: dict[str, str] = {}
@@ -168,7 +169,7 @@ class AgentEngine:
         depth: int,
         building_set: frozenset[str],
     ) -> dict[str, SubAgentDescriptor]:
-        max_depth = self.config.get("agent", {}).get("max_subagent_depth", 2)
+        max_depth = get_config_value(self.config, "agent.max_subagent_depth", 2)
         if depth >= max_depth:
             return {}
 
@@ -606,7 +607,7 @@ class AgentEngine:
 
     def _build_summarization_middleware(self, preset: AgentPreset) -> list:
         """Build SummarizationMiddleware based on config, returns empty list if disabled."""
-        summ_conf = self.config.get("agent", {}).get("summarization", {})
+        summ_conf = get_config_value(self.config, "agent.summarization", {})
         if not summ_conf.get("enabled", True):
             return []
 
@@ -746,7 +747,7 @@ class AgentEngine:
                 selected_model_id = (
                     model_id
                     if model_id and self._find_model(model_id)
-                    else self.config.get("agent", {}).get("default_model", "")
+                    else get_config_value(self.config, "agent.default_model", "")
                 )
                 cache_key = self._get_agent_cache_key(
                     preset_id,

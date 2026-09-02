@@ -10,6 +10,13 @@ from fastapi import FastAPI
 from langchain_agentskills import SkillsToolkit
 from langchain_agentskills.loaders import CompositeSkillLoader, DirectorySkillLoader
 
+from lc_agent.config import (
+    DEFAULT_CHECKPOINT_PATH,
+    DEFAULT_DATABASE_URL,
+    get_config,
+    get_config_value,
+    set_config,
+)
 from lc_agent.config.schema import MemoryConfig
 from lc_agent.core.auth import AuthService
 from lc_agent.core.engine import AgentEngine
@@ -50,32 +57,30 @@ def _resolve_file_path(path: str, root: Path) -> str:
     return str((root / file_path).resolve())
 
 
-def _get_config_value(config, name: str, default=None):
-    if isinstance(config, dict):
-        return config.get(name, default)
-    return getattr(config, name, default)
-
-
 class LcAgentApp:
     """Main application orchestrator — creates engine, server, and runs."""
 
-    def __init__(self, config: dict, host: str = "127.0.0.1", port: int = 8000):
+    def __init__(self, config: dict | None = None, host: str = "127.0.0.1", port: int = 8000):
+        if config is None:
+            config = get_config()
+        else:
+            set_config(config)
         self.config = config
         project_root = Path(config.get("_project_root") or Path.cwd())
         database_config = self.config.setdefault("database", {})
         database_config["url"] = _resolve_sqlite_url(
-            database_config.get("url", "sqlite+aiosqlite:///./lc_agent_data.db"),
+            database_config.get("url", DEFAULT_DATABASE_URL),
             project_root,
         )
         database_config["checkpoint_path"] = _resolve_file_path(
-            database_config.get("checkpoint_path", "./lc_agent_checkpoints.db"),
+            database_config.get("checkpoint_path", DEFAULT_CHECKPOINT_PATH),
             project_root,
         )
         self.host = host
         self.port = port
         self._db_url = database_config["url"]
         self._checkpoint_path = database_config["checkpoint_path"]
-        permissions_path = config.get("permissions", {}).get("path", "./permissions.jsonc")
+        permissions_path = get_config_value(config, "permissions.path", "./permissions.jsonc")
         self._permissions_service = PermissionsService(permissions_path=Path(permissions_path))
         self.engine = AgentEngine(config)
         skills_dirs = list(config.get("skills", ["./skills"]))
@@ -139,12 +144,12 @@ class LcAgentApp:
             memory_config = self.config.get("memory")
             if memory_config is None:
                 memory_config = MemoryConfig().model_dump()
-            if _get_config_value(memory_config, "enabled", False):
-                memory_type = _get_config_value(memory_config, "type", "sqlite")
+            if get_config_value(memory_config, "enabled", False):
+                memory_type = get_config_value(memory_config, "type", "sqlite")
                 if memory_type != "sqlite":
                     raise ValueError("Only sqlite long-term memory is supported")
                 memory_path = _resolve_file_path(
-                    _get_config_value(memory_config, "path", "./lc_agent_memory.db"),
+                    get_config_value(memory_config, "path", "./lc_agent_memory.db"),
                     Path(self.config.get("_project_root") or Path.cwd()),
                 )
                 memory_store = await create_sqlite_memory_store(memory_path, memory_config=memory_config)

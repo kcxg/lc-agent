@@ -1,7 +1,19 @@
 import pytest
 
+from lc_agent.config import reset_config, set_config
 from lc_agent.core.auth import AuthService
 from lc_agent.db.models_auth import User
+
+
+@pytest.fixture(autouse=True)
+def _baseline_global_config():
+    """每个测试前注册一个空基线配置，防止惰性 get_config() 触发磁盘搜索/报错。
+
+    测试内创建 LcAgentApp/create_app 显式传 dict 时会覆盖全局。
+    """
+    set_config({})
+    yield
+    reset_config()
 
 
 @pytest.fixture

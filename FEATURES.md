@@ -89,7 +89,7 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 - **自动数据库迁移**：Alembic 启动时自动迁移，升级框架无需手动操作
 
 ### 自动化任务
-- **定时任务**： 按照用户指定的agent 定时自动运行任务。
+- **定时任务**： 按照用户指定的agent 定时自动运行任务。并可以通知到钉钉 企业微信 飞书中。
 
 ### ai coding 强化
 - **专门的项目模式**：自动将绑定的项目文件夹作为agent的工作目录，自动读取项目下的AGNTES.md 和 .agents/skills 文件夹的skill。 专门的集中展示文件变动内容，专门划分git变化和当前会话agent修改文件导致的变动内容。

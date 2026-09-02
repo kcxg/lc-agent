@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lc_agent.core.engine import AgentEngine
+from lc_agent.config import get_app_name
 from lc_agent.db.models import AutomationTask
 from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.db.repository import AutomationRunRepository, AutomationTaskRepository
@@ -273,7 +274,7 @@ async def test_notification_target(
     user: User = Depends(get_current_user),
 ):
     del user
-    app_name = request.app.state.config.get("ui", {}).get("app_name", "lc-agent")
+    app_name = get_app_name()
     delivery = await AutomationNotificationService(app_name=app_name).send_test(
         body.target.model_dump(exclude_none=True),
     )

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from lc_agent.config import DEFAULT_DATABASE_URL, get_database_url
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
@@ -33,7 +34,7 @@ _cancel_flags: dict[str, bool] = {}
 _run_locks: dict[str, asyncio.Lock] = {}
 
 _engine: AgentEngine | None = None
-_db_url: str = "sqlite+aiosqlite:///./lc_agent_data.db"
+_db_url: str = DEFAULT_DATABASE_URL
 
 
 def configure(engine: AgentEngine, db_url: str) -> None:
@@ -123,7 +124,7 @@ async def _authenticate_sse(request: Request):
     from lc_agent.db.models_auth import User
     from sqlalchemy import select
     from lc_agent.db.engine import get_async_session
-    db_url = request.app.state.config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
+    db_url = get_database_url()
     db = get_async_session(db_url)
     try:
         result = await db.execute(select(User).where(User.id == payload["sub"]))
@@ -143,7 +144,7 @@ async def _check_sse_auth(request: Request, thread_id: str) -> JSONResponse | No
         from lc_agent.db.engine import get_async_session as _get_session
         from lc_agent.db.models import SessionMeta
         from sqlalchemy import select as sa_select
-        db_url = request.app.state.config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
+        db_url = get_database_url()
         _db = _get_session(db_url)
         try:
             result = await _db.execute(sa_select(SessionMeta).where(SessionMeta.id == thread_id))
@@ -170,7 +171,7 @@ async def _check_sse_agent_access(request: Request, preset_id: str) -> JSONRespo
     from lc_agent.db.models_auth import UserAgentAccess
     from sqlalchemy import select
 
-    db_url = request.app.state.config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
+    db_url = get_database_url()
     db = get_async_session(db_url)
     try:
         result = await db.execute(
