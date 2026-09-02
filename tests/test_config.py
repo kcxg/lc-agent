@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from lc_agent.config.loader import load_config_from_file, substitute_env_vars
 from lc_agent.config.schema import AppConfig
+from lc_agent.config.utils import get_config_value
 from lc_agent.tools.system_tools._config import (
     set_active_project,
     validate_path_access,
@@ -245,3 +246,102 @@ class TestValidateReadWritePath:
         resolved = validate_write_path("new_file.py")
 
         assert resolved == str(project_root / "new_file.py")
+
+
+class TestGetConfigValue:
+    def test_reads_nested_dict_path(self):
+        config = {"database": {"url": "sqlite+aiosqlite:///./x.db"}}
+        assert get_config_value(config, "database.url") == "sqlite+aiosqlite:///./x.db"
+
+    def test_returns_default_when_top_level_missing(self):
+        assert get_config_value({}, "database.url", "fallback") == "fallback"
+
+    def test_returns_default_when_middle_layer_missing(self):
+        assert get_config_value({"agent": {}}, "agent.summarization.enabled", True) is True
+
+    def test_returns_default_when_config_is_none(self):
+        assert get_config_value(None, "agent.default_model", "m1") == "m1"
+
+    def test_explicit_none_value_is_returned_not_default(self):
+        config = {"memory": {"enabled": None}}
+        assert get_config_value(config, "memory.enabled", True) is None
+
+    def test_single_key_path(self):
+        assert get_config_value({"_project_root": "D:/x"}, "_project_root") == "D:/x"
+
+    def test_reads_pydantic_object_attributes(self):
+        config = AppConfig(mcpServers={"remote": {"url": "http://localhost:3000/mcp"}})
+        assert get_config_value(config, "memory.type") == "sqlite"
+
+    def test_mixed_dict_and_object_layers(self):
+        config = {"memory": {"semantic_search": None}}
+        assert get_config_value(config, "memory.semantic_search.api_key", "") == ""
+
+
+class TestConfigRuntime:
+    def test_set_config_registers_same_reference(self):
+        from lc_agent.config import get_config, set_config
+
+        cfg = {"ui": {"app_name": "x"}}
+        set_config(cfg)
+        assert get_config() is cfg
+
+    def test_get_config_lazy_loads_from_env_path(self, tmp_path, monkeypatch):
+        from lc_agent.config import get_config, reset_config
+        from lc_agent.config.utils import ENV_CONFIG_PATH
+
+        config_file = tmp_path / "myapp.jsonc"
+        config_file.write_text('{"ui": {"app_name": "LazyApp"}}', encoding="utf-8")
+        monkeypatch.setenv(ENV_CONFIG_PATH, str(config_file))
+        reset_config()
+        cfg = get_config()
+        assert cfg["ui"]["app_name"] == "LazyApp"
+        assert get_config() is cfg  # 缓存：同一引用
+
+    def test_set_config_path_writes_env_and_invalidates_cache(self, tmp_path, monkeypatch):
+        from lc_agent.config import get_config, reset_config, set_config_path
+        from lc_agent.config.utils import ENV_CONFIG_PATH
+
+        config_file = tmp_path / "app.jsonc"
+        config_file.write_text('{"ui": {"app_name": "EnvApp"}}', encoding="utf-8")
+        set_config_path(str(config_file))
+        assert os.environ[ENV_CONFIG_PATH] == str(config_file.resolve())
+        reset_config()
+        assert get_config()["ui"]["app_name"] == "EnvApp"
+        monkeypatch.delenv(ENV_CONFIG_PATH)
+
+    def test_set_config_path_missing_file_raises(self, tmp_path):
+        from lc_agent.config import set_config_path
+
+        with pytest.raises(FileNotFoundError):
+            set_config_path(str(tmp_path / "nope.jsonc"))
+
+    def test_load_config_raises_when_nothing_found(self, monkeypatch, tmp_path):
+        from lc_agent.config import load_config
+        from lc_agent.config.utils import ENV_CONFIG_PATH
+
+        monkeypatch.delenv(ENV_CONFIG_PATH, raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        with pytest.raises(RuntimeError, match="未找到任何配置文件"):
+            load_config()
+
+    def test_create_app_registers_global(self, sample_config):
+        from lc_agent.server.app import create_app
+        from lc_agent.config import get_config
+
+        app = create_app(sample_config)
+        assert get_config() is app.state.config
+
+    def test_get_app_name_and_database_url_read_global(self):
+        from lc_agent.config import get_app_name, get_database_url, set_config
+
+        set_config({"ui": {"app_name": "演示"}, "database": {"url": "sqlite+aiosqlite:///./x.db"}})
+        assert get_app_name() == "演示"
+        assert get_database_url() == "sqlite+aiosqlite:///./x.db"
+
+    def test_get_app_name_and_database_url_defaults(self):
+        from lc_agent.config import get_app_name, get_database_url
+
+        assert get_app_name() == "lc-agent"
+        assert get_database_url() == "sqlite+aiosqlite:///./lc_agent_data.db"

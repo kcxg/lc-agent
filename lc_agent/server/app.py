@@ -19,6 +19,7 @@ from lc_agent.server.routes.tools import router as tools_router
 
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
+from lc_agent.config import get_config, set_config
 from lc_agent.server.routes.settings import router as settings_router
 from lc_agent.server.routes.admin import router as admin_router
 from lc_agent.server.routes.permissions import router as permissions_router
@@ -30,8 +31,15 @@ from lc_agent.server.routes.automation import router as automation_router
 from lc_agent.server.sse import router as sse_router
 
 
-def create_app(config: dict, lifespan=None) -> FastAPI:
-    """Create and configure the FastAPI application."""
+def create_app(config: dict | None = None, lifespan=None) -> FastAPI:
+    """Create and configure the FastAPI application.
+
+    config 为 None 时取全局配置（get_config()）；显式传入时同步注册为全局。
+    """
+    if config is None:
+        config = get_config()
+    else:
+        set_config(config)
     app = FastAPI(
         title="lc_agent",
         version=__version__,

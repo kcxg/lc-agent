@@ -12,6 +12,8 @@ from langgraph.store.base import IndexConfig
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 from pydantic import BaseModel, ConfigDict, Field
 
+from lc_agent.config import get_config_value
+
 
 DEFAULT_MEMORY_NAMESPACE = ("lc-agent", "memories")
 
@@ -111,31 +113,23 @@ def _extract_embeddings(payload: dict[str, Any]) -> list[list[float]]:
     return [item["embedding"] for item in data]
 
 
-def _get_config_value(config: Any, name: str, default: Any = None) -> Any:
-    if config is None:
-        return default
-    if isinstance(config, dict):
-        return config.get(name, default)
-    return getattr(config, name, default)
-
-
 def build_store_index(memory_config: Any) -> IndexConfig | None:
-    semantic = _get_config_value(memory_config, "semantic_search")
-    if semantic is None or not _get_config_value(semantic, "enabled", False):
+    semantic = get_config_value(memory_config, "semantic_search")
+    if semantic is None or not get_config_value(semantic, "enabled", False):
         return None
 
-    api_key = _get_config_value(semantic, "api_key", "")
+    api_key = get_config_value(semantic, "api_key", "")
     if not api_key:
         raise ValueError("memory.semantic_search.api_key is required when semantic search is enabled")
 
     embeddings = OpenAICompatibleEmbeddings(
         api_key=api_key,
-        base_url=_get_config_value(semantic, "base_url", ""),
-        model=_get_config_value(semantic, "model", ""),
+        base_url=get_config_value(semantic, "base_url", ""),
+        model=get_config_value(semantic, "model", ""),
     )
     return IndexConfig(
         embed=embeddings,
-        dims=int(_get_config_value(semantic, "dims", 0)),
+        dims=int(get_config_value(semantic, "dims", 0)),
         fields=["content"],
     )
 

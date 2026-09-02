@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from lc_agent.config import get_database_url
 from lc_agent.core.engine import AgentEngine
 from lc_agent.db.engine import get_async_session as _get_db_session
 from lc_agent.db.models import AgentPresetDB
@@ -15,7 +16,7 @@ router = APIRouter(tags=["prompts"])
 
 
 async def get_db(request: Request):
-    db_url = request.app.state.config.get("database", {}).get("url", "sqlite+aiosqlite:///./lc_agent_data.db")
+    db_url = get_database_url()
     session = _get_db_session(db_url)
     try:
         yield session

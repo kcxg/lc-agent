@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from lc_agent.config import get_config, get_config_value
 from lc_agent.core.engine import AgentEngine
 from lc_agent.db.models_auth import User
 from lc_agent.server.auth_middleware import get_current_user
@@ -22,7 +23,7 @@ def get_summarization(
     engine: AgentEngine = Depends(get_engine),
 ):
     """Get current summarization configuration."""
-    conf = engine.config.get("agent", {}).get("summarization", {})
+    conf = get_config_value(get_config(), "agent.summarization", {})
     return {
         "enabled": conf.get("enabled", True),
         "default_model": conf.get("default_model", ""),
@@ -38,7 +39,7 @@ def update_summarization(
     engine: AgentEngine = Depends(get_engine),
 ):
     """Update summarization config at runtime (no restart needed)."""
-    agent_conf = engine.config.setdefault("agent", {})
+    agent_conf = get_config().setdefault("agent", {})
     summ_conf = agent_conf.setdefault("summarization", {})
 
     summ_conf["enabled"] = body.enabled

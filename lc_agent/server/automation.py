@@ -14,6 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from tzlocal import get_localzone_name
 
 from lc_agent.core.engine import AgentEngine
+from lc_agent.config import get_app_name
 from lc_agent.db.engine import get_async_session
 from lc_agent.db.models import AutomationRun, AutomationTask
 from lc_agent.db.models_auth import User, UserAgentAccess
@@ -494,8 +495,7 @@ class AutomationRunner:
         final_output: str = "",
     ) -> None:
         try:
-            app_config = getattr(getattr(self.app, "state", None), "config", {})
-            app_name = app_config.get("ui", {}).get("app_name", "lc-agent")
+            app_name = get_app_name()
             summary = await AutomationNotificationService(app_name=app_name).deliver_run(
                 task.notification_targets or [],
                 task_name=task.name,

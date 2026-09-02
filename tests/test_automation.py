@@ -131,7 +131,11 @@ async def test_automation_runner_persists_notification_delivery_summary(db_url, 
     )
     from types import SimpleNamespace
 
-    app = SimpleNamespace(state=SimpleNamespace(config={"ui": {"app_name": "心有灵犀"}}))
+    from lc_agent.config import set_config
+
+    # 新设计：_notify_run 从全局配置读 app_name
+    set_config({"ui": {"app_name": "心有灵犀"}})
+    app = SimpleNamespace(state=SimpleNamespace(config={}))
     runner = AutomationRunner(object(), db_url, app)
     await runner._notify_run(task, run.id, "success", final_output="摘要正文")
     assert service_app_names == ["心有灵犀"]

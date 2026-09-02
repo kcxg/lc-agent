@@ -2,7 +2,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
-_cached_config: dict[str, Any] | None = None
+from lc_agent.config import get_config, get_config_value
 
 # Per-request project context stored in ContextVar so concurrent async tasks
 # (different users / sessions) don't overwrite each other's values.
@@ -34,27 +34,20 @@ def get_active_project_root() -> str | None:
 
 
 def get_system_tools_config() -> dict[str, Any]:
-    """Return the 'system_tools' section from config.jsonc (cached)."""
-    global _cached_config
-    if _cached_config is not None:
-        return _cached_config
-
-    from lc_agent.config.loader import load_config
-    full_config = load_config()
-    _cached_config = full_config.get("system_tools", {})
-    return _cached_config
+    """Return the 'system_tools' section from the global config."""
+    return get_config_value(get_config(), "system_tools", {})
 
 
 def get_file_read_config() -> dict[str, Any]:
-    return get_system_tools_config().get("file_read", {})
+    return get_config_value(get_system_tools_config(), "file_read", {})
 
 
 def get_file_write_config() -> dict[str, Any]:
-    return get_system_tools_config().get("file_write", {})
+    return get_config_value(get_system_tools_config(), "file_write", {})
 
 
 def get_command_config() -> dict[str, Any]:
-    return get_system_tools_config().get("command", {})
+    return get_config_value(get_system_tools_config(), "command", {})
 
 
 def _get_effective_allowed_dirs(config_dirs: list[str]) -> list[str]:
