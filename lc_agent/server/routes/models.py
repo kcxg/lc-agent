@@ -16,7 +16,8 @@ def list_models(
     """List all configured models."""
     return [
         {
-            "id": m.id,
+            "model_id": m.model_id,
+            "raw_model_id": m.raw_model_id,
             "provider": m.provider,
             "base_url": m.base_url,
             "context_limit": m.context_limit,

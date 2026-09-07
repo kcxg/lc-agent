@@ -162,6 +162,8 @@ def build_my_agent(config: dict):
     """构建自定义 Agent Graph"""
     # 从 config 获取 LLM 配置
     provider_conf = list(config.get("provider", {}).values())[0]
+    # default_model 的值域是配置里的 model_id（自己命名的全局唯一模型名，
+    # 标识/统计/显示都用它；渠道原始模型名另存于条目的 raw_model_id，仅定价兜底/统计归并用）
     model_id = config.get("agent", {}).get("default_model", "")
     
     from lc_agent.core.chat_model import ChatOpenAIReasoning
@@ -258,6 +260,10 @@ cd D:\codes\lc-agent\frontend && npm run build
 cd D:\codes\lc-agent
 D:\ProgramData\Miniconda3\envs\py312\python.exe -m pytest tests/ -v
 ```
+
+- "测试通过"必须看到 `N passed` 汇总行才算数，exit 0 不算（曾有仓库根遗留 `pytest.py` 劫持 `python -m pytest`，只打印 5 行依赖检查就 exit 0）
+- 仓库根严禁放与常用工具同名的 .py（pytest.py / conftest.py 等，会因 cwd 优先被当模块加载）
+- 若 pytest 输出异常为空，先确认没有同名劫持文件；结果可 `--junitxml` 或落盘再读
 
 ## 6. 关键设计模式
 
@@ -474,3 +480,12 @@ def func(arg: str) -> str:
     """docstring 是 LLM 看到的描述"""
     return "result"
 ```
+
+## lc-agent 要支持的数据库
+lc-agent分为langchain的checkpoint数据库和业务数据库。
+checkpoint数据库要能支持sqlite postgre
+业务数据库使用的sqlmodel，所以支持所有sqlachemy支持的数据库
+
+## 前端开发规则
+1. UI设计要美观华丽，各种UI设计的布局和颜色要符合业界通常的最佳实践设计。不能为了贪快，只实现功能不顾布局合理性和美感。
+2. 按钮必须有彩色背景，禁止灰底/透明底。

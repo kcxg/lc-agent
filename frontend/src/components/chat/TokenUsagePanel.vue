@@ -359,6 +359,15 @@ function toggleToolsDetails() {
   overflow: hidden;
 }
 
+/* 滚动定位避开固定顶栏与底部输入框 */
+.usage-details {
+  scroll-margin: 72px 0 96px;
+}
+
+.tools-details {
+  scroll-margin: 72px 0 96px;
+}
+
 .usage-details-enter-active,
 .usage-details-leave-active {
   transition: all 0.18s ease;

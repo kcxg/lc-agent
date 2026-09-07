@@ -21,7 +21,7 @@ def hitl_engine(tmp_path):
             "test": {
                 "api_key": "test-key",
                 "base_url": "http://localhost:11434/v1",
-                "models": [{"id": "test-model"}],
+                "models": [{"model_id": "test-model", "raw_model_id": "test-model"}],
             }
         },
         "agent": {

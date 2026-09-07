@@ -9,10 +9,16 @@
         "app_name": "lc_agent"
     },
 
+    // ----- Token 用量统计 -----
+    // enabled=false 只关采集（不再写 llm_usage）；表照建、已落库数据照常可查
+    "usage_stats": {
+        "enabled": true
+    },
+
 
     // ----- LLM 供应商 -----
     // 支持配置多个供应商，每个供应商可配置多个模型
-    // provider 名称随意取，仅用于内部标识
+    // provider 只是 base_url + api_key 的凭据分组，不参与标识/定价/统计
     "provider": {
         "deepseek": {
             // API Key，支持 {env:ENV_VAR_NAME} 语法读取环境变量
@@ -21,12 +27,18 @@
             "base_url": "https://api.deepseek.com/v1",
             "models": [
                 {
-                    "id": "deepseek-chat",       // 模型 ID，前端显示和切换用
+                    // model_id：自己命名的、全局唯一（跨 provider 也算），
+                    // 标识、统计、显示、sessions 记录都用它；请求 API 时也直接发它
+                    "model_id": "deepseek-chat",
+                    // raw_model_id：渠道提供的原始模型名，定价兜底 + 统计归并用。
+                    // 原厂直连时它就是厂商 id（与 model_id 相同是合法且正确的）
+                    "raw_model_id": "deepseek-chat",
                     "context_limit": 64000,       // 上下文窗口大小（tokens），对应 LangChain 的 max_input_tokens
                     "max_output_tokens": 65536    // 最大输出 tokens，0 = 不限制
                 },
                 {
-                    "id": "deepseek-reasoner",
+                    "model_id": "deepseek-reasoner",
+                    "raw_model_id": "deepseek-reasoner",
                     "context_limit": 64000,
                     "max_output_tokens": 65536
                 }
@@ -37,14 +49,16 @@
         //     "api_key": "{env:OPENAI_API_KEY}",
         //     "base_url": "https://api.openai.com/v1",
         //     "models": [
-        //         {"id": "gpt-4o", "context_limit": 128000, "max_output_tokens": 16384}
+        //         {"model_id": "gpt-4o", "raw_model_id": "gpt-4o", "context_limit": 128000, "max_output_tokens": 16384}
         //     ]
         // },
         // "litellm": {
         //     "api_key": "sk-no-key-needed",
         //     "base_url": "http://localhost:4000/v1",
         //     "models": [
-        //         {"id": "my-model", "context_limit": 64000, "max_output_tokens": 65536}
+        //         // 反代下 model_id = litellm 的 model_name（请求时原样发给 litellm），
+        //         // raw_model_id 填 litellm 背后的上游真实模型名（定价兜底/统计归并）
+        //         {"model_id": "my-model", "raw_model_id": "gpt-4o", "context_limit": 64000, "max_output_tokens": 65536}
         //     ]
         // }
     },

@@ -10,6 +10,8 @@ const router = createRouter({
     { path: '/', name: 'home', component: ChatView },
     { path: '/c/:sessionId', name: 'chat', component: ChatView, props: true },
     { path: '/admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/usage', name: 'usage-admin', component: () => import('@/views/UsageAdminView.vue'), meta: { requiresAdmin: true } },
+    { path: '/me/usage', name: 'usage-me', component: () => import('@/views/MyUsageView.vue') },
     { path: '/test-segments', name: 'test-segments', component: () => import('@/views/TestSegments.vue') },
   ],
 })

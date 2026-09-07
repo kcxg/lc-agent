@@ -87,20 +87,60 @@ class AgentEngine:
         self._code_agent_factories[name] = factory
 
     def _parse_models(self, config: dict) -> list[ModelInfo]:
-        """Extract ModelInfo list from config."""
-        models = []
+        """Extract ModelInfo list from config.
+
+        Fail fast: collect ALL problems (missing model_id/raw_model_id, duplicate
+        ids) and raise once with the full list, instead of failing one at a time.
+        """
+        problems: list[str] = []
+        parsed: list[tuple[str, dict, dict]] = []  # (provider_name, provider_conf, model_conf)
+        seen_model_ids: dict[str, str] = {}        # model_id -> provider（全局唯一，跨 provider 也算）
+        seen_raw: dict[tuple[str, str], str] = {}  # (provider, raw_model_id) -> model_id
         for provider_name, provider_conf in config.get("provider", {}).items():
-            if isinstance(provider_conf, dict):
-                for model_conf in provider_conf.get("models", []):
-                    models.append(ModelInfo(
-                        id=model_conf["id"],
-                        provider=provider_name,
-                        base_url=provider_conf.get("base_url", ""),
-                        context_limit=model_conf.get("context_limit", 8000),
-                        max_output_tokens=model_conf.get("max_output_tokens", 0),
-                        api_key=provider_conf.get("api_key", ""),
-                    ))
-        return models
+            if not isinstance(provider_conf, dict):
+                continue
+            for model_conf in provider_conf.get("models", []):
+                model_id = model_conf.get("model_id", "")
+                raw_model_id = model_conf.get("raw_model_id", "")
+                if not model_id:
+                    problems.append(f"provider={provider_name} 的模型条目缺少 model_id：{model_conf}")
+                if not raw_model_id:
+                    problems.append(f"provider={provider_name} 的模型 {model_id or model_conf} 缺少 raw_model_id")
+                if model_id:
+                    if model_id in seen_model_ids:
+                        problems.append(
+                            f"model_id 重复：{model_id!r} 同时被 provider={seen_model_ids[model_id]} "
+                            f"和 provider={provider_name} 使用（model_id 必须全局唯一，跨 provider 也算）"
+                        )
+                    else:
+                        seen_model_ids[model_id] = provider_name
+                if raw_model_id:
+                    key = (provider_name, raw_model_id)
+                    if key in seen_raw:
+                        problems.append(
+                            f"(provider, raw_model_id) 重复：({provider_name}, {raw_model_id!r}) 同时被 "
+                            f"model_id={seen_raw[key]} 和 model_id={model_id} 使用；"
+                            "同一渠道同一底层模型只允许一个入口，路由/故障转移请在渠道侧（litellm）配置"
+                        )
+                    else:
+                        seen_raw[key] = model_id
+                parsed.append((provider_name, provider_conf, model_conf))
+        if problems:
+            raise ValueError(
+                "模型配置校验失败（共 %d 处）：\n  - " % len(problems) + "\n  - ".join(problems)
+            )
+        return [
+            ModelInfo(
+                model_id=model_conf["model_id"],
+                raw_model_id=model_conf["raw_model_id"],
+                provider=provider_name,
+                base_url=provider_conf.get("base_url", ""),
+                context_limit=model_conf.get("context_limit", 8000),
+                max_output_tokens=model_conf.get("max_output_tokens", 0),
+                api_key=provider_conf.get("api_key", ""),
+            )
+            for provider_name, provider_conf, model_conf in parsed
+        ]
 
     def get_models(self) -> list[ModelInfo]:
         """Return available models."""
@@ -540,7 +580,7 @@ class AgentEngine:
 
     def _build_tracing_async_client(self, model_info: ModelInfo | None, model_id: str):
         provider = model_info.provider if model_info else None
-        resolved_model = model_info.id if model_info else model_id
+        resolved_model = model_info.model_id if model_info else model_id
         base_url = model_info.base_url if model_info and model_info.base_url else None
         return TracingAsyncClient(
             collector_getter=get_http_trace_collector,
@@ -572,7 +612,7 @@ class AgentEngine:
         if model_info and model_info.base_url:
             from lc_agent.core.chat_model import ChatOpenAIReasoning
             kwargs: dict[str, Any] = dict(
-                model=model_info.id,
+                model=model_info.model_id,
                 base_url=model_info.base_url,
                 api_key=model_info.api_key or "not-set",
                 temperature=temperature,
@@ -589,7 +629,7 @@ class AgentEngine:
         from langchain.chat_models import init_chat_model
 
         if model_info:
-            model_str = f"{model_info.provider}:{model_info.id}" if model_info.provider else model_info.id
+            model_str = f"{model_info.provider}:{model_info.model_id}" if model_info.provider else model_info.model_id
             kwargs: dict[str, Any] = dict(
                 api_key=model_info.api_key or "not-set",
                 temperature=temperature,
@@ -606,9 +646,9 @@ class AgentEngine:
         return init_chat_model(model_id, **kwargs)
 
     def _find_model(self, model_id: str) -> ModelInfo | None:
-        """Find model info by ID."""
+        """Find model info by model_id."""
         for m in self._models:
-            if m.id == model_id:
+            if m.model_id == model_id:
                 return m
         return None
 
@@ -909,20 +949,28 @@ class AgentEngine:
         if callable(sync_deleter):
             sync_deleter(thread_id)
 
-    async def generate_title(self, user_message: str, model_id: str = "") -> str:
-        """Generate a short conversation title from the user's first message."""
+    async def generate_title(
+        self, user_message: str, model_id: str = "", usage_sink: list[dict] | None = None
+    ) -> str:
+        """Generate a short conversation title from the user's first message.
+
+        usage_sink：可选出参列表，调用后追加一条本次调用的 usage 摘要
+        （供 usage_recorder 落 source="title" 行，token_stats.md §4.4）。
+        """
         model_info = self._find_model(model_id) if model_id else None
         if model_info is None and self._models:
             model_info = self._models[0]
         if model_info is None:
             return user_message[:20]
 
-        llm = self._create_llm(model_info, model_info.id)
+        llm = self._create_llm(model_info, model_info.model_id)
         try:
             resp = await llm.ainvoke([
                 {"role": "system", "content": "用10个字以内为这段对话生成一个简洁标题。只输出标题，不要标点符号和引号。"},
                 {"role": "user", "content": user_message[:200]},
             ])
+            if usage_sink is not None:
+                usage_sink.append(_usage_from_message(resp, model_info))
             title = resp.content.strip().strip('"\'""').strip()
             return title[:30] if title else user_message[:20]
         except Exception:
@@ -952,3 +1000,27 @@ class AgentEngine:
         if preset_id in self.BUILTIN_IDS:
             return False
         return self._presets.pop(preset_id, None) is not None
+
+
+def _usage_from_message(resp: Any, model_info: Any) -> dict:
+    """从 LLM 响应提取 usage 摘要（generate_title 等图外调用用）。"""
+    meta = getattr(resp, "usage_metadata", None) or {}
+    def _g(key: str) -> int:
+        return int(meta.get(key) or 0) if isinstance(meta, dict) else int(getattr(meta, key, 0) or 0)
+    def _d(key: str) -> int:
+        details = meta.get("input_token_details") or {} if isinstance(meta, dict) else (getattr(meta, "input_token_details", None) or {})
+        if not details:
+            return 0
+        return int(details.get(key, 0) or 0) if isinstance(details, dict) else int(getattr(details, key, 0) or 0)
+    return {
+        "model_id": model_info.model_id,
+        "raw_model_id": model_info.raw_model_id,
+        "provider": model_info.provider,
+        "role": "main",
+        "sub_session_id": "",
+        "input_tokens": _g("input_tokens"),
+        "output_tokens": _g("output_tokens"),
+        "cache_read_tokens": _d("cache_read"),
+        "cache_write_tokens": _d("cache_creation"),
+        "reasoning_tokens": 0,
+    }

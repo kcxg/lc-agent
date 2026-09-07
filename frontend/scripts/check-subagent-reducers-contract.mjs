@@ -87,11 +87,11 @@ if (taskModeSubagentStart.name !== 'funboost教程查询智能体' || taskModeSu
 for (const [eventName, reducerName] of reducers) {
   expectIncludes('chat.ts', chatStore, `export function ${reducerName}(`)
   expectIncludes('chat.ts', chatStore, `client.on('${eventName}', (msg: SseMessage) => {`)
-  expectIncludes('chat.ts', chatStore, `const result = applySubAgentEventToMessages(messages.value, msg, ${reducerName}, threadId.value)`)
+  expectIncludes('chat.ts', chatStore, `const result = applySubAgentEventToMessages(state.messages.value, msg, ${reducerName}, sessionId)`)
   expectMatches(
     'chat.ts',
     chatStore,
-    new RegExp(`const result = applySubAgentEventToMessages\\(messages\\.value, msg, ${reducerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, threadId\\.value\\)[\\s\\S]*?if \\(result\\.shouldRefresh\\) \\{\\s*messages\\.value = \\[\\.\\.\\.messages\\.value\\]\\s*\\}`, 'm'),
+    new RegExp(`const result = applySubAgentEventToMessages\\(state\\.messages\\.value, msg, ${reducerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, sessionId\\)[\\s\\S]*?if \\(result\\.shouldRefresh\\) \\{\\s*state\\.messages\\.value = \\[\\.\\.\\.state\\.messages\\.value\\]\\s*\\}`, 'm'),
     `必须在 ${eventName} 处理器中按 tool_call_id 定位消息后再按 shouldRefresh 刷新 messages.value`,
   )
 }

@@ -32,15 +32,15 @@ async def app_with_models(tmp_path):
                 "base_url": "https://api.openai.com/v1",
                 "api_key": "sk-test",
                 "models": [
-                    {"id": "gpt-4", "context_limit": 128000},
-                    {"id": "gpt-3.5-turbo", "context_limit": 16000},
+                    {"model_id": "gpt-4", "raw_model_id": "gpt-4", "context_limit": 128000},
+                    {"model_id": "gpt-3.5-turbo", "raw_model_id": "gpt-3.5-turbo", "context_limit": 16000},
                 ],
             },
             "deepseek": {
                 "base_url": "https://api.deepseek.com/v1",
                 "api_key": "sk-ds",
                 "models": [
-                    {"id": "deepseek-chat", "context_limit": 64000},
+                    {"model_id": "deepseek-chat", "raw_model_id": "deepseek-chat", "context_limit": 64000},
                 ],
             },
         },
@@ -68,9 +68,10 @@ async def test_get_models(app_with_models):
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 3
-        ids = [m["id"] for m in data]
+        ids = [m["model_id"] for m in data]
         assert "gpt-4" in ids
         assert "deepseek-chat" in ids
-        gpt4 = next(m for m in data if m["id"] == "gpt-4")
+        gpt4 = next(m for m in data if m["model_id"] == "gpt-4")
         assert gpt4["provider"] == "openai"
         assert gpt4["context_limit"] == 128000
+        assert gpt4["raw_model_id"] == "gpt-4"

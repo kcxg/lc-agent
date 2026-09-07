@@ -17,7 +17,7 @@ async def app_and_headers(tmp_path):
             "openai": {
                 "base_url": "http://fake",
                 "api_key": "sk-fake",
-                "models": [{"id": "gpt-4"}],
+                "models": [{"model_id": "gpt-4", "raw_model_id": "gpt-4"}],
             }
         },
         "agent": {"default_model": "gpt-4", "system_prompt": "You are helpful."},

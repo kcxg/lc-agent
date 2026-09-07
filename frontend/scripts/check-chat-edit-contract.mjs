@@ -52,11 +52,11 @@ expectMatch(
 expectMatch(
   'ChatView.vue',
   files.chatView,
-  /function handleSend\(content: string\)[\s\S]*getReplayHistory\(editMessageId\)[\s\S]*chatStore\.truncateAfterMessage\(editingMessageId\.value\)[\s\S]*cancelEdit\(\)[\s\S]*chatStore\.sendMessage/,
+  /function handleSend\(content: ContentBlock\[\]\)[\s\S]*getReplayHistory\(editMessageId\)[\s\S]*chatStore\.truncateAfterMessage\(editingMessageId\.value\)[\s\S]*cancelEdit\(\)[\s\S]*chatStore\.sendMessage/,
   '编辑提交必须保留编辑点之前的历史、截断旧回复，再重新发送',
 )
 expectIncludes('ChatInput.vue', files.chatInput, 'isEditing?: boolean')
-expectIncludes('ChatInput.vue', files.chatInput, 'watch(() => props.editContent')
+expectIncludes('ChatInput.vue', files.chatInput, 'watch(() => [props.editContent, props.editAttachments] as const')
 expectIncludes('ChatInput.vue', files.chatInput, 'ref="textareaRef"')
 expectIncludes('ChatInput.vue', files.chatInput, 'v-model="messageText"')
 expectIncludes('ChatInput.vue', files.chatInput, 'function resizeTextarea()')
@@ -68,7 +68,7 @@ expectIncludes('ChatInput.vue', files.chatInput, '@keyframes stop-spin')
 expectIncludes('ChatInput.vue', files.chatInput, 'class="edit-banner"')
 expectIncludes('ChatInput.vue', files.chatInput, '@click="handleCancelEdit"')
 expectIncludes('chat.ts', files.chatStore, 'function truncateAfterMessage(messageId: string)')
-expectIncludes('chat.ts', files.chatStore, 'messages.value = messages.value.slice(0, idx)')
+expectIncludes('chat.ts', files.chatStore, 'state.messages.value = state.messages.value.slice(0, idx)')
 expectIncludes('chat.ts', files.chatStore, 'truncateAfterMessage')
 expectIncludes('chat.ts', files.chatStore, 'export interface ReplayMessage')
 expectIncludes('chat.ts', files.chatStore, 'export interface SendMessageOptions')
@@ -87,7 +87,7 @@ expectIncludes('ChatView.vue', files.chatView, 'scrollMessagesToBottom()')
 expectIncludes('ChatView.vue', files.chatView, 'watch(() => messages.value[messages.value.length - 1]?.id')
 expectIncludes('ChatView.vue', files.chatView, 'type LoadOlderBubbleItem = BubbleListItemProps & {')
 expectIncludes('ChatView.vue', files.chatView, "itemType: 'load-older'")
-expectIncludes('ChatView.vue', files.chatView, "if (hasOlderMessages.value) items.unshift(createLoadOlderItem())")
+expectIncludes('ChatView.vue', files.chatView, "if (hasOlderMessages.value) out.unshift(createLoadOlderItem())")
 expectIncludes('ChatView.vue', files.chatView, '<template #item="{ item }">')
 expectIncludes('ChatView.vue', files.chatView, "v-if=\"item.itemType === 'load-older'\"")
 expectIncludes('ChatView.vue', files.chatView, 'class="load-older-messages is-inline"')
@@ -108,7 +108,7 @@ expectMatch(
 expectMatch(
   'ChatView.vue',
   files.chatView,
-  /const bubbleList = computed\(\(\): ChatBubbleItem\[\] =>[\s\S]*const items = messages\.value[\s\S]*if \(hasOlderMessages\.value\) items\.unshift\(createLoadOlderItem\(\)\)[\s\S]*return items/,
+  /const bubbleList = computed\(\(\): ChatBubbleItem\[\] =>[\s\S]*const out: ChatBubbleItem\[\] = \[\][\s\S]*if \(hasOlderMessages\.value\) out\.unshift\(createLoadOlderItem\(\)\)[\s\S]*return out/,
   'bubbleList 必须在还有更早消息时把加载入口插入为第一项',
 )
 expectIncludes('http.ts', files.http, 'if (params?.offset !== undefined)')

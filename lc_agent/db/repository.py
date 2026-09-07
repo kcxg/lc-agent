@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,9 @@ from lc_agent.db.models import (
     PromptTemplateDB,
     SessionMeta,
 )
+from lc_agent.db.models_auth import User
+from lc_agent.db.models_usage import LlmUsage, ModelPrice
+from lc_agent.db.usage_pricing import bucket_end, compute_cost, resolve_prices_for
 
 
 AUTOMATION_ACTIVE_STATUSES = ("pending", "running")
@@ -462,3 +465,347 @@ class FileChangeRepository:
             await self.session.delete(row)
         await self.session.commit()
         return len(rows)
+
+
+GROUP_COLUMNS = {
+    "user": "user_id",
+    "agent": "agent_id",
+    "model_id": "model_id",
+    "raw_model_id": "raw_model_id",
+    "provider": "provider",
+    "role": "role",
+}
+
+_TOKEN_SUMS = (
+    "sum(input_tokens)",
+    "sum(output_tokens)",
+    "sum(cache_read_tokens)",
+    "sum(cache_write_tokens)",
+    "sum(reasoning_tokens)",
+)
+
+
+def _bucket_expr(granularity: str) -> str:
+    """按服务器本地时区切桶（token_stats.md §3.1，2026-09-07 定）。"""
+    if granularity == "month":
+        return "strftime('%Y-%m', datetime(ts, 'localtime'))"
+    return "date(datetime(ts, 'localtime'))"
+
+
+class UsageRepository:
+    """llm_usage 聚合查询（docs/tasks/token_stats.md §5）。
+
+    聚合 SQL 只做求和，不碰价格；金额在 Python 侧按 (bucket, model_id) 换算。
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def _load_prices(self) -> list[ModelPrice]:
+        """价格表全量载入（几十行），供会话金额归并使用。"""
+        result = await self.session.execute(select(ModelPrice))
+        return list(result.scalars().all())
+
+    async def _usernames(self) -> dict[str, str]:
+        """user_id -> username 映射，看板显示用户名而非 UUID。"""
+        result = await self.session.execute(select(User.id, User.username))
+        return {uid: uname for uid, uname in result.all()}
+
+    async def _agent_names(self) -> dict[str, str]:
+        """agent_id -> 展示名映射（预设 agent 用 display_name，内置/未知 id 回退原值）。"""
+        result = await self.session.execute(
+            select(AgentPresetDB.id, AgentPresetDB.display_name, AgentPresetDB.name)
+        )
+        return {aid: (disp or name) for aid, disp, name in result.all()}
+
+    def _validate_group_by(self, group_by: list[str]) -> list[str]:
+        for g in group_by:
+            if g not in GROUP_COLUMNS and g != "bucket":
+                raise ValueError(f"非法 group_by 值: {g}")
+        return group_by
+
+    async def summary(
+        self,
+        *,
+        date_from: str,
+        date_to: str,
+        group_by: list[str],
+        granularity: str = "day",
+        include_sub: bool = True,
+        user_id: str | None = None,
+    ) -> list[dict]:
+        """通用聚合：按 group_by 维度 + 时间桶求和。
+
+        日期过滤在 localtime 表达式上进行，与切桶口径一致（否则边界 8 小时错位）。
+        """
+        self._validate_group_by(group_by)
+        bucket = _bucket_expr(granularity)
+        # 日期过滤恒按天切（"2026-09" 与 "2026-09-01" 字符串比较会错位漏行）
+        where_bucket = _bucket_expr("day")
+        select_parts = [f"{bucket} AS bucket", "model_id", "raw_model_id", "provider"]
+        group_parts = ["bucket", "model_id", "raw_model_id", "provider"]
+        for g in group_by:
+            if g == "bucket":
+                continue  # bucket 已在 select_parts 首位，重复别名会自引用报错
+            col = GROUP_COLUMNS[g]
+            select_parts.append(f"{col} AS \"{g}\"")
+            if col not in group_parts:
+                group_parts.append(col)
+        select_parts.extend(_TOKEN_SUMS)
+        select_parts.append("count(*) AS calls")
+
+        sql = f"""
+            SELECT {", ".join(select_parts)}
+            FROM llm_usage
+            WHERE {where_bucket} >= :date_from AND {where_bucket} <= :date_to
+        """
+        params: dict = {"date_from": date_from, "date_to": date_to}
+        if not include_sub:
+            sql += " AND role = 'main'"
+        if user_id is not None:
+            sql += " AND user_id = :user_id"
+            params["user_id"] = user_id
+        sql += f" GROUP BY {', '.join(group_parts)} ORDER BY bucket"
+
+        result = await self.session.execute(text(sql), params)
+        rows = []
+        for r in result.mappings():
+            rows.append({
+                "bucket": r["bucket"],
+                "model_id": r["model_id"],
+                "raw_model_id": r["raw_model_id"],
+                "provider": r["provider"],
+                **({g: r[g] for g in group_by}),
+                "input_tokens": r["sum(input_tokens)"] or 0,
+                "output_tokens": r["sum(output_tokens)"] or 0,
+                "cache_read_tokens": r["sum(cache_read_tokens)"] or 0,
+                "cache_write_tokens": r["sum(cache_write_tokens)"] or 0,
+                "reasoning_tokens": r["sum(reasoning_tokens)"] or 0,
+                "calls": r["calls"] or 0,
+            })
+        if "user" in group_by:
+            # user_id → username，看板与 CSV 显示用户名（查不到时回退原始 id）
+            umap = await self._usernames()
+            for row in rows:
+                row["user"] = umap.get(row.get("user"), row.get("user"))
+        if "agent" in group_by:
+            # agent_id → 展示名，同上
+            amap = await self._agent_names()
+            for row in rows:
+                row["agent"] = amap.get(row.get("agent"), row.get("agent"))
+        return rows
+
+    async def totals(
+        self,
+        *,
+        date_from: str,
+        date_to: str,
+        include_sub: bool = True,
+        user_id: str | None = None,
+    ) -> dict:
+        """全量合计（看板顶部卡片用）。"""
+        bucket = _bucket_expr("day")
+        sql = f"""
+            SELECT
+                sum(input_tokens) AS input_tokens,
+                sum(output_tokens) AS output_tokens,
+                sum(cache_read_tokens) AS cache_read_tokens,
+                sum(cache_write_tokens) AS cache_write_tokens,
+                count(*) AS calls,
+                count(DISTINCT CASE WHEN user_id != '' THEN user_id END) AS active_users,
+                count(DISTINCT session_id) AS session_count
+            FROM llm_usage
+            WHERE {bucket} >= :date_from AND {bucket} <= :date_to
+        """
+        params: dict = {"date_from": date_from, "date_to": date_to}
+        if not include_sub:
+            sql += " AND role = 'main'"
+        if user_id is not None:
+            sql += " AND user_id = :user_id"
+            params["user_id"] = user_id
+        result = await self.session.execute(text(sql), params)
+        r = result.mappings().one()
+        return {
+            "input_tokens": r["input_tokens"] or 0,
+            "output_tokens": r["output_tokens"] or 0,
+            "cache_read_tokens": r["cache_read_tokens"] or 0,
+            "cache_write_tokens": r["cache_write_tokens"] or 0,
+            "calls": r["calls"] or 0,
+            "active_users": r["active_users"] or 0,
+            "session_count": r["session_count"] or 0,
+        }
+
+    async def top_sessions(
+        self,
+        *,
+        date_from: str,
+        date_to: str,
+        limit: int = 50,
+        include_sub: bool = True,
+        user_id: str | None = None,
+    ) -> list[dict]:
+        """最烧钱的会话，join sessions 取标题/用户/agent。
+
+        金额在（会话 × 天 × 模型）粒度算好后归并到会话——跨模型会话的钱不会算错；
+        排序按金额降序（没配价的排后面，按 token 量兜底排序）。
+        """
+        bucket = _bucket_expr("day")
+        sql = f"""
+            SELECT u.session_id,
+                   {bucket.replace('ts', 'u.ts')} AS bucket,
+                   u.model_id,
+                   u.raw_model_id,
+                   max(u.agent_id) AS agent_id,
+                   max(u.user_id) AS user_id,
+                   max(s.title) AS title,
+                   sum(u.input_tokens) AS input_tokens,
+                   sum(u.output_tokens) AS output_tokens,
+                   sum(u.cache_read_tokens) AS cache_read_tokens,
+                   sum(u.cache_write_tokens) AS cache_write_tokens,
+                   count(*) AS calls
+            FROM llm_usage u
+            LEFT JOIN sessions s ON s.id = u.session_id
+            WHERE {bucket.replace('ts', 'u.ts')} >= :date_from
+              AND {bucket.replace('ts', 'u.ts')} <= :date_to
+        """
+        params: dict = {"date_from": date_from, "date_to": date_to}
+        if not include_sub:
+            sql += " AND u.role = 'main'"
+        if user_id is not None:
+            sql += " AND u.user_id = :user_id"
+            params["user_id"] = user_id
+        sql += """
+            GROUP BY u.session_id, bucket, u.model_id, u.raw_model_id
+        """
+        result = await self.session.execute(text(sql), params)
+        umap = await self._usernames()
+        amap = await self._agent_names()
+
+        # （会话 × 天 × 模型）粒度算钱（桶末时刻匹配当时生效价）
+        prices = await self._load_prices()
+        sessions: dict[str, dict] = {}
+        for r in result.mappings():
+            at = bucket_end(r["bucket"], "day")
+            cost = compute_cost(
+                {
+                    "input": r["input_tokens"] or 0,
+                    "output": r["output_tokens"] or 0,
+                    "cache_read": r["cache_read_tokens"] or 0,
+                    "cache_write": r["cache_write_tokens"] or 0,
+                },
+                resolve_prices_for(prices, r["model_id"] or "", r["raw_model_id"] or "", at),
+            )
+            sid = r["session_id"]
+            agg = sessions.get(sid)
+            if agg is None:
+                agg = sessions[sid] = {
+                    "session_id": sid,
+                    "title": r["title"] or "(无标题)",
+                    "user_id": r["user_id"] or "",
+                    "username": umap.get(r["user_id"] or "", r["user_id"] or ""),
+                    "agent_id": r["agent_id"] or "",
+                    "agent_name": amap.get(r["agent_id"] or "", r["agent_id"] or ""),
+                    "model_id": r["model_id"] or "",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "calls": 0,
+                    "cost": 0.0,
+                    "_cost_missing": False,
+                }
+            if r["model_id"] and not agg["model_id"]:
+                agg["model_id"] = r["model_id"]
+            agg["input_tokens"] += r["input_tokens"] or 0
+            agg["output_tokens"] += r["output_tokens"] or 0
+            agg["cache_read_tokens"] += r["cache_read_tokens"] or 0
+            agg["cache_write_tokens"] += r["cache_write_tokens"] or 0
+            agg["calls"] += r["calls"] or 0
+            if cost is None:
+                agg["_cost_missing"] = True
+            else:
+                agg["cost"] += cost
+
+        rows = list(sessions.values())
+        for row in rows:
+            if row["_cost_missing"]:
+                row["cost"] = None  # 有没配价的部分，整体显示「—」
+            else:
+                row["cost"] = round(row["cost"], 4)
+            row.pop("_cost_missing")
+        rows.sort(
+            key=lambda x: (
+                x["cost"] is None,  # 配了价的排前面
+                x["cost"] or 0,
+                x["input_tokens"] + x["output_tokens"],  # 没配价的按 token 量兜底
+            ),
+            reverse=True,
+        )
+        return rows[:limit]
+
+    async def session_detail(self, session_id: str) -> list[dict]:
+        """下钻：某会话每次 LLM 调用的明细（含按当天生效价算的单次金额）。"""
+        prices = await self._load_prices()
+        result = await self.session.execute(
+            select(LlmUsage)
+            .where(LlmUsage.session_id == session_id)
+            .order_by(LlmUsage.ts)
+        )
+        rows = []
+        for u in result.scalars().all():
+            cost = None
+            if u.ts is not None:
+                # ts 存 naive UTC（utcnow），与 SQL 的 datetime(ts,'localtime') 同口径转本地
+                local_naive = u.ts.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
+                at = local_naive.replace(hour=23, minute=59, second=59)  # 当天桶末匹配生效价
+                cost = compute_cost(
+                    {
+                        "input": u.input_tokens,
+                        "output": u.output_tokens,
+                        "cache_read": u.cache_read_tokens,
+                        "cache_write": u.cache_write_tokens,
+                    },
+                    resolve_prices_for(prices, u.model_id, u.raw_model_id, at),
+                )
+            rows.append({
+                "ts": u.ts.isoformat() if u.ts else None,
+                "model_id": u.model_id,
+                "raw_model_id": u.raw_model_id,
+                "provider": u.provider,
+                "role": u.role,
+                "source": u.source,
+                "input_tokens": u.input_tokens,
+                "output_tokens": u.output_tokens,
+                "cache_read_tokens": u.cache_read_tokens,
+                "cache_write_tokens": u.cache_write_tokens,
+                "reasoning_tokens": u.reasoning_tokens,
+                "duration_ms": u.duration_ms,
+                "cost": cost,
+            })
+        return rows
+
+    # ---- 单价维护（改价 = INSERT，绝不 UPDATE —— §2.2 铁律）----
+
+    async def list_pricing(self) -> list[ModelPrice]:
+        result = await self.session.execute(
+            select(ModelPrice).order_by(ModelPrice.model, ModelPrice.kind, ModelPrice.effective_from)
+        )
+        return list(result.scalars().all())
+
+    async def add_pricing(
+        self, *, model: str, kind: str, price_per_1m: float,
+        effective_from: datetime, note: str = "",
+    ) -> ModelPrice:
+        if kind not in ("input", "output", "cache_read", "cache_write"):
+            raise ValueError(f"非法 kind: {kind}")
+        price = ModelPrice(
+            model=model,
+            kind=kind,
+            price_per_1m=price_per_1m,
+            effective_from=effective_from,
+            note=note,
+        )
+        self.session.add(price)
+        await self.session.commit()
+        await self.session.refresh(price)
+        return price

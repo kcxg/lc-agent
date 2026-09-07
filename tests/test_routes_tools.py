@@ -41,7 +41,7 @@ async def app_with_tools(tmp_path):
         return f"content of {path}"
 
     config = {
-        "provider": {"openai": {"base_url": "http://fake", "api_key": "sk-fake", "models": [{"id": "gpt-4"}]}},
+        "provider": {"openai": {"base_url": "http://fake", "api_key": "sk-fake", "models": [{"model_id": "gpt-4", "raw_model_id": "gpt-4"}]}},
         "agent": {"default_model": "gpt-4", "system_prompt": "Test"},
         "database": {"url": db_url, "checkpoint_path": ":memory:"},
     }

@@ -61,3 +61,18 @@ The script (`scripts/restart.ps1`) performs three steps:
 - Frontend build output: `D:\codes\lc-agent\lc_agent\web\dist\`
 - Working directory for bfzs: `D:\codes\lc-agent-bfzs`
 - The script sets `PYTHONUNBUFFERED=1` for immediate log output
+
+## ⚠️ AI 工具沙箱环境下的替代流程（2026-09-07 实测）
+
+在 WorkBuddy 的 PowerShell 工具沙箱里**运行不了本脚本**：原生 exe 调用被限制
+（netstat 报 "Cannot run a document in the middle of a pipeline"；node.exe 静默无输出
+且不设 `$LASTEXITCODE`，exit 0 是假象）；cmd.exe / powershell 也被安全策略或 PATH 拦截。
+此时改用 **Bash 工具** 分三步手工执行（Bash 沙箱里 curl/node/python 均正常）：
+
+1. **杀旧进程**（如有）：Bash 里 `netstat -ano | grep :8001` 找 PID，
+   再 `taskkill //F //T //PID <pid>`（Git Bash 双斜杠）
+2. **编译前端**：
+   `cd D:/codes/lc-agent/frontend && NODE_OPTIONS="--max-old-space-size=3072" "C:/Users/ydf6/.workbuddy/binaries/node/versions/22.22.2-2/node.exe" node_modules/vite/bin/vite.js build`
+3. **启动服务**（run_in_background）：
+   `cd D:/codes/lc-agent-bfzs && PYTHONUNBUFFERED=1 PYTHONPATH="D:/codes/lc-agent" "D:/ProgramData/Miniconda3/envs/py312/python.exe" -u -m bfzs.main --port 8001 --host 0.0.0.0`
+4. **验证**：curl `/api/health` 200，再探测新增路由应返回 401（路由存在）而非 404

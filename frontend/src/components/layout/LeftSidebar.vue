@@ -127,7 +127,9 @@
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="change-password">修改密码</el-dropdown-item>
+            <el-dropdown-item command="my-usage">我的用量</el-dropdown-item>
             <el-dropdown-item v-if="authStore.isAdmin" command="admin">管理后台</el-dropdown-item>
+            <el-dropdown-item v-if="authStore.isAdmin" command="usage-admin">用量统计</el-dropdown-item>
             <el-dropdown-item v-if="authStore.isAdmin" command="cleanup">数据清理</el-dropdown-item>
             <el-dropdown-item divided command="logout">登出</el-dropdown-item>
           </el-dropdown-menu>
@@ -145,6 +147,7 @@ import { useSessionsStore, type Session } from '@/stores/sessions'
 import { useAgentsStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
+import { useRouter } from 'vue-router'
 
 const props = defineProps<{ collapsed: boolean; panelWidth?: number }>()
 
@@ -163,11 +166,17 @@ const emit = defineEmits<{
   logout: []
 }>()
 
+const router = useRouter()
+
 function handleSettingsCommand(command: string) {
   if (command === 'change-password') {
     emit('changePassword')
   } else if (command === 'admin') {
     emit('goAdmin')
+  } else if (command === 'my-usage') {
+    router.push('/me/usage')
+  } else if (command === 'usage-admin') {
+    router.push('/admin/usage')
   } else if (command === 'cleanup') {
     emit('openSettings')
   } else if (command === 'logout') {

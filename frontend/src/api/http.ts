@@ -1,5 +1,75 @@
 const BASE_URL = '/api'
 
+export interface UsageSummaryRow {
+  bucket: string
+  model_id: string
+  raw_model_id: string
+  provider: string
+  user_id?: string
+  user?: string
+  agent?: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  reasoning_tokens?: number
+  calls: number
+  cost: number | null
+}
+
+export interface UsageTotals {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  calls: number
+  active_users: number
+  session_count: number
+  cost: number | null
+}
+
+export interface UsageSessionRow {
+  session_id: string
+  title: string
+  user_id: string
+  username: string
+  agent_id: string
+  agent_name: string
+  model_id: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  calls: number
+  cost: number | null
+}
+
+export interface UsageCallRow {
+  ts: string | null
+  model_id: string
+  raw_model_id: string
+  provider: string
+  role: string
+  source: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  reasoning_tokens: number
+  duration_ms: number
+  cost: number | null
+}
+
+export interface PriceRow {
+  id: string
+  model: string
+  kind: string
+  price_per_1m: number
+  currency: string
+  effective_from: string | null
+  note: string
+}
+
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const token = localStorage.getItem('token')
@@ -40,7 +110,7 @@ export const api = {
   getToolGroups: () => fetchApi<{ id: string; description: string; tools: { name: string; description: string }[]; enabled: boolean }[]>('/tools/groups'),
   toggleToolGroup: (groupId: string) => fetchApi<{ id: string; enabled: boolean }>(`/tools/groups/${groupId}/toggle`, { method: 'POST' }),
 
-  getModels: () => fetchApi<{ id: string; provider: string; base_url: string; context_limit: number }[]>('/models'),
+  getModels: () => fetchApi<{ model_id: string; raw_model_id: string; provider: string; base_url: string; context_limit: number }[]>('/models'),
 
   getMcpServers: () => fetchApi<any[]>('/mcp'),
   refreshMcpServers: () => fetchApi<any[]>('/mcp/refresh', { method: 'POST' }),
@@ -188,6 +258,35 @@ export const api = {
       `/sessions/${sessionId}/git-diff/file?file_path=${encodeURIComponent(filePath)}&baseline=${encodeURIComponent(baseline)}${commit ? `&commit=${encodeURIComponent(commit)}` : ''}`
     ),
 
+  // Token 用量统计（docs/tasks/token_stats.md §5）
+  getUsageSummary: (params: { from: string; to: string; group_by: string; granularity: string; include_sub: boolean }) =>
+    fetchApi<{ rows: UsageSummaryRow[]; group_by: string[]; granularity: string }>(
+      `/admin/usage/summary?${new URLSearchParams({
+        from: params.from, to: params.to, group_by: params.group_by,
+        granularity: params.granularity, include_sub: String(params.include_sub),
+      })}`
+    ),
+  getUsageTotals: (params: { from: string; to: string; include_sub: boolean }) =>
+    fetchApi<UsageTotals>(`/admin/usage/totals?${new URLSearchParams({
+      from: params.from, to: params.to, include_sub: String(params.include_sub),
+    })}`),
+  getUsageTopSessions: (params: { from: string; to: string; include_sub: boolean }) =>
+    fetchApi<{ rows: UsageSessionRow[] }>(`/admin/usage/top-sessions?${new URLSearchParams({
+      from: params.from, to: params.to, include_sub: String(params.include_sub),
+    })}`),
+  getUsageSessionDetail: (sessionId: string) =>
+    fetchApi<{ rows: UsageCallRow[] }>(`/admin/usage/session/${sessionId}`),
+  getPricing: () => fetchApi<{ rows: PriceRow[] }>('/admin/usage/pricing'),
+  addPricing: (data: { model: string; kind: string; price_per_1m: number; effective_from: string; note?: string }) =>
+    fetchApi<PriceRow>('/admin/usage/pricing', { method: 'POST', body: JSON.stringify(data) }),
+  getMyUsage: (params: { from: string; to: string; group_by: string; granularity: string; include_sub: boolean }) =>
+    fetchApi<{ rows: UsageSummaryRow[]; totals: UsageTotals; group_by: string[]; granularity: string }>(
+      `/me/usage?${new URLSearchParams({
+        from: params.from, to: params.to, group_by: params.group_by,
+        granularity: params.granularity, include_sub: String(params.include_sub),
+      })}`
+    ),
+
   // 数据清理 / 瘦身（参见 docs/adr/adr-001-data-cleanup.md）
   previewCleanup: (data: {
     keep_days: number
@@ -229,4 +328,28 @@ export async function fetchAvailableSubagents(): Promise<Array<{
   description: string
 }>> {
   return fetchApi('/agents/available-subagents')
+}
+
+export async function downloadUsageCsv(params: {
+  from: string
+  to: string
+  group_by: string
+  granularity: string
+  include_sub: boolean
+}): Promise<void> {
+  const qs = new URLSearchParams({
+    from: params.from, to: params.to, group_by: params.group_by,
+    granularity: params.granularity, include_sub: String(params.include_sub),
+  })
+  const response = await fetch(`${BASE_URL}/admin/usage/export.csv?${qs}`, {
+    headers: getAuthHeaders(),
+  })
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `usage_${params.from}_${params.to}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
 }

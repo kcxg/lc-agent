@@ -107,9 +107,12 @@ async def generate_title(
     first_message: str,
     preset_id: str = "chat",
     selected_model_id: str = "",
+    usage_sink: list[dict] | None = None,
 ) -> str | None:
     """Generate title from first message using the agent's model.
 
+    usage_sink：可选出参列表，透传给 engine.generate_title 收集本次调用 usage
+    （供 usage_recorder 落 source="title" 行）。
     Returns the generated title string, or None on failure.
     """
     try:
@@ -123,7 +126,7 @@ async def generate_title(
             preset = engine._presets.get(preset_id) or engine._custom_presets.get(preset_id)
             if preset:
                 model_id = model_id or preset.default_model
-        return await engine.generate_title(first_message, model_id)
+        return await engine.generate_title(first_message, model_id, usage_sink=usage_sink)
     except Exception:
         logger.exception("Title generation failed for session %s", thread_id)
         return None

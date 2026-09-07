@@ -39,11 +39,12 @@ expectIncludes('ChatView.vue', files.chatView, 'class="thinking-unavailable"')
 expectIncludes('ChatView.vue', files.chatView, 'shouldShowReasoningNotice(item)')
 expectIncludes('ChatView.vue', files.chatView, 'getReasoningTokenTotal')
 expectIncludes('ChatView.vue', files.chatView, '没有返回可展示的思考文字')
-expectIncludes('ChatView.vue', files.chatView, '<summary class="thinking-summary"')
+expectIncludes('ChatView.vue', files.chatView, 'class="thinking-summary"')
 expectIncludes('ChatView.vue', files.chatView, 'hasStructuredSegments')
-expectIncludes('ChatView.vue', files.chatView, 'open')
-expectMatch('ChatView.vue', files.chatView, /marker === '<!--THINK_START-->'[\s\S]*type: 'thinking'/, '没有把 THINK 标记解析成 thinking segment')
-expectMatch('ChatView.vue', files.chatView, /class="thinking-block"[\s\S]*:?open[\s\S]*<summary class="thinking-summary"/, '思考块没有默认展开，用户会看不到思考正文')
+// THINK 标记（现为 THINK_START/THINK_END 常量）解析成 thinking segment
+expectMatch('ChatView.vue', files.chatView, /THINK_START[\s\S]*type: inThinking \? 'thinking' : 'text'/, '没有把 THINK 标记解析成 thinking segment')
+// 思考块流式输出中默认展开（isThinkingExpanded 兜底 isStreamingMessage === true），结束后可点"思考过程"展开
+expectMatch('ChatView.vue', files.chatView, /class="thinking-block"[\s\S]*isThinkingExpanded[\s\S]*\?\? item\.isStreamingMessage === true/, '思考块流式期间没有默认展开，用户会看不到思考正文')
 if (files.chatView.includes(':open="item.loading"')) {
   failures.push('ChatView.vue 思考块仍绑定 item.loading；thinking 一写入 content 后 loading 会变 false')
 }
@@ -59,14 +60,14 @@ expectIncludes('sse-client.ts', files.sseClient, 'reasoning_tokens?: number')
 expectIncludes('chat.ts', files.chatStore, 'function mergeFinalUsageRounds')
 expectIncludes('chat.ts', files.chatStore, 'reasoningTokens: msg.reasoning_tokens || 0')
 expectIncludes('chat.ts', files.chatStore, 'mergeFinalUsageRounds(last.usage.rounds, usageData)')
-expectIncludes('chat.ts', files.chatStore, 'client.sendMessage(content.trim(), presetId, modelId')
+expectIncludes('chat.ts', files.chatStore, 'client.sendMessage(content, presetId, modelId')
 expectMatch(
   'ChatView.vue',
   files.chatView,
-  /chatStore\.sendMessage\(\s*content,\s*agentsStore\.currentAgentId,\s*toolsStore\.currentModel/,
+  /const modelOverride = agentsStore\.isCodeAgent \? '' : toolsStore\.currentModel[\s\S]*chatStore\.sendMessage\(\s*content,\s*agentsStore\.currentAgentId,\s*modelOverride/,
   '发送消息必须继续使用当前 Agent 和当前模型',
 )
-expectIncludes('ChatInput.vue', files.chatInput, "send: [content: string]")
+expectIncludes('ChatInput.vue', files.chatInput, "send: [content: ContentBlock[]]")
 expectIncludes('ChatView.vue', files.chatView, ':title="item.role === \'user\' ? \'你\' : getAssistantLabel()"')
 if (/<span class="role-name">\{\{\s*item\.role === 'user' \? '你'/.test(files.chatView)) {
   failures.push('ChatView.vue 用户消息仍在 role-name 中显示悬空的“你”文本，应由右侧用户头像承担身份标识')

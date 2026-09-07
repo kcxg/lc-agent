@@ -18,7 +18,7 @@ function expectMatch(pattern, message) {
   if (!pattern.test(panel)) failures.push(`TokenUsagePanel.vue ${message}`)
 }
 
-expectIncludes('import { ref, computed, nextTick }')
+expectIncludes('import { ref, computed, nextTick, watch }')
 expectIncludes('const usageDetailsRef = ref<HTMLElement>()')
 expectIncludes('const toolsDetailsRef = ref<HTMLElement>()')
 expectIncludes('function scrollDetailsIntoView')

@@ -61,12 +61,14 @@ class TestAgentPreset:
 class TestModelInfo:
     def test_creates_model_info(self):
         info = ModelInfo(
-            id="deepseek-chat",
+            model_id="deepseek-chat",
+            raw_model_id="deepseek-chat",
             provider="default",
             base_url="https://api.deepseek.com/v1",
             context_limit=64000,
         )
-        assert info.id == "deepseek-chat"
+        assert info.model_id == "deepseek-chat"
+        assert info.raw_model_id == "deepseek-chat"
         assert info.context_limit == 64000
 
 
@@ -190,7 +192,8 @@ class TestAgentEngine:
         engine = AgentEngine(sample_config)
         models = engine.get_models()
         assert len(models) == 1
-        assert models[0].id == "test-model"
+        assert models[0].model_id == "test-model"
+        assert models[0].raw_model_id == "test-model"
         assert models[0].context_limit == 8000
 
     def test_get_default_preset(self, sample_config):
@@ -211,8 +214,8 @@ class TestAgentEngine:
                     "api_key": "test-key",
                     "base_url": "https://api.example.com/v1",
                     "models": [
-                        {"id": "test-model", "context_limit": 8000},
-                        {"id": "ark-deepseek-v4-flash", "context_limit": 200000},
+                        {"model_id": "test-model", "raw_model_id": "test-model", "context_limit": 8000},
+                        {"model_id": "ark-deepseek-v4-flash", "raw_model_id": "deepseek-v4-flash", "context_limit": 200000},
                     ],
                 }
             },
@@ -398,7 +401,8 @@ class TestCreateLlm:
         engine = AgentEngine(sample_config)
         for model_id in ["ds-deepseek-v4-flash", "ark-deepseek-v4-flash", "ark-glm-5.1", "gpt-4o"]:
             model_info = ModelInfo(
-                id=model_id,
+                model_id=model_id,
+                raw_model_id=model_id,
                 provider="litellm",
                 base_url="http://localhost:4000/v1",
                 api_key="sk-no-key",
@@ -421,7 +425,8 @@ class TestCreateLlm:
 
         engine = AgentEngine(sample_config)
         model_info = ModelInfo(
-            id="deepseek-chat",
+            model_id="deepseek-chat",
+            raw_model_id="deepseek-chat",
             provider="deepseek",
             base_url="",
             api_key="test-key",
@@ -449,7 +454,8 @@ class TestCreateLlm:
 
         engine = AgentEngine(sample_config)
         model_info = ModelInfo(
-            id="gpt-4o",
+            model_id="gpt-4o",
+            raw_model_id="gpt-4o",
             provider="openai",
             base_url="https://api.openai.com/v1",
             api_key="test-key",
@@ -464,7 +470,8 @@ class TestCreateLlm:
 
         engine = AgentEngine(sample_config)
         model_info = ModelInfo(
-            id="gpt-4o",
+            model_id="gpt-4o",
+            raw_model_id="gpt-4o",
             provider="openai",
             base_url="https://api.openai.com/v1",
             api_key="test-key",

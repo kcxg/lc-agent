@@ -88,6 +88,7 @@ async def init_db(url: str = "sqlite+aiosqlite:///./lc_agent_data.db"):
     (handles the case where migrations failed but tables already exist).
     """
     import lc_agent.db.models  # noqa: F401 — ensure models are registered
+    import lc_agent.db.models_usage  # noqa: F401 — llm_usage / model_pricing
 
     sync_url = _to_sync_url(url)
 

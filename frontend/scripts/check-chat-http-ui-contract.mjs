@@ -30,13 +30,11 @@ if (toolbar.includes('请求 HTTP')) failures.push('MessageToolbar.vue 不应再
 if (toolbar.includes('响应 HTTP')) failures.push('MessageToolbar.vue 不应再包含 响应 HTTP 按钮')
 if (toolbar.includes('HttpTracePopover')) failures.push('MessageToolbar.vue 不应再引入 HttpTracePopover')
 
-// ChatView.vue — must parse HTTP markers and render HttpTraceBlock
-expectIncludes('ChatView.vue', chatView, "type: 'http'")
-expectIncludes('ChatView.vue', chatView, 'httpIndex?: number')
-expectIncludes('ChatView.vue', chatView, '<!--HTTP:')
-expectIncludes('ChatView.vue', chatView, "seg.type === 'http'")
-expectIncludes('ChatView.vue', chatView, "seg.httpIndex")
-expectIncludes('ChatView.vue', chatView, 'import HttpTraceBlock')
+// ChatView.vue — HTTP 交互以结构化 httpTraces 经 HttpTracesGroup 独立块渲染（内部仍用 HttpTraceBlock）
+expectIncludes('ChatView.vue', chatView, 'import HttpTracesGroup')
+expectIncludes('ChatView.vue', chatView, '<HttpTracesGroup')
+expectIncludes('ChatView.vue', chatView, ':traces="item.httpTraces"')
+expectIncludes('ChatView.vue', chatView, 'httpTracesCount')
 
 if (failures.length > 0) {
   console.error('聊天 HTTP UI 契约测试失败:')

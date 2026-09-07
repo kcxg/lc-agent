@@ -45,7 +45,8 @@ export interface Skill {
 }
 
 export interface ModelInfo {
-  id: string
+  model_id: string
+  raw_model_id: string
   provider: string
   base_url: string
   context_limit: number
@@ -119,7 +120,7 @@ export const useToolsStore = defineStore('tools', () => {
       return
     }
     if (models.value.length > 0 && !currentModel.value) {
-      currentModel.value = models.value[0].id
+      currentModel.value = models.value[0].model_id
     }
   }
 

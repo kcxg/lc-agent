@@ -19,6 +19,8 @@ OPENAI_MODEL=ds-deepseek-v4-flash
 
 The OpenAI-compatible client uses `http://localhost:4000/v1` as its base URL and sends chat requests to `/chat/completions`. The local proxy does not require a real provider API key, so `sk-no-key-needed` is the intended placeholder.
 
+In lc-agent's `config.jsonc`, the same model name goes into BOTH required fields of a model entry: `model_id` (your own globally-unique name — identity, stats, display) and `raw_model_id` (the channel-provided original model name — pricing fallback + stats merging). Under this LiteLLM proxy both values are identical, e.g. `{"model_id": "ds-deepseek-v4-flash", "raw_model_id": "ds-deepseek-v4-flash"}`. Missing fields or uniqueness conflicts (`model_id` global-unique; `(provider, raw_model_id)` unique) fail at startup with a full problem list.
+
 ## Decision Rules
 
 1. Use the local LiteLLM values above when an AI agent implementation needs model configuration and no explicit alternative is requested.

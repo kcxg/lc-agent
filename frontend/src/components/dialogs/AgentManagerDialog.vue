@@ -308,73 +308,97 @@
                     <div class="form-hint">项目模式下文件工具默认只能访问项目目录，此处可追加其他允许路径</div>
                   </el-form-item>
 
-                  <el-form-item label="名称" required>
-                    <el-input ref="nameInputRef" v-model="form.name" placeholder="例如：code-assistant、researcher" />
-                    <div class="form-hint">只能使用英文字母、数字、连字符(-)和下划线(_)，且必须以字母开头</div>
-                  </el-form-item>
-
-                  <el-form-item label="显示名称">
-                    <el-input v-model="form.display_name" placeholder="可填中文，例如：代码助手（留空则显示名称字段）" />
-                  </el-form-item>
-
-                  <el-form-item label="模型">
-                    <el-select v-model="form.default_model" filterable style="width:100%" placeholder="选择默认模型">
-                      <el-option
-                        v-for="model in toolsStore.models"
-                        :key="model.id"
-                        :label="`${model.id} (${model.provider})`"
-                        :value="model.id"
-                      />
-                    </el-select>
-                  </el-form-item>
-
-                  <el-form-item label="Temperature">
-                    <div class="llm-param-item">
-                      <el-checkbox
-                        :model-value="form.llm_params?.temperature !== undefined"
-                        @update:model-value="toggleTemperature"
-                      >为此预设固定温度值</el-checkbox>
-                      <div v-if="form.llm_params?.temperature !== undefined" class="temperature-preset-control">
-                        <el-slider
-                          :model-value="form.llm_params.temperature"
-                          :min="0"
-                          :max="2"
-                          :step="0.05"
-                          class="temp-slider"
-                          @update:model-value="setTemperature"
-                        />
-                        <el-input-number
-                          :model-value="form.llm_params.temperature"
-                          :min="0"
-                          :max="2"
-                          :step="0.05"
-                          :precision="2"
-                          size="small"
-                          controls-position="right"
-                          style="width: 80px"
-                          @update:model-value="setTemperature"
-                        />
+                  <el-form-item class="group-field">
+                    <div class="group-card">
+                      <div class="group-card-header">
+                        <span class="group-card-title">基本信息</span>
+                        <span class="group-card-desc">Agent 的标识与默认模型</span>
                       </div>
-                      <span v-else class="param-hint">留空时运行时默认 0.7</span>
+                      <div class="group-card-body">
+                        <div class="field-row">
+                          <div class="field-col">
+                            <label class="mini-label">名称 <span class="mini-label-req">*</span></label>
+                            <el-input ref="nameInputRef" v-model="form.name" placeholder="例如：code-assistant、researcher" />
+                            <div class="form-hint">只能使用英文字母、数字、连字符(-)和下划线(_)，且必须以字母开头</div>
+                          </div>
+                          <div class="field-col">
+                            <label class="mini-label">显示名称</label>
+                            <el-input v-model="form.display_name" placeholder="可填中文，例如：代码助手（留空则显示名称字段）" />
+                            <div class="form-hint">留空时回退使用名称</div>
+                          </div>
+                        </div>
+                        <div class="field-row">
+                          <div class="field-col">
+                            <label class="mini-label">模型</label>
+                            <el-select v-model="form.default_model" filterable placeholder="选择默认模型">
+                              <el-option
+                                v-for="model in toolsStore.models"
+                                :key="model.model_id"
+                                :label="`${model.model_id} (${model.provider})`"
+                                :value="model.model_id"
+                              />
+                            </el-select>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </el-form-item>
 
-                  <el-form-item label="思考级别（reasoning_effort）">
-                    <div class="llm-param-item">
-                      <el-checkbox
-                        :model-value="form.llm_params?.reasoning_effort !== undefined"
-                        @update:model-value="toggleReasoningEffort"
-                      >为此预设固定思考级别</el-checkbox>
-                      <el-select
-                        v-if="form.llm_params?.reasoning_effort !== undefined"
-                        :model-value="form.llm_params.reasoning_effort"
-                        size="small"
-                        style="width: 140px; margin-top: 6px"
-                        @update:model-value="setReasoningEffort"
-                      >
-                        <el-option v-for="effort in REASONING_EFFORTS" :key="effort" :label="effort" :value="effort" />
-                      </el-select>
-                      <span v-else class="param-hint">留空时由模型决定</span>
+                  <el-form-item class="group-field">
+                    <div class="group-card">
+                      <div class="group-card-header">
+                        <span class="group-card-title">模型参数</span>
+                        <span class="group-card-desc">留空时使用运行时默认值</span>
+                      </div>
+                      <div class="group-card-body">
+                        <div class="field-row">
+                          <div class="field-col">
+                            <label class="mini-label">Temperature</label>
+                            <el-checkbox
+                              :model-value="form.llm_params?.temperature !== undefined"
+                              @update:model-value="toggleTemperature"
+                            >为此预设固定温度值</el-checkbox>
+                            <div v-if="form.llm_params?.temperature !== undefined" class="temperature-preset-control">
+                              <el-slider
+                                :model-value="form.llm_params.temperature"
+                                :min="0"
+                                :max="2"
+                                :step="0.05"
+                                class="temp-slider"
+                                @update:model-value="setTemperature"
+                              />
+                              <el-input-number
+                                :model-value="form.llm_params.temperature"
+                                :min="0"
+                                :max="2"
+                                :step="0.05"
+                                :precision="2"
+                                size="small"
+                                controls-position="right"
+                                style="width: 80px"
+                                @update:model-value="setTemperature"
+                              />
+                            </div>
+                            <span v-else class="param-hint">运行时默认 0.7</span>
+                          </div>
+                          <div class="field-col">
+                            <label class="mini-label">思考级别（reasoning_effort）</label>
+                            <el-checkbox
+                              :model-value="form.llm_params?.reasoning_effort !== undefined"
+                              @update:model-value="toggleReasoningEffort"
+                            >为此预设固定思考级别</el-checkbox>
+                            <el-select
+                              v-if="form.llm_params?.reasoning_effort !== undefined"
+                              :model-value="form.llm_params.reasoning_effort"
+                              placeholder="选择思考级别"
+                              @update:model-value="setReasoningEffort"
+                            >
+                              <el-option v-for="effort in REASONING_EFFORTS" :key="effort" :label="effort" :value="effort" />
+                            </el-select>
+                            <span v-else class="param-hint">由模型决定</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </el-form-item>
 
@@ -406,215 +430,327 @@
                     </div>
                   </el-form-item>
 
-                  <el-form-item label="允许的工具组">
-                    <div class="tool-group-select">
-                      <el-radio-group v-model="toolGroupMode" size="small">
-                        <el-radio-button value="all">全部</el-radio-button>
-                        <el-radio-button value="none">无</el-radio-button>
-                        <el-radio-button value="custom">自定义</el-radio-button>
-                      </el-radio-group>
-                      <div v-if="toolGroupMode === 'custom'" class="custom-groups">
+                  <el-form-item label="允许的工具组" class="perm-field">
+                    <div class="perm-card">
+                      <div class="perm-toolbar">
+                        <span class="perm-toolbar-hint">按功能分组选择该 Agent 可用的内置工具</span>
+                        <el-radio-group v-model="toolGroupMode" size="small">
+                          <el-radio-button value="all">全部</el-radio-button>
+                          <el-radio-button value="none">无</el-radio-button>
+                          <el-radio-button value="custom">自定义</el-radio-button>
+                        </el-radio-group>
+                      </div>
+                      <div v-if="toolGroupMode === 'all'" class="skills-scope-status is-all">
+                        <span class="skills-status-dot"></span>
+                        <span>已允许全部 {{ toolsStore.groups.length }} 个工具组</span>
+                      </div>
+                      <div v-else-if="toolGroupMode === 'none'" class="skills-scope-status is-none">
+                        <span class="skills-status-dot"></span>
+                        <span>已禁用全部工具组</span>
+                      </div>
+                      <div v-else class="perm-list">
                         <el-checkbox-group v-model="selectedGroups">
                           <el-checkbox
                             v-for="group in toolsStore.groups"
                             :key="group.id"
                             :value="group.id"
+                            class="perm-item"
                           >
-                            {{ group.id }}{{ group.description ? `（${group.description}）` : '' }} ({{ group.tools.length }} tools)
+                            <div class="perm-item-main">
+                              <span class="perm-item-name" :title="group.id">{{ group.id }}</span>
+                              <span class="perm-item-count">{{ group.tools.length }} tools</span>
+                            </div>
+                            <div v-if="group.description" class="perm-item-desc" :title="group.description">{{ group.description }}</div>
                           </el-checkbox>
+                          <div v-if="toolsStore.groups.length === 0" class="skill-empty-tip">暂无可用的工具组</div>
                         </el-checkbox-group>
                       </div>
                     </div>
                   </el-form-item>
 
-                  <el-form-item label="允许的 MCP 服务器">
-                    <div class="tool-group-select">
-                      <el-radio-group v-model="mcpMode" size="small">
-                        <el-radio-button value="all">全部</el-radio-button>
-                        <el-radio-button value="none">无</el-radio-button>
-                        <el-radio-button value="custom">自定义</el-radio-button>
-                      </el-radio-group>
-                      <div v-if="mcpMode === 'custom'" class="custom-groups">
+                  <el-form-item label="允许的 MCP 服务器" class="perm-field">
+                    <div class="perm-card">
+                      <div class="perm-toolbar">
+                        <span class="perm-toolbar-hint">选择允许该 Agent 调用的 MCP 服务器及其工具</span>
+                        <el-radio-group v-model="mcpMode" size="small">
+                          <el-radio-button value="all">全部</el-radio-button>
+                          <el-radio-button value="none">无</el-radio-button>
+                          <el-radio-button value="custom">自定义</el-radio-button>
+                        </el-radio-group>
+                      </div>
+                      <div v-if="mcpMode === 'all'" class="skills-scope-status is-all">
+                        <span class="skills-status-dot"></span>
+                        <span>已允许全部 {{ toolsStore.mcpServers.length }} 个 MCP 服务器</span>
+                      </div>
+                      <div v-else-if="mcpMode === 'none'" class="skills-scope-status is-none">
+                        <span class="skills-status-dot"></span>
+                        <span>已禁用全部 MCP 服务器</span>
+                      </div>
+                      <div v-else class="perm-list">
                         <el-checkbox-group v-model="selectedMcpServers">
                           <el-checkbox
                             v-for="server in toolsStore.mcpServers"
                             :key="server.name"
                             :value="server.name"
+                            class="perm-item"
                           >
-                            {{ server.name }}
-                            <el-tag size="small" :type="server.status === 'connected' ? 'success' : 'info'" style="margin-left:4px">
-                              {{ server.tools?.length || 0 }} tools
-                            </el-tag>
+                            <div class="perm-item-main">
+                              <span class="mcp-dot" :class="server.status === 'connected' ? 'is-on' : 'is-off'" :title="server.status === 'connected' ? '已连接' : '未连接'"></span>
+                              <span class="perm-item-name" :title="server.name">{{ server.name }}</span>
+                              <span class="perm-item-count">{{ server.tools?.length || 0 }} tools</span>
+                            </div>
                           </el-checkbox>
+                          <div v-if="toolsStore.mcpServers.length === 0" class="skill-empty-tip">暂无已连接的 MCP 服务器</div>
                         </el-checkbox-group>
                       </div>
                     </div>
                   </el-form-item>
 
-                  <el-form-item label="此agent自定义额外 Skills 目录">
-                    <div class="extra-dirs-list">
-                      <div
-                        v-for="(dir, idx) in (form.extra_skill_dirs || [])"
-                        :key="idx"
-                        class="extra-dir-row"
+                  <el-form-item label="Skills" class="skills-field">
+                    <div class="skills-manager">
+                      <div class="skills-manager-intro">
+                        Skills 是该 Agent 可调用的技能包，按来源分为三层：全局共享、项目内置、本 Agent 自定义额外 Skills目录。
+                      </div>
+
+                      <!-- 1) 全局 Skills -->
+                      <section class="skills-scope" :class="{ 'is-mode-all': globalSkillsMode === 'all', 'is-mode-none': globalSkillsMode === 'none' }">
+                        <header class="skills-scope-header">
+                          <div class="skills-scope-icon">🌐</div>
+                          <div class="skills-scope-meta">
+                            <div class="skills-scope-title">
+                              <span>全局 Skills</span>
+                              <span class="skills-scope-total">{{ dialogGlobalSkills.length }}</span>
+                            </div>
+                            <div class="skills-scope-desc">来自全局配置的 Skills 目录，所有 Agent 共享</div>
+                          </div>
+                          <div class="skills-scope-mode">
+                            <el-radio-group v-model="globalSkillsMode" size="small">
+                              <el-radio-button value="all">全部</el-radio-button>
+                              <el-radio-button value="none">无</el-radio-button>
+                              <el-radio-button value="custom">自定义</el-radio-button>
+                            </el-radio-group>
+                          </div>
+                        </header>
+                        <div class="skills-scope-body">
+                          <div v-if="globalSkillsMode === 'all'" class="skills-scope-status is-all">
+                            <span class="skills-status-dot"></span>
+                            <span>已允许全部 {{ dialogGlobalSkills.length }} 个全局 Skills</span>
+                          </div>
+                          <div v-else-if="globalSkillsMode === 'none'" class="skills-scope-status is-none">
+                            <span class="skills-status-dot"></span>
+                            <span>已禁用全部全局 Skills</span>
+                          </div>
+                          <div v-else v-loading="dialogSkillsLoading" class="skills-custom-area">
+                            <el-checkbox-group v-model="selectedGlobalSkills">
+                              <div
+                                v-for="grp in globalSkillGroups"
+                                :key="grp.key"
+                                class="skill-group"
+                              >
+                                <div
+                                  class="skill-group-header"
+                                  :title="grp.path || ''"
+                                  @click="toggleSkillGroup(grp.key)"
+                                >
+                                  <span class="skill-group-caret" :class="{ 'is-open': isSkillGroupOpen(grp.key) }">▸</span>
+                                  <span class="skill-group-icon">📁</span>
+                                  <span class="skill-group-name" :title="grp.path || grp.folder">{{ grp.folder }}</span>
+                                  <span class="skill-group-count">{{ grp.skills.length }}</span>
+                                </div>
+                                <el-collapse-transition>
+                                  <div v-show="isSkillGroupOpen(grp.key)" class="skill-group-body">
+                                    <el-checkbox
+                                      v-for="skill in grp.skills"
+                                      :key="skill.name"
+                                      :value="skill.name"
+                                      class="skill-checkbox"
+                                    >
+                                      <div class="skill-item-main">
+                                        <span class="skill-item-name" :title="skill.name">{{ skill.name }}</span>
+                                      </div>
+                                      <div v-if="skill.description" class="skill-item-desc" :title="skill.description">{{ skill.description }}</div>
+                                    </el-checkbox>
+                                  </div>
+                                </el-collapse-transition>
+                              </div>
+                              <div v-if="dialogGlobalSkills.length === 0" class="skill-empty-tip">暂无全局 Skills</div>
+                            </el-checkbox-group>
+                          </div>
+                        </div>
+                      </section>
+
+                      <!-- 2) 项目 Skills -->
+                      <section
+                        v-if="form.project_mode && form.project_root.trim()"
+                        class="skills-scope is-project"
+                        :class="{ 'is-mode-all': projectSkillsMode === 'all', 'is-mode-none': projectSkillsMode === 'none' }"
                       >
-                        <el-input
-                          :model-value="dir"
-                          placeholder="如 D:\\codes\\my-skills（必须是绝对路径）"
-                          clearable
-                          @update:model-value="(val: string) => updateExtraSkillDir(idx, val)"
-                          @clear="removeExtraSkillDir(idx)"
-                        />
-                        <el-button
-                          :icon="Delete"
-                          circle
-                          plain
-                          type="danger"
-                          size="small"
-                          class="extra-dir-delete-btn"
-                          @click="removeExtraSkillDir(idx)"
-                        />
-                      </div>
-                      <el-button
-                        :icon="Plus"
-                        plain
-                        size="small"
-                        class="extra-dirs-add-btn"
-                        @click="addExtraSkillDir"
-                      >添加 Skills 目录</el-button>
-                    </div>
-                    <div class="form-hint">为该智能体额外加载指定目录下的 Skills（绝对路径）</div>
-                  </el-form-item>
-
-                  <el-form-item label="允许的全局 Skills">
-                    <div class="tool-group-select">
-                      <el-radio-group v-model="globalSkillsMode" size="small">
-                        <el-radio-button value="all">全部</el-radio-button>
-                        <el-radio-button value="none">无</el-radio-button>
-                        <el-radio-button value="custom">自定义</el-radio-button>
-                      </el-radio-group>
-                      <div v-if="globalSkillsMode === 'custom'" v-loading="dialogSkillsLoading" class="custom-groups">
-                        <el-checkbox-group v-model="selectedGlobalSkills">
-                          <div
-                            v-for="grp in globalSkillGroups"
-                            :key="grp.key"
-                            class="skill-group"
-                          >
-                            <div
-                              class="skill-group-header"
-                              :title="grp.path || ''"
-                              @click="toggleSkillGroup(grp.key)"
-                            >
-                              <span class="skill-group-caret" :class="{ 'is-open': isSkillGroupOpen(grp.key) }">▸</span>
-                              <span class="skill-group-icon">📁</span>
-                              <span class="skill-group-name" :title="grp.path || grp.folder">{{ grp.folder }}</span>
-                              <span class="skill-group-count">{{ grp.skills.length }}</span>
+                        <header class="skills-scope-header">
+                          <div class="skills-scope-icon">📦</div>
+                          <div class="skills-scope-meta">
+                            <div class="skills-scope-title">
+                              <span>项目 Skills</span>
+                              <span class="skills-scope-total">{{ dialogProjectSkills.length }}</span>
                             </div>
-                            <div v-show="isSkillGroupOpen(grp.key)" class="skill-group-body">
-                              <el-checkbox
-                                v-for="skill in grp.skills"
-                                :key="skill.name"
-                                :value="skill.name"
-                                class="skill-checkbox"
-                              >
-                                <div class="skill-item-main">
-                                  <span class="skill-item-name" :title="skill.name">{{ skill.name }}</span>
-                                </div>
-                                <div v-if="skill.description" class="skill-item-desc" :title="skill.description">{{ skill.description }}</div>
-                              </el-checkbox>
+                            <div class="skills-scope-desc" :title="`${form.project_root}/.agents/skills/`">
+                              默认读取项目根目录下的 .agents/skills/ 文件夹
                             </div>
                           </div>
-                          <div v-if="dialogGlobalSkills.length === 0" class="skill-empty-tip">暂无全局 Skills</div>
-                        </el-checkbox-group>
-                      </div>
-                    </div>
-                  </el-form-item>
-
-                  <el-form-item v-if="dialogExtraSkills.length > 0" label="此agent自定义额外目录 Skills">
-                    <div class="tool-group-select">
-                      <el-radio-group v-model="extraSkillsMode" size="small">
-                        <el-radio-button value="all">全部</el-radio-button>
-                        <el-radio-button value="none">无</el-radio-button>
-                        <el-radio-button value="custom">自定义</el-radio-button>
-                      </el-radio-group>
-                      <div v-if="extraSkillsMode === 'custom'" v-loading="dialogSkillsLoading" class="custom-groups">
-                        <el-checkbox-group v-model="selectedExtraSkills">
-                          <div
-                            v-for="grp in extraSkillGroups"
-                            :key="grp.key"
-                            class="skill-group"
-                          >
-                            <div
-                              class="skill-group-header"
-                              :title="grp.path || ''"
-                              @click="toggleSkillGroup(grp.key)"
-                            >
-                              <span class="skill-group-caret" :class="{ 'is-open': isSkillGroupOpen(grp.key) }">▸</span>
-                              <span class="skill-group-icon">📁</span>
-                              <span class="skill-group-name" :title="grp.path || grp.folder">{{ grp.folder }}</span>
-                              <span class="skill-group-count">{{ grp.skills.length }}</span>
-                            </div>
-                            <div v-show="isSkillGroupOpen(grp.key)" class="skill-group-body">
-                              <el-checkbox
-                                v-for="skill in grp.skills"
-                                :key="skill.name"
-                                :value="skill.name"
-                                class="skill-checkbox"
-                              >
-                                <div class="skill-item-main">
-                                  <span class="skill-item-name" :title="skill.name">{{ skill.name }}</span>
-                                </div>
-                                <div v-if="skill.description" class="skill-item-desc" :title="skill.description">{{ skill.description }}</div>
-                              </el-checkbox>
-                            </div>
+                          <div class="skills-scope-mode">
+                            <el-radio-group v-model="projectSkillsMode" size="small">
+                              <el-radio-button value="all">全部</el-radio-button>
+                              <el-radio-button value="none">无</el-radio-button>
+                              <el-radio-button value="custom">自定义</el-radio-button>
+                            </el-radio-group>
                           </div>
-                          <div v-if="dialogExtraSkills.length === 0" class="skill-empty-tip">暂无此agent自定义额外目录 Skills</div>
-                        </el-checkbox-group>
-                      </div>
-                    </div>
-                  </el-form-item>
-
-                  <el-form-item v-if="form.project_mode && dialogProjectSkills.length > 0" label="允许的项目 Skills">
-                    <div class="form-hint" style="margin-bottom: 6px;">{{ form.project_root }}/.agents/skills/</div>
-                    <div class="tool-group-select">
-                      <el-radio-group v-model="projectSkillsMode" size="small">
-                        <el-radio-button value="all">全部</el-radio-button>
-                        <el-radio-button value="none">无</el-radio-button>
-                        <el-radio-button value="custom">自定义</el-radio-button>
-                      </el-radio-group>
-                      <div v-if="projectSkillsMode === 'custom'" v-loading="dialogSkillsLoading" class="custom-groups">
-                        <el-checkbox-group v-model="selectedProjectSkills">
-                          <div
-                            v-for="grp in projectSkillGroups"
-                            :key="grp.key"
-                            class="skill-group"
-                          >
-                            <div
-                              class="skill-group-header"
-                              :title="grp.path || ''"
-                              @click="toggleSkillGroup(grp.key)"
-                            >
-                              <span class="skill-group-caret" :class="{ 'is-open': isSkillGroupOpen(grp.key) }">▸</span>
-                              <span class="skill-group-icon">📁</span>
-                              <span class="skill-group-name" :title="grp.path || grp.folder">{{ grp.folder }}</span>
-                              <span class="skill-group-count">{{ grp.skills.length }}</span>
-                            </div>
-                            <div v-show="isSkillGroupOpen(grp.key)" class="skill-group-body">
-                              <el-checkbox
-                                v-for="skill in grp.skills"
-                                :key="skill.name"
-                                :value="skill.name"
-                                class="skill-checkbox"
-                              >
-                                <div class="skill-item-main">
-                                  <span class="skill-item-name" :title="skill.name">{{ skill.name }}</span>
-                                </div>
-                                <div v-if="skill.description" class="skill-item-desc" :title="skill.description">{{ skill.description }}</div>
-                              </el-checkbox>
-                            </div>
+                        </header>
+                        <div class="skills-scope-body">
+                          <div v-if="projectSkillsMode === 'all'" class="skills-scope-status is-all">
+                            <span class="skills-status-dot"></span>
+                            <span>已允许全部 {{ dialogProjectSkills.length }} 个项目 Skills</span>
                           </div>
-                        </el-checkbox-group>
-                      </div>
+                          <div v-else-if="projectSkillsMode === 'none'" class="skills-scope-status is-none">
+                            <span class="skills-status-dot"></span>
+                            <span>已禁用全部项目 Skills</span>
+                          </div>
+                          <div v-else v-loading="dialogSkillsLoading" class="skills-custom-area">
+                            <el-checkbox-group v-model="selectedProjectSkills">
+                              <div
+                                v-for="grp in projectSkillGroups"
+                                :key="grp.key"
+                                class="skill-group"
+                              >
+                                <div
+                                  class="skill-group-header"
+                                  :title="grp.path || ''"
+                                  @click="toggleSkillGroup(grp.key)"
+                                >
+                                  <span class="skill-group-caret" :class="{ 'is-open': isSkillGroupOpen(grp.key) }">▸</span>
+                                  <span class="skill-group-icon">📁</span>
+                                  <span class="skill-group-name" :title="grp.path || grp.folder">{{ grp.folder }}</span>
+                                  <span class="skill-group-count">{{ grp.skills.length }}</span>
+                                </div>
+                                <el-collapse-transition>
+                                  <div v-show="isSkillGroupOpen(grp.key)" class="skill-group-body">
+                                    <el-checkbox
+                                      v-for="skill in grp.skills"
+                                      :key="skill.name"
+                                      :value="skill.name"
+                                      class="skill-checkbox"
+                                    >
+                                      <div class="skill-item-main">
+                                        <span class="skill-item-name" :title="skill.name">{{ skill.name }}</span>
+                                      </div>
+                                      <div v-if="skill.description" class="skill-item-desc" :title="skill.description">{{ skill.description }}</div>
+                                    </el-checkbox>
+                                  </div>
+                                </el-collapse-transition>
+                              </div>
+                              <div v-if="dialogProjectSkills.length === 0" class="skill-empty-tip">项目目录下暂无 Skills</div>
+                            </el-checkbox-group>
+                          </div>
+                        </div>
+                      </section>
+
+                      <!-- 3) 此agent自定义额外 Skills 目录（目录管理 + 技能勾选） -->
+                      <section class="skills-scope is-extra" :class="{ 'is-mode-all': extraSkillsMode === 'all', 'is-mode-none': extraSkillsMode === 'none' }">
+                        <header class="skills-scope-header">
+                          <div class="skills-scope-icon">📂</div>
+                          <div class="skills-scope-meta">
+                            <div class="skills-scope-title">
+                              <span>此agent自定义额外 Skills</span>
+                              <span class="skills-scope-total">{{ dialogExtraSkills.length }}</span>
+                            </div>
+                            <div class="skills-scope-desc">为本 Agent 挂载专属目录下的 Skills（绝对路径），仅本 Agent 可用</div>
+                          </div>
+                          <div class="skills-scope-mode">
+                            <el-radio-group v-model="extraSkillsMode" size="small">
+                              <el-radio-button value="all">全部</el-radio-button>
+                              <el-radio-button value="none">无</el-radio-button>
+                              <el-radio-button value="custom">自定义</el-radio-button>
+                            </el-radio-group>
+                          </div>
+                        </header>
+                        <div class="skills-scope-body">
+                          <div class="extra-dirs-list">
+                            <div
+                              v-for="(dir, idx) in (form.extra_skill_dirs || [])"
+                              :key="idx"
+                              class="extra-dir-row"
+                            >
+                              <el-input
+                                :model-value="dir"
+                                placeholder="如 D:\\codes\\my-skills（必须是绝对路径）"
+                                clearable
+                                @update:model-value="(val: string) => updateExtraSkillDir(idx, val)"
+                                @clear="removeExtraSkillDir(idx)"
+                              />
+                              <el-button
+                                :icon="Delete"
+                                circle
+                                plain
+                                type="danger"
+                                size="small"
+                                class="extra-dir-delete-btn"
+                                @click="removeExtraSkillDir(idx)"
+                              />
+                            </div>
+                            <el-button
+                              :icon="Plus"
+                              plain
+                              size="small"
+                              class="extra-dirs-add-btn"
+                              @click="addExtraSkillDir"
+                            >添加 Skills 目录</el-button>
+                          </div>
+                          <div class="form-hint">为该智能体额外加载指定目录下的 Skills（绝对路径）</div>
+
+                          <template v-if="extraSkillsMode === 'custom'">
+                            <div class="skills-extra-divider"></div>
+                            <div v-loading="dialogSkillsLoading" class="skills-custom-area">
+                              <el-checkbox-group v-model="selectedExtraSkills">
+                                <div
+                                  v-for="grp in extraSkillGroups"
+                                  :key="grp.key"
+                                  class="skill-group"
+                                >
+                                  <div
+                                    class="skill-group-header"
+                                    :title="grp.path || ''"
+                                    @click="toggleSkillGroup(grp.key)"
+                                  >
+                                    <span class="skill-group-caret" :class="{ 'is-open': isSkillGroupOpen(grp.key) }">▸</span>
+                                    <span class="skill-group-icon">📁</span>
+                                    <span class="skill-group-name" :title="grp.path || grp.folder">{{ grp.folder }}</span>
+                                    <span class="skill-group-count">{{ grp.skills.length }}</span>
+                                  </div>
+                                  <el-collapse-transition>
+                                    <div v-show="isSkillGroupOpen(grp.key)" class="skill-group-body">
+                                      <el-checkbox
+                                        v-for="skill in grp.skills"
+                                        :key="skill.name"
+                                        :value="skill.name"
+                                        class="skill-checkbox"
+                                      >
+                                        <div class="skill-item-main">
+                                          <span class="skill-item-name" :title="skill.name">{{ skill.name }}</span>
+                                        </div>
+                                        <div v-if="skill.description" class="skill-item-desc" :title="skill.description">{{ skill.description }}</div>
+                                      </el-checkbox>
+                                    </div>
+                                  </el-collapse-transition>
+                                </div>
+                                <div v-if="dialogExtraSkills.length === 0" class="skill-empty-tip">暂无此agent自定义额外目录 Skills</div>
+                              </el-checkbox-group>
+                            </div>
+                          </template>
+                          <div v-else class="skills-scope-status" :class="extraSkillsMode === 'all' ? 'is-all' : 'is-none'">
+                            <span class="skills-status-dot"></span>
+                            <span v-if="extraSkillsMode === 'all'">已允许全部 {{ dialogExtraSkills.length }} 个额外目录 Skills</span>
+                            <span v-else>已禁用全部额外目录 Skills</span>
+                          </div>
+                        </div>
+                      </section>
                     </div>
                   </el-form-item>
 
@@ -756,8 +892,8 @@
 
           <!-- Footer actions -->
           <div class="form-footer">
-            <el-button type="info" @click="visible = false">关闭</el-button>
             <div class="form-footer-right">
+              <el-button @click="visible = false">关闭</el-button>
               <el-button v-if="!isReadOnly && canCopy" type="success" @click="handleCopy">克隆</el-button>
               <el-button v-if="!isReadOnly && canDelete" type="danger" @click="handleDelete">删除</el-button>
               <el-button v-if="!isReadOnly && !isCodeAgent" type="primary" :loading="saving" @click="handleSave">
@@ -818,7 +954,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElCollapseTransition } from 'element-plus'
 import type { InputInstance } from 'element-plus'
 import { QuestionFilled, Folder, Plus, Delete } from '@element-plus/icons-vue'
 import { useMediaQuery } from '@vueuse/core'
@@ -2046,7 +2182,7 @@ defineExpose({ open })
 .form-footer {
   flex-shrink: 0;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   padding: 10px 16px;
   border-top: 1px solid var(--el-border-color-lighter);
@@ -2244,13 +2380,6 @@ defineExpose({ open })
 }
 
 /* LLM params */
-.llm-param-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-}
-
 .temperature-preset-control {
   display: flex;
   align-items: center;
@@ -2268,27 +2397,196 @@ defineExpose({ open })
   margin-left: 2px;
 }
 
-/* Tool groups / MCP / Skills */
-.tool-group-select {
+/* ===== 工具组 / MCP 选择卡片（与 Skills 面板同一设计语言）===== */
+.perm-card {
+  width: 100%;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-bg-color);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.perm-card:hover {
+  border-color: color-mix(in srgb, var(--el-color-primary) 30%, var(--el-border-color-lighter));
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--el-color-primary) 10%, rgba(0, 0, 0, 0.05));
+}
+
+.perm-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--el-color-primary) 9%, transparent) 0%, transparent 65%);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.perm-toolbar-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--el-text-color-secondary);
+}
+
+.perm-list { padding: 10px 12px 12px; }
+
+.perm-item {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 2px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.perm-item:hover {
+  background: color-mix(in srgb, var(--el-color-primary) 6%, transparent);
+}
+
+.perm-item.is-checked {
+  background: color-mix(in srgb, var(--el-color-primary) 9%, transparent);
+}
+
+.perm-item :deep(.el-checkbox__label) {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden;
+  padding-left: 8px;
+}
+
+.perm-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0; /* flex 子项：允许缩小，让 ellipsis 生效 */
+}
+
+.perm-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.perm-item-count {
+  flex-shrink: 0;
+  padding: 0 7px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 999px;
+}
+
+.perm-item-desc {
+  margin: 2px 0 0 22px; /* 与 checkbox 框后的文字左侧对齐 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-text-color-regular);
+  opacity: 0.75;
+}
+
+.mcp-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--el-text-color-placeholder);
+}
+
+.mcp-dot.is-on {
+  background: var(--el-color-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-success) 18%, transparent);
+}
+
+/* ===== 分组卡片（基本信息 / 模型参数）：卡内多字段布局 ===== */
+.group-card {
   width: 100%;
 }
 
-.custom-groups {
-  margin-top: 8px;
-  padding: 10px;
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-}
-
-.custom-groups .el-checkbox {
+.group-card-header {
   display: flex;
-  align-items: flex-start;
-  margin-bottom: 8px;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
-.custom-groups .el-checkbox .el-checkbox__input {
-  margin-top: 2px;
+.group-card-title {
+  position: relative;
+  padding-left: 11px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.4px;
+  color: var(--el-text-color-primary);
+}
+
+.group-card-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--el-color-primary);
+}
+
+.group-card-desc {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
+.group-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field-row {
+  display: flex;
+  gap: 14px;
+}
+
+.field-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.mini-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.mini-label-req {
+  color: var(--el-color-danger);
+}
+
+@media (max-width: 760px) {
+  .field-row {
+    flex-direction: column;
+    gap: 14px;
+  }
 }
 
 /* ===== Skill checkbox: 限宽 + 省略号 ===== */
@@ -2461,9 +2759,175 @@ defineExpose({ open })
 }
 
 .skill-empty-tip {
+  padding: 10px 12px;
   font-size: 12px;
   color: var(--el-text-color-placeholder);
-  padding: 4px 0;
+  text-align: center;
+  border: 1px dashed var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+
+/* ===== Skills 统一管理面板 ===== */
+/* 层次：Skills 表单项 → 来源卡片(skills-scope) → 目录分组(skill-group) → 技能(skill-checkbox) */
+.skills-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.skills-manager-intro {
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.skills-scope {
+  --scope-accent: var(--el-color-primary);
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 3px solid transparent;
+  border-radius: 10px;
+  background: var(--el-bg-color);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.skills-scope.is-project { --scope-accent: var(--el-color-success); }
+.skills-scope.is-extra { --scope-accent: var(--el-color-warning); }
+
+/* 模式状态通过左侧色条直观表达：全部=主题色，无=灰 */
+.skills-scope.is-mode-all { border-left-color: color-mix(in srgb, var(--scope-accent) 55%, transparent); }
+.skills-scope.is-mode-none { border-left-color: var(--el-border-color); }
+.skills-scope.is-mode-none .skills-scope-icon {
+  filter: grayscale(0.4);
+  opacity: 0.7;
+}
+
+.skills-scope:hover {
+  border-color: color-mix(in srgb, var(--scope-accent) 30%, var(--el-border-color-lighter));
+  border-left-color: var(--scope-accent);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--scope-accent) 12%, rgba(0, 0, 0, 0.05));
+}
+
+.skills-scope-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--scope-accent) 9%, transparent) 0%, transparent 65%);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.skills-scope-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  font-size: 16px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--scope-accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--scope-accent) 26%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 30%, transparent);
+}
+
+.skills-scope-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.skills-scope-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--el-text-color-primary);
+}
+
+.skills-scope-total {
+  flex-shrink: 0;
+  padding: 0 7px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--scope-accent);
+  background: color-mix(in srgb, var(--scope-accent) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--scope-accent) 24%, transparent);
+  border-radius: 999px;
+}
+
+.skills-scope-desc {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--el-text-color-secondary);
+}
+
+.skills-scope-mode { flex-shrink: 0; }
+
+.skills-scope-body { padding: 10px 12px 12px; }
+
+.skills-scope-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border: 1px dashed var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+
+.skills-status-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--el-text-color-placeholder);
+}
+
+.skills-scope-status.is-all .skills-status-dot {
+  background: var(--el-color-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-success) 18%, transparent);
+}
+
+.skills-custom-area { min-height: 24px; }
+
+.skills-extra-divider {
+  height: 1px;
+  margin: 12px 0 10px;
+  background: linear-gradient(90deg, var(--el-border-color-lighter) 0%, transparent 100%);
+}
+
+/* 技能行：悬浮/选中态按来源色着色（--scope-accent 从 scope 卡片继承） */
+.skill-group-body .skill-checkbox {
+  margin: 0 0 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.skill-group-body .skill-checkbox:hover {
+  background: color-mix(in srgb, var(--scope-accent, var(--el-color-primary)) 3%, transparent);
+}
+
+/* 选中态：左侧 3px 来源色竖条 + 极淡背景（避免整条色带感） */
+.skill-group-body .skill-checkbox.is-checked {
+  background: color-mix(in srgb, var(--scope-accent, var(--el-color-primary)) 4%, transparent);
+  box-shadow: inset 3px 0 0 0 var(--scope-accent, var(--el-color-primary));
+}
+
+.skill-group-body .skill-checkbox.is-checked .skill-item-name {
+  color: var(--scope-accent, var(--el-color-primary));
 }
 
 /* Code agent readonly */
@@ -2982,6 +3446,35 @@ defineExpose({ open })
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
+/* ===== 右上角关闭 X：增大热区 + 悬停红晕旋转反馈 ===== */
+.agent-manager-dialog .el-dialog__headerbtn {
+  top: 10px;
+  right: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  transition: background-color 0.15s ease;
+}
+
+.agent-manager-dialog .el-dialog__headerbtn .el-dialog__close {
+  font-size: 18px;
+  color: var(--el-text-color-secondary);
+  transition: color 0.15s ease, transform 0.2s ease;
+}
+
+.agent-manager-dialog .el-dialog__headerbtn:hover {
+  background: color-mix(in srgb, var(--el-color-danger) 12%, transparent);
+}
+
+.agent-manager-dialog .el-dialog__headerbtn:hover .el-dialog__close {
+  color: var(--el-color-danger);
+  transform: rotate(90deg);
+}
+
+html.dark .agent-manager-dialog .el-dialog__headerbtn:hover {
+  background: color-mix(in srgb, var(--el-color-danger) 18%, transparent);
+}
+
 .agent-manager-dialog .el-form-item {
   margin-bottom: 14px;
   padding: 12px 14px;
@@ -2996,43 +3489,37 @@ defineExpose({ open })
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
+/* B：卡片标题式标签 —— 紧凑小标题 + 左侧主题色竖条（替代大胶囊） */
 .agent-manager-dialog .el-form-item--label-top .el-form-item__label {
   display: inline-flex !important;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   width: auto !important;
   height: auto !important;
-  padding: 4px 10px !important;
-  margin-bottom: 8px !important;
-  border-radius: 999px;
-  background: var(--el-fill-color);
-  border: 1px solid var(--el-border-color-light);
-  font-size: 12px;
+  position: relative;
+  padding: 0 0 8px 11px !important;
+  margin-bottom: 0 !important;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  font-size: 13px;
   font-weight: 700;
   color: var(--el-text-color-primary);
   line-height: 1.3 !important;
   letter-spacing: 0.4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: none;
 }
 
 .agent-manager-dialog .el-form-item--label-top .el-form-item__label::before {
   content: '';
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--el-color-info);
-}
-
-.agent-manager-dialog .el-form-item--label-top.is-required .el-form-item__label::after {
-  content: '*';
-  margin-left: 2px;
-  color: var(--el-color-danger);
-  font-size: 12px;
-}
-
-.agent-manager-dialog .el-form-item--label-top .el-form-item__label .el-form-item__asterisk {
-  display: none;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--el-color-primary);
 }
 
 .agent-manager-dialog .project-mode-field {
@@ -3043,16 +3530,6 @@ defineExpose({ open })
 .agent-manager-dialog .project-mode-field--toggle {
   border-left-width: 4px !important;
   border-left-color: var(--el-color-primary) !important;
-}
-
-.agent-manager-dialog .project-mode-field .el-form-item__label {
-  border-color: var(--el-color-primary-light-7) !important;
-  background: var(--el-color-primary-light-9) !important;
-  color: var(--el-color-primary) !important;
-}
-
-.agent-manager-dialog .project-mode-field .el-form-item__label::before {
-  background: var(--el-color-primary) !important;
 }
 
 @media (max-width: 760px) {
@@ -3098,5 +3575,98 @@ html.dark .agent-manager-dialog .skill-group-count {
   color: #1e3a5f !important;
   background: #ffffff !important;
   border-color: #ffffff !important;
+}
+
+/* ===== Skills 统一管理面板：form-item 级强调 ===== */
+.agent-manager-dialog .skills-field {
+  border-color: color-mix(in srgb, var(--el-color-primary) 24%, var(--el-border-color-lighter)) !important;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--el-color-primary) 7%, var(--el-fill-color-extra-light)) 0%, var(--el-fill-color-extra-light) 58%) !important;
+}
+
+/* ===== Dark mode: Skills 统一管理面板 ===== */
+html.dark .agent-manager-dialog .skills-field {
+  border-color: color-mix(in srgb, var(--el-color-primary) 34%, var(--el-border-color)) !important;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--el-color-primary) 12%, var(--el-fill-color-extra-light)) 0%, var(--el-fill-color-extra-light) 60%) !important;
+}
+
+html.dark .agent-manager-dialog .skills-scope {
+  background: color-mix(in srgb, #ffffff 3%, var(--el-bg-color));
+  border-color: var(--el-border-color);
+}
+
+html.dark .agent-manager-dialog .skills-scope:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+html.dark .agent-manager-dialog .skills-scope-header {
+  border-bottom-color: var(--el-border-color-lighter);
+}
+
+html.dark .agent-manager-dialog .skills-scope-icon {
+  box-shadow: none;
+}
+
+html.dark .agent-manager-dialog .skills-scope-status {
+  background: color-mix(in srgb, #ffffff 4%, transparent);
+  border-color: var(--el-border-color);
+}
+
+html.dark .agent-manager-dialog .skill-group-body .skill-checkbox:hover {
+  background: color-mix(in srgb, var(--scope-accent, var(--el-color-primary)) 6%, transparent);
+}
+
+html.dark .agent-manager-dialog .skill-group-body .skill-checkbox.is-checked {
+  background: color-mix(in srgb, var(--scope-accent, var(--el-color-primary)) 7%, transparent);
+}
+
+/* ===== C：控件精修 —— 统一圆角 + focus 主题色光晕 ===== */
+.agent-manager-dialog .el-input__wrapper,
+.agent-manager-dialog .el-textarea__inner,
+.agent-manager-dialog .el-select__wrapper {
+  border-radius: 8px;
+}
+
+.agent-manager-dialog .el-input__wrapper.is-focus,
+.agent-manager-dialog .el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset,
+    0 0 0 3px color-mix(in srgb, var(--el-color-primary) 15%, transparent);
+}
+
+.agent-manager-dialog .el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset,
+    0 0 0 3px color-mix(in srgb, var(--el-color-primary) 15%, transparent);
+}
+
+/* ===== Dark mode: 工具组 / MCP 选择卡片 ===== */
+html.dark .agent-manager-dialog .perm-card {
+  background: color-mix(in srgb, #ffffff 3%, var(--el-bg-color));
+  border-color: var(--el-border-color);
+}
+
+html.dark .agent-manager-dialog .perm-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+html.dark .agent-manager-dialog .perm-item:hover {
+  background: color-mix(in srgb, var(--el-color-primary) 6%, transparent);
+}
+
+html.dark .agent-manager-dialog .perm-item-count {
+  background: color-mix(in srgb, #ffffff 6%, transparent);
+  border-color: var(--el-border-color);
+}
+
+/* Dark mode: 输入控件底色微抬升，与卡片底色拉开层次 */
+html.dark .agent-manager-dialog .el-input__wrapper,
+html.dark .agent-manager-dialog .el-textarea__inner,
+html.dark .agent-manager-dialog .el-select__wrapper {
+  background-color: color-mix(in srgb, #ffffff 4%, var(--el-bg-color));
+}
+
+html.dark .agent-manager-dialog .el-input__wrapper.is-focus,
+html.dark .agent-manager-dialog .el-select__wrapper.is-focused,
+html.dark .agent-manager-dialog .el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset,
+    0 0 0 3px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
 }
 </style>

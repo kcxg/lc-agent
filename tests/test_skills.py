@@ -88,7 +88,7 @@ async def app_with_skills(skills_dir, tmp_path):
             "openai": {
                 "base_url": "http://fake",
                 "api_key": "sk-fake",
-                "models": [{"id": "gpt-4"}],
+                "models": [{"model_id": "gpt-4", "raw_model_id": "gpt-4"}],
             }
         },
         "agent": {"default_model": "gpt-4", "system_prompt": "You are helpful."},

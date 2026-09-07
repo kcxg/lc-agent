@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class ModelConfig(BaseModel):
-    id: str
+    model_id: str       # 配置者自命名的全局唯一模型 id（标识/统计/显示都用它）
+    raw_model_id: str   # 渠道提供的原始模型名（定价兜底 + 统计归并用，不参与显示）
     context_limit: int = 8000  # maps to LangChain profile["max_input_tokens"]
     max_output_tokens: int = 65536
 
@@ -62,6 +63,15 @@ class AuthConfig(BaseModel):
     token_expire_days: int = 7
 
 
+class UsageStatsConfig(BaseModel):
+    """Token 用量统计开关（docs/tasks/token_stats.md §3.4）。
+
+    enabled=False 只关采集（recorder no-op）；表照建、已落库数据照常可查。
+    """
+
+    enabled: bool = True
+
+
 class AppConfig(BaseModel):
     """Application configuration schema."""
 
@@ -77,6 +87,7 @@ class AppConfig(BaseModel):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    usage_stats: UsageStatsConfig = Field(default_factory=UsageStatsConfig)
     session: dict = Field(default_factory=lambda: {"db_path": ""})
     ui: dict = Field(default_factory=dict)
     skills: list[str] = Field(default_factory=lambda: ["./skills"])

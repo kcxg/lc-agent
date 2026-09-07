@@ -115,9 +115,9 @@
           >
             <el-option
               v-for="model in toolsStore.models"
-              :key="model.id"
-              :label="model.id"
-              :value="model.id"
+              :key="model.model_id"
+              :label="model.model_id"
+              :value="model.model_id"
             />
           </el-select>
         </div>

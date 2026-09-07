@@ -277,7 +277,7 @@ def test_lc_agent_app_wires_mcp_state_changes_to_generation():
     from lc_agent.app import LcAgentApp
 
     config = {
-        "provider": {"openai": {"base_url": "http://fake", "api_key": "sk-fake", "models": [{"id": "gpt-4"}]}},
+        "provider": {"openai": {"base_url": "http://fake", "api_key": "sk-fake", "models": [{"model_id": "gpt-4", "raw_model_id": "gpt-4"}]}},
         "agent": {"default_model": "gpt-4", "system_prompt": "Test"},
         # Key must be `mcpServers`: that is what LcAgentApp reads, and a
         # misspelled key silently registers zero servers (no callback fires).

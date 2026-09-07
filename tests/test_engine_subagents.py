@@ -11,7 +11,7 @@ MINIMAL_CONFIG = {
         "test": {
             "base_url": "http://localhost:4000/v1",
             "api_key": "test",
-            "models": [{"id": "test-model", "context_limit": 8000}],
+            "models": [{"model_id": "test-model", "raw_model_id": "test-model", "context_limit": 8000}],
         }
     },
     "agent": {"default_model": "test-model", "max_subagent_depth": 2},

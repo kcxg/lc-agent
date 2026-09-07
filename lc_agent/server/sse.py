@@ -8,6 +8,7 @@ import asyncio
 import logging
 import time
 import traceback
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -24,6 +25,7 @@ from lc_agent.core.http_trace import (
 )
 from lc_agent.server import persistence, stream_utils
 from lc_agent.server.subagent_tracker import SubAgentRunTracker
+from lc_agent.server.usage_recorder import build_model_map, record_usage
 from lc_agent.utils.loggers import server_logger
 
 router = APIRouter(prefix="/api/threads", tags=["chat-sse"])
@@ -357,6 +359,8 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
         await lock.acquire()
         try:
             usage_rounds: list[dict] = []
+            usage_run_id = str(uuid.uuid4())
+            usage_model_map = build_model_map(engine)
             round_start_time = time.time()
             stream_start_time = time.time()
             content_parts: list[str] = []
@@ -421,7 +425,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
             model_info = engine._find_model(model_id) if model_id else None
             provider = model_info.provider if model_info else None
-            resolved_model = model_info.id if model_info else model_id
+            resolved_model = model_info.model_id if model_info else model_id
             trace_collector = HttpTraceCollector(provider=provider, model=resolved_model)
             trace_token = bind_http_trace_collector(trace_collector)
 
@@ -498,7 +502,11 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                         last_event_time = time.time()
 
                     prev_len = len(usage_rounds)
-                    stream_utils.accumulate_usage(event, usage_rounds)
+                    stream_utils.accumulate_usage(
+                        event, usage_rounds,
+                        default_model_id=model_id or "",
+                        model_map=usage_model_map,
+                    )
                     if len(usage_rounds) > prev_len:
                         usage_rounds[-1]["duration_ms"] = int((time.time() - round_start_time) * 1000)
                         round_start_time = time.time()
@@ -559,6 +567,14 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 done_payload["http_traces"] = http_traces
 
             await subagent_tracker.drain()
+            await record_usage(
+                _db_url, usage_rounds,
+                session_id=thread_id,
+                user_id=user.id if user else "",
+                agent_id=preset_id,
+                source="chat",
+                run_id=usage_run_id,
+            )
 
             if content_parts or tool_calls or usage_rounds or http_traces:
                 await persistence.save_ui_message(
@@ -579,7 +595,8 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
             if is_first:
                 asyncio.create_task(
-                    _generate_and_yield_title(thread_id, _extract_text_from_blocks(content), preset_id, model_id)
+                    _generate_and_yield_title(thread_id, _extract_text_from_blocks(content), preset_id, model_id,
+                                              user_id=user.id if user else "")
                 )
 
         except Exception as e:
@@ -588,6 +605,14 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="error"):
                     yield stream_utils.format_sse_event(evt_type, evt_data)
                 await subagent_tracker.drain()
+            await record_usage(
+                _db_url, usage_rounds,
+                session_id=thread_id,
+                user_id=user.id if user else "",
+                agent_id=preset_id,
+                source="chat",
+                run_id=usage_run_id,
+            )
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
             error_info["message"] = str(e)
@@ -638,6 +663,8 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             bind_session_for_file_tracking(thread_id)
 
             usage_rounds: list[dict] = []
+            usage_run_id = str(uuid.uuid4())
+            usage_model_map = build_model_map(engine)
             round_start_time = time.time()
             stream_start_time = time.time()
             content_parts: list[str] = []
@@ -697,7 +724,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
 
             model_info = engine._find_model(model_id) if model_id else None
             provider = model_info.provider if model_info else None
-            resolved_model = model_info.id if model_info else model_id
+            resolved_model = model_info.model_id if model_info else model_id
             trace_collector = HttpTraceCollector(
                 provider=provider, model=resolved_model, seq_offset=existing_trace_count,
             )
@@ -779,7 +806,11 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                         last_event_time = time.time()
 
                     prev_len = len(usage_rounds)
-                    stream_utils.accumulate_usage(event, usage_rounds)
+                    stream_utils.accumulate_usage(
+                        event, usage_rounds,
+                        default_model_id=model_id or "",
+                        model_map=usage_model_map,
+                    )
                     if len(usage_rounds) > prev_len:
                         usage_rounds[-1]["duration_ms"] = int((time.time() - round_start_time) * 1000)
                         round_start_time = time.time()
@@ -848,6 +879,14 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 done_payload["http_traces"] = http_traces
 
             await subagent_tracker.drain()
+            await record_usage(
+                _db_url, usage_rounds,
+                session_id=thread_id,
+                user_id=user.id if user else "",
+                agent_id=preset_id,
+                source="chat",
+                run_id=usage_run_id,
+            )
 
             new_content = "".join(content_parts)
             if new_content or tool_calls or usage_rounds or http_traces:
@@ -867,6 +906,14 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="error"):
                     yield stream_utils.format_sse_event(evt_type, evt_data)
                 await subagent_tracker.drain()
+            await record_usage(
+                _db_url, usage_rounds,
+                session_id=thread_id,
+                user_id=user.id if user else "",
+                agent_id=preset_id,
+                source="chat",
+                run_id=usage_run_id,
+            )
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
             error_info["message"] = str(e)
@@ -891,6 +938,7 @@ async def _generate_and_yield_title(
     first_message: str,
     preset_id: str,
     model_id: str,
+    user_id: str = "",
 ) -> None:
     """Background task: generate title and save to DB.
 
@@ -898,6 +946,21 @@ async def _generate_and_yield_title(
     the title update will be delivered on the next state query or page refresh.
     """
     engine = _get_engine()
-    title = await persistence.generate_title(engine, thread_id, first_message, preset_id, model_id)
+    title_usage: list[dict] = []
+    title = await persistence.generate_title(
+        engine, thread_id, first_message, preset_id, model_id, usage_sink=title_usage,
+    )
+    if title_usage:
+        try:
+            await record_usage(
+                _db_url, title_usage,
+                session_id=thread_id,
+                user_id=user_id,
+                agent_id=preset_id,
+                source="title",
+                run_id=str(uuid.uuid4()),
+            )
+        except Exception:
+            server_logger.exception("Failed to record title usage")
     if title:
         await persistence.save_title(_db_url, thread_id, title)

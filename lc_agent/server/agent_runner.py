@@ -1,6 +1,7 @@
 """Internal Agent execution service shared by chat and automation."""
 
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,7 @@ from lc_agent.core.http_trace import (
 )
 from lc_agent.server import persistence, stream_utils
 from lc_agent.server.subagent_tracker import SubAgentRunTracker
+from lc_agent.server.usage_recorder import build_model_map, record_usage
 
 
 @dataclass
@@ -44,6 +46,8 @@ class AgentRunService:
 
         content = [{"type": "text", "text": prompt}]
         tool_calls: list[dict[str, Any]] = []
+        usage_run_id = str(uuid.uuid4())
+        usage_model_map = build_model_map(self.engine)
         usage_rounds: list[dict[str, Any]] = []
         content_parts: list[str] = []
         active_subagent_tool_call_ids: set[str] = set()
@@ -131,7 +135,11 @@ class AgentRunService:
                         tracker.handle_event(event_type, payload)
 
                     before = len(usage_rounds)
-                    stream_utils.accumulate_usage(event, usage_rounds)
+                    stream_utils.accumulate_usage(
+                        event, usage_rounds,
+                        default_model_id=model_id or "",
+                        model_map=usage_model_map,
+                    )
                     if len(usage_rounds) > before:
                         usage_rounds[-1]["duration_ms"] = int((time.time() - round_start_time) * 1000)
                         round_start_time = time.time()
@@ -144,6 +152,14 @@ class AgentRunService:
                 reset_http_trace_collector(trace_token)
 
             await tracker.drain()
+            await record_usage(
+                self.db_url, usage_rounds,
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=preset_id,
+                source="automation",
+                run_id=usage_run_id,
+            )
             traces = trace_collector.snapshot()
             if content_parts or tool_calls or usage_rounds or traces:
                 await persistence.save_ui_message(
@@ -176,4 +192,12 @@ class AgentRunService:
                 pass
             return AgentRunResult(final_output="".join(content_parts))
         except Exception as exc:
+            await record_usage(
+                self.db_url, usage_rounds,
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=preset_id,
+                source="automation",
+                run_id=usage_run_id,
+            )
             return AgentRunResult(error=str(exc), final_output="".join(content_parts))

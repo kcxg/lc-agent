@@ -66,7 +66,7 @@ class TestLoadConfigFromFile:
                 "default": {
                     "api_key": "sk-test",
                     "base_url": "https://api.example.com/v1",
-                    "models": [{"id": "test-model", "context_limit": 8000}]
+                    "models": [{"model_id": "test-model", "raw_model_id": "test-model", "context_limit": 8000}]
                 }
             },
             "mcp": {},
@@ -146,7 +146,7 @@ def test_memory_defaults_use_durable_sqlite_store():
 class TestAppConfig:
     def test_validates_minimal_config(self):
         config = AppConfig(
-            provider={"default": {"api_key": "sk-test", "base_url": "https://api.example.com/v1", "models": [{"id": "m1", "context_limit": 4000}]}},
+            provider={"default": {"api_key": "sk-test", "base_url": "https://api.example.com/v1", "models": [{"model_id": "m1", "raw_model_id": "m1", "context_limit": 4000}]}},
             agent={"system_prompt": "Hi", "default_model": "m1", "streaming": True},
         )
         assert config.agent["default_model"] == "m1"

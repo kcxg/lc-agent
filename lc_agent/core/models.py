@@ -10,7 +10,8 @@ class SubAgentLink(BaseModel):
 class ModelInfo(BaseModel):
     """LLM model metadata."""
 
-    id: str
+    model_id: str       # 配置者自命名的全局唯一 id（标识/统计/显示都用它）
+    raw_model_id: str   # 渠道提供的原始模型名（定价兜底 + 统计归并用，不参与显示）
     provider: str
     base_url: str
     context_limit: int = 8000

@@ -79,11 +79,11 @@
       >
         <el-option
           v-for="model in toolsStore.models"
-          :key="model.id"
-          :label="model.id"
-          :value="model.id"
+          :key="model.model_id"
+          :label="model.model_id"
+          :value="model.model_id"
         >
-          <span>{{ model.id }}</span>
+          <span>{{ model.model_id }}</span>
           <span class="header-model-option-provider">{{ model.provider }}</span>
         </el-option>
       </el-select>
