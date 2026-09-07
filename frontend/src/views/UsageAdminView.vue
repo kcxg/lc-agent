@@ -135,6 +135,9 @@
           <el-table-column label="输入" min-width="100" align="right">
             <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
           </el-table-column>
+          <el-table-column label="命中缓存" min-width="100" align="right">
+            <template #default="{ row }">{{ fmtNum(row.cache_read_tokens) }}</template>
+          </el-table-column>
           <el-table-column label="输出" min-width="100" align="right">
             <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
           </el-table-column>
@@ -162,13 +165,16 @@
         <el-table-column prop="model_id" label="模型" min-width="140" />
         <el-table-column prop="role" label="角色" width="70" />
         <el-table-column prop="source" label="来源" width="90" />
-        <el-table-column label="输入" width="90" align="right">
-          <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
-        </el-table-column>
-        <el-table-column label="输出" width="90" align="right">
-          <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
-        </el-table-column>
-        <el-table-column label="耗时" width="90" align="right">
+                <el-table-column label="输入" width="90" align="right">
+                  <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
+                </el-table-column>
+                <el-table-column label="命中缓存" width="90" align="right">
+                  <template #default="{ row }">{{ fmtNum(row.cache_read_tokens) }}</template>
+                </el-table-column>
+                <el-table-column label="输出" width="90" align="right">
+                  <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
+                </el-table-column>
+                <el-table-column label="耗时" width="90" align="right">
           <template #default="{ row }">{{ (row.duration_ms / 1000).toFixed(1) }}s</template>
         </el-table-column>
         <el-table-column label="金额" width="100" align="right">
