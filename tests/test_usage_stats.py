@@ -214,6 +214,41 @@ def test_pricing_future_effective_ignored():
     assert resolve_prices_for(prices, "m", "m", at)["input"] is None
 
 
+def test_compute_cost_cache_read_replaces_full_price():
+    """回归（2026-09-07 线上实锤）：input_tokens 已含 cache_read，
+    命中缓存部分必须按缓存价**替代**输入全价，不是全价之外另加。
+    93% 命中时旧公式多算 10 倍（¥1.20 → 实际 ¥0.13）。"""
+    prices = {"input": 1.0, "output": 2.0, "cache_read": 0.02, "cache_write": None}
+
+    # 旧 bug 形态：1_000_000 输入全按 1.0 计 + 930_000 缓存又按 0.02 计 → ¥1.0186
+    # 正确口径：净输入 70_000×1.0 + 缓存 930_000×0.02 → ¥0.0886
+    cost = compute_cost(
+        {"input": 1_000_000, "output": 0, "cache_read": 930_000, "cache_write": 0},
+        prices,
+    )
+    assert cost == round((70_000 / 1e6) * 1.0 + (930_000 / 1e6) * 0.02, 4)
+
+    # 全命中：净输入为 0，只出缓存费
+    cost2 = compute_cost(
+        {"input": 100_000, "output": 0, "cache_read": 100_000, "cache_write": 0},
+        prices,
+    )
+    assert cost2 == round((100_000 / 1e6) * 0.02, 4)
+
+    # 无缓存：退化为净输入全价（与旧公式一致）
+    cost3 = compute_cost(
+        {"input": 100_000, "output": 0, "cache_read": 0, "cache_write": 0},
+        prices,
+    )
+    assert cost3 == 0.1
+
+    # 有 token 消耗但该维度没配价 → None（前端显示 —）
+    assert compute_cost(
+        {"input": 10, "output": 0, "cache_read": 0, "cache_write": 5_000},
+        prices,  # cache_write 没配
+    ) is None
+
+
 def test_compute_cost_unpriced_returns_none():
     prices = {"input": 1.0, "output": None, "cache_read": 1.0, "cache_write": None}
     assert compute_cost({"input": 1_000_000}, prices) == 1.0

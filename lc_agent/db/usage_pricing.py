@@ -76,16 +76,48 @@ def resolve_prices_for(
 
 
 def compute_cost(token_sums: dict[str, int], prices: dict[str, float | None]) -> float | None:
-    """按 §3.2 公式换算。返回 None = 无法算（有 token 消耗的维度没配价），显示 `—`。"""
+    """金额换算。返回 None = 无法算（有 token 消耗的维度没配价），显示 `—`。
+
+    采集口径（langchain UsageMetadata，官方注释）：input_tokens 是"Sum of all
+    input token types"，**已包含** cache_read / cache_creation。因此命中缓存
+    部分按缓存价**替代**输入全价，而不是在输入全价之外再加一份：
+
+        输入费 = (input − cache_read) × p_input + cache_read × p_cache_read
+        写缓存费 = cache_write × p_cache_write（cache_write 独立于 input，另计）
+    """
+    inp = token_sums.get("input", 0) or 0
+    cache_read = token_sums.get("cache_read", 0) or 0
+    cache_write = token_sums.get("cache_write", 0) or 0
+    out = token_sums.get("output", 0) or 0
+
+    # 净输入（未命中缓存、按输入全价计的部分）
+    net_input = inp - cache_read
+    if net_input < 0:
+        # 防御：上游口径异常（cache_read > input）时不计负数
+        net_input = 0
+
+    p_in = prices.get("input")
+    p_out = prices.get("output")
+    p_cr = prices.get("cache_read")
+    p_cw = prices.get("cache_write")
+
     cost = 0.0
-    for kind in KINDS:
-        tokens = token_sums.get(kind, 0) or 0
-        if tokens <= 0:
-            continue
-        price = prices.get(kind)
-        if price is None:
+    if net_input > 0:
+        if p_in is None:
             return None
-        cost += (tokens / 1_000_000) * price
+        cost += (net_input / 1_000_000) * p_in
+    if cache_read > 0:
+        if p_cr is None:
+            return None
+        cost += (cache_read / 1_000_000) * p_cr
+    if out > 0:
+        if p_out is None:
+            return None
+        cost += (out / 1_000_000) * p_out
+    if cache_write > 0:
+        if p_cw is None:
+            return None
+        cost += (cache_write / 1_000_000) * p_cw
     return round(cost, 4)
 
 
