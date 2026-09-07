@@ -45,8 +45,8 @@
     </div>
 
     <el-table v-loading="loading" :data="rows" stripe border max-height="520">
-      <el-table-column v-if="groupBy === 'bucket'" prop="bucket" label="时间" min-width="110" />
-      <el-table-column v-else-if="groupBy === 'agent'" prop="agent" label="Agent" min-width="130" />
+      <el-table-column prop="bucket" label="时间" min-width="110" />
+      <el-table-column v-if="groupBy === 'agent'" prop="agent" label="Agent" min-width="130" />
       <el-table-column v-else prop="model_id" label="模型" min-width="160" />
       <el-table-column label="输入" min-width="100" align="right">
         <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
@@ -113,7 +113,7 @@ async function load() {
     const [from, to] = range.value
     const result = await api.getMyUsage({
       from, to, group_by: groupBy.value,
-      granularity: groupBy.value === 'bucket' ? granularity.value : 'month',
+      granularity: granularity.value,
       include_sub: includeSub.value,
     })
     rows.value = result.rows
