@@ -157,7 +157,7 @@
     </el-tabs>
 
     <!-- 会话明细弹窗 -->
-    <el-dialog v-model="detailVisible" :title="detailTitle" width="900px">
+    <el-dialog v-model="detailVisible" :title="detailTitle" width="1040px">
       <el-table v-loading="detailLoading" :data="detailRows" stripe border max-height="480" size="small">
         <el-table-column prop="ts" label="时间" min-width="160">
           <template #default="{ row }">{{ fmtTime(row.ts) }}</template>
