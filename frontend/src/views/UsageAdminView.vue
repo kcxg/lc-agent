@@ -360,7 +360,11 @@ const modelKeyOptions = ref<{ models: string[] }>({ models: [] })
 
 const exporting = ref(false)
 
-const displayDims = computed(() => groupBy.value.filter((d) => d !== 'bucket'))
+const displayDims = computed(() => {
+  // '时间'列在汇总表固定显示（时间桶是每行的天然属性，不该被筛选藏掉）
+  const dims = groupBy.value.filter((d) => d !== 'bucket')
+  return ['bucket', ...dims]
+})
 const totalTokens = computed(() =>
   // input_tokens 已含命中/写入缓存明细（langchain 口径），直接相加会重复统计
   (totals.value?.input_tokens ?? 0) + (totals.value?.output_tokens ?? 0)
@@ -393,12 +397,15 @@ interface PriceGroupRow {
   note: string
 }
 const priceGroups = computed<PriceGroupRow[]>(() => {
+  // 按（模型 × 生效日期）合并：同一模型的不同生效版本各占一行，
+  // 否则旧版本价格被新版本覆盖、日期却还显示旧的，误导
   const map = new Map<string, PriceGroupRow>()
   for (const p of prices.value) {
-    let g = map.get(p.model)
+    const key = `${p.model}|${p.effective_from ?? ''}`
+    let g = map.get(key)
     if (!g) {
       g = { model: p.model, effective_from: p.effective_from ?? '', note: p.note ?? '' }
-      map.set(p.model, g)
+      map.set(key, g)
     }
     if (p.kind === 'input' || p.kind === 'cache_read' || p.kind === 'output' || p.kind === 'cache_write') {
       g[p.kind] = p.price_per_1m
