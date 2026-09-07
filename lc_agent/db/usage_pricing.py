@@ -79,21 +79,23 @@ def compute_cost(token_sums: dict[str, int], prices: dict[str, float | None]) ->
     """金额换算。返回 None = 无法算（有 token 消耗的维度没配价），显示 `—`。
 
     采集口径（langchain UsageMetadata，官方注释）：input_tokens 是"Sum of all
-    input token types"，**已包含** cache_read / cache_creation。因此命中缓存
-    部分按缓存价**替代**输入全价，而不是在输入全价之外再加一份：
+    input token types"，**已包含** cache_read / cache_creation。因此缓存命中和
+    写入部分都按各自价格**替代**输入全价，而不是在输入全价之外再加一份：
 
-        输入费 = (input − cache_read) × p_input + cache_read × p_cache_read
-        写缓存费 = cache_write × p_cache_write（cache_write 独立于 input，另计）
+        输入费 = (input − cache_read − cache_write) × p_input
+               + cache_read × p_cache_read
+               + cache_write × p_cache_write
     """
     inp = token_sums.get("input", 0) or 0
     cache_read = token_sums.get("cache_read", 0) or 0
     cache_write = token_sums.get("cache_write", 0) or 0
     out = token_sums.get("output", 0) or 0
 
-    # 净输入（未命中缓存、按输入全价计的部分）
-    net_input = inp - cache_read
+    # 净输入（未走缓存的普通输入，按输入全价计）。
+    # cache_read / cache_creation 都算在 input_tokens 里，需一并扣除。
+    net_input = inp - cache_read - cache_write
     if net_input < 0:
-        # 防御：上游口径异常（cache_read > input）时不计负数
+        # 防御：上游口径异常（缓存明细 > input）时不计负数
         net_input = 0
 
     p_in = prices.get("input")

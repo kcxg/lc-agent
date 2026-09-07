@@ -185,13 +185,13 @@ GROUP BY bucket, model_id, provider
 
 **口径前提（2026-09-07 实锤修正）**：采集端 `input_tokens` 遵循 langchain
 `UsageMetadata` 定义 —— "Sum of all input token types"，**已包含**缓存命中与写缓存
-部分。因此缓存命中部分按缓存价**替代**输入全价，绝不能全价之外再加一份：
+部分。因此缓存命中和写缓存部分都按各自价格**替代**输入全价，绝不能全价之外再加一份：
 
 ```python
-cost = ((input_t - cache_r) / 1_000_000) * p_in   # 净输入（未命中缓存）按输入全价
-     + (cache_r       / 1_000_000) * p_cr          # 命中缓存部分按缓存价（替代，不是另加）
-     + (output_t      / 1_000_000) * p_out
-     + (cache_w       / 1_000_000) * p_cw          # 写缓存独立计费（不包含在 input 里）
+cost = ((input_t - cache_r - cache_w) / 1_000_000) * p_in  # 未走缓存的净输入
+     + (cache_r / 1_000_000) * p_cr                       # 命中缓存，替代输入价
+     + (cache_w / 1_000_000) * p_cw                       # 写缓存，替代输入价
+     + (output_t / 1_000_000) * p_out
 ```
 
 价格表总共几十行，全量读进内存（带 TTL 缓存），对每个 `(bucket, model_id)` 找当时生效的那一版。

@@ -43,8 +43,6 @@
       <el-select v-model="groupBy" multiple collapse-tags class="f-group" placeholder="分组维度" @change="loadAll">
         <el-option label="用户" value="user" />
         <el-option label="Agent" value="agent" />
-        <el-option label="模型" value="model_id" />
-        <el-option label="底层模型" value="raw_model_id" />
         <el-option label="时间桶" value="bucket" />
       </el-select>
       <el-checkbox v-model="includeSub" @change="loadAll">含子 Agent</el-checkbox>
@@ -108,14 +106,14 @@
           <el-table-column label="输入" min-width="100" align="right">
             <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
           </el-table-column>
-          <el-table-column label="输出" min-width="100" align="right">
-            <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
-          </el-table-column>
           <el-table-column label="命中缓存" min-width="100" align="right">
             <template #default="{ row }">{{ fmtNum(row.cache_read_tokens) }}</template>
           </el-table-column>
           <el-table-column label="写入缓存" min-width="90" align="right">
             <template #default="{ row }">{{ fmtNum(row.cache_write_tokens) }}</template>
+          </el-table-column>
+          <el-table-column label="输出" min-width="100" align="right">
+            <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
           </el-table-column>
           <el-table-column prop="calls" label="调用" width="80" align="right" />
           <el-table-column label="金额（元）" min-width="110" align="right" fixed="right">
@@ -137,6 +135,9 @@
           </el-table-column>
           <el-table-column label="命中缓存" min-width="100" align="right">
             <template #default="{ row }">{{ fmtNum(row.cache_read_tokens) }}</template>
+          </el-table-column>
+          <el-table-column label="写入缓存" min-width="100" align="right">
+            <template #default="{ row }">{{ fmtNum(row.cache_write_tokens) }}</template>
           </el-table-column>
           <el-table-column label="输出" min-width="100" align="right">
             <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
@@ -165,16 +166,19 @@
         <el-table-column prop="model_id" label="模型" min-width="140" />
         <el-table-column prop="role" label="角色" width="70" />
         <el-table-column prop="source" label="来源" width="90" />
-                <el-table-column label="输入" width="90" align="right">
-                  <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
-                </el-table-column>
-                <el-table-column label="命中缓存" width="90" align="right">
-                  <template #default="{ row }">{{ fmtNum(row.cache_read_tokens) }}</template>
-                </el-table-column>
-                <el-table-column label="输出" width="90" align="right">
-                  <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
-                </el-table-column>
-                <el-table-column label="耗时" width="90" align="right">
+        <el-table-column label="输入" width="90" align="right">
+          <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
+        </el-table-column>
+        <el-table-column label="命中缓存" width="90" align="right">
+          <template #default="{ row }">{{ fmtNum(row.cache_read_tokens) }}</template>
+        </el-table-column>
+        <el-table-column label="写入缓存" width="90" align="right">
+          <template #default="{ row }">{{ fmtNum(row.cache_write_tokens) }}</template>
+        </el-table-column>
+        <el-table-column label="输出" width="90" align="right">
+          <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
+        </el-table-column>
+        <el-table-column label="耗时" width="90" align="right">
           <template #default="{ row }">{{ (row.duration_ms / 1000).toFixed(1) }}s</template>
         </el-table-column>
         <el-table-column label="金额" width="100" align="right">
@@ -358,10 +362,8 @@ const exporting = ref(false)
 
 const displayDims = computed(() => groupBy.value.filter((d) => d !== 'bucket'))
 const totalTokens = computed(() =>
-  (totals.value?.input_tokens ?? 0)
-  + (totals.value?.output_tokens ?? 0)
-  + (totals.value?.cache_read_tokens ?? 0)
-  + (totals.value?.cache_write_tokens ?? 0)
+  // input_tokens 已含命中/写入缓存明细（langchain 口径），直接相加会重复统计
+  (totals.value?.input_tokens ?? 0) + (totals.value?.output_tokens ?? 0)
 )
 
 // 汇总行里金额为 null 的模型 = 没设置价格（按模型名去重）
@@ -414,7 +416,9 @@ function fmtNum(n: number | undefined): string {
 }
 
 function fmtCost(c: number | null | undefined): string {
-  return c === null || c === undefined ? '—' : `¥${c.toFixed(2)}`
+  if (c === null || c === undefined) return '—'
+  // 后端保留 4 位小数；小额费用 2 位会显示 ¥0.00，智能提升精度
+  return `¥${c < 0.01 && c > 0 ? c.toFixed(4) : c.toFixed(2)}`
 }
 
 function fmtTime(ts: string | null): string {

@@ -51,11 +51,14 @@
       <el-table-column label="输入" min-width="100" align="right">
         <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
       </el-table-column>
-      <el-table-column label="输出" min-width="100" align="right">
-        <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
-      </el-table-column>
       <el-table-column label="命中缓存" min-width="100" align="right">
         <template #default="{ row }">{{ fmtNum(row.cache_read_tokens) }}</template>
+      </el-table-column>
+      <el-table-column label="写入缓存" min-width="100" align="right">
+        <template #default="{ row }">{{ fmtNum(row.cache_write_tokens) }}</template>
+      </el-table-column>
+      <el-table-column label="输出" min-width="100" align="right">
+        <template #default="{ row }">{{ fmtNum(row.output_tokens) }}</template>
       </el-table-column>
       <el-table-column prop="calls" label="调用" width="80" align="right" />
       <el-table-column label="金额（元）" min-width="110" align="right">
@@ -90,10 +93,8 @@ const rows = ref<UsageSummaryRow[]>([])
 const totals = ref<UsageTotals | null>(null)
 
 const totalTokens = computed(() =>
-  (totals.value?.input_tokens ?? 0)
-  + (totals.value?.output_tokens ?? 0)
-  + (totals.value?.cache_read_tokens ?? 0)
-  + (totals.value?.cache_write_tokens ?? 0)
+  // input_tokens 已含命中/写入缓存明细（langchain 口径），直接相加会重复统计
+  (totals.value?.input_tokens ?? 0) + (totals.value?.output_tokens ?? 0)
 )
 
 function fmtNum(n: number | undefined): string {
@@ -101,7 +102,9 @@ function fmtNum(n: number | undefined): string {
 }
 
 function fmtCost(c: number | null | undefined): string {
-  return c === null || c === undefined ? '—' : `¥${c.toFixed(2)}`
+  if (c === null || c === undefined) return '—'
+  // 后端保留 4 位小数；小额费用 2 位会显示 ¥0.00，智能提升精度
+  return `¥${c < 0.01 && c > 0 ? c.toFixed(4) : c.toFixed(2)}`
 }
 
 async function load() {

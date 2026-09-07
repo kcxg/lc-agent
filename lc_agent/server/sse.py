@@ -442,6 +442,15 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                         for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                         await subagent_tracker.drain()
+                        # 已产生的 token 消耗照常入账（取消≠免费）
+                        await record_usage(
+                            _db_url, usage_rounds,
+                            session_id=thread_id,
+                            user_id=user.id if user else "",
+                            agent_id=preset_id,
+                            source="chat",
+                            run_id=usage_run_id,
+                        )
                         yield stream_utils.format_sse_event("cancelled", {})
                         return
 
@@ -450,6 +459,14 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                         for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                         await subagent_tracker.drain()
+                        await record_usage(
+                            _db_url, usage_rounds,
+                            session_id=thread_id,
+                            user_id=user.id if user else "",
+                            agent_id=preset_id,
+                            source="chat",
+                            run_id=usage_run_id,
+                        )
                         return
 
                     in_thinking = stream_utils.accumulate_display_state(
@@ -746,6 +763,15 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                         for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                         await subagent_tracker.drain()
+                        # 已产生的 token 消耗照常入账（取消≠免费）
+                        await record_usage(
+                            _db_url, usage_rounds,
+                            session_id=thread_id,
+                            user_id=user.id if user else "",
+                            agent_id=preset_id,
+                            source="chat",
+                            run_id=usage_run_id,
+                        )
                         yield stream_utils.format_sse_event("cancelled", {})
                         return
 
@@ -754,6 +780,14 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                         for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                         await subagent_tracker.drain()
+                        await record_usage(
+                            _db_url, usage_rounds,
+                            session_id=thread_id,
+                            user_id=user.id if user else "",
+                            agent_id=preset_id,
+                            source="chat",
+                            run_id=usage_run_id,
+                        )
                         return
 
                     in_thinking = stream_utils.accumulate_display_state(
