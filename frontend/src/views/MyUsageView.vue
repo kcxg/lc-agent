@@ -67,11 +67,6 @@
         </template>
       </el-table-column>
     </el-table>
-
-    <p class="note">
-      金额与管理员口径一致；显示 — 表示该模型尚未配置单价，token 数照常统计。
-      统计目的不是考核，是让消耗透明。
-    </p>
   </div>
 </template>
 
@@ -202,11 +197,6 @@ onMounted(load)
   font-weight: 600;
 }
 .unpriced {
-  color: var(--el-text-color-secondary);
-}
-.note {
-  margin-top: 14px;
-  font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 </style>
