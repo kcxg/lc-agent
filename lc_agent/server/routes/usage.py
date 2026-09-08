@@ -187,7 +187,7 @@ async def admin_usage_top_sessions(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """最烧钱的会话（按金额降序）。"""
+    """消费最高的会话（按金额降序）。"""
     date_from, date_to = _parse_range(from_d, to_d)
     repo = UsageRepository(db)
     return {

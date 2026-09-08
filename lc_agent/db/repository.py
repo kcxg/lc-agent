@@ -644,7 +644,7 @@ class UsageRepository:
         include_sub: bool = True,
         user_id: str | None = None,
     ) -> list[dict]:
-        """最烧钱的会话，join sessions 取标题/用户/agent。
+        """消费最高的会话，join sessions 取标题/用户/agent。
 
         金额在（会话 × 天 × 模型）粒度算好后归并到会话——跨模型会话的钱不会算错；
         排序按金额降序（没配价的排后面，按 token 量兜底排序）。

@@ -124,7 +124,7 @@
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="最烧钱会话" name="sessions">
+      <el-tab-pane label="消费最高的会话" name="sessions">
         <el-table v-loading="sessionsLoading" :data="topSessions" stripe border max-height="560">
           <el-table-column prop="title" label="会话" min-width="220" />
           <el-table-column prop="username" label="用户" min-width="110" />

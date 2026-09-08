@@ -299,7 +299,7 @@ cost = ((input_t - cache_r - cache_w) / 1_000_000) * p_in  # 未走缓存的净�
 中转站换马甲更是不可控。没有这个字段，跨渠道的账就对不到一起：
 
 - 每个渠道的 model_id 都得单独配一遍价，漏一个就静默显示 `—`，而且没人会发现
-- "哪个模型最烧钱"被拆成 N 行，结论被稀释，看不出该换哪个
+- "哪个模型消费最高"被拆成 N 行，结论被稀释，看不出该换哪个
 
 用途与去向：
 
@@ -394,9 +394,9 @@ GET /admin/usage/summary
 | 每人每月花了多少（老板主视图）    | `user,bucket`         | `month`     |
 | 某人每天花了多少（看趋势）      | `user,bucket`         | `day`       |
 | 某人对每个 agent 花了多少   | `user,agent`          | `month`     |
-| 哪个 agent 最烧钱       | `agent`               | `month`     |
-| 哪个模型最烧钱（决定要不要换便宜的） | `model_id,bucket`     | `month`     |
-| 底层模型谁最烧钱（路由/马甲合并后） | `raw_model_id,bucket` | `month`     |
+| 哪个 agent 消费最高       | `agent`               | `month`     |
+| 哪个模型消费最高（决定要不要换便宜的） | `model_id,bucket`     | `month`     |
+| 底层模型谁消费最高（路由/马甲合并后） | `raw_model_id,bucket` | `month`     |
 
 > **默认分组是 `model_id` 而不是 `raw_model_id`** —— 归并是用户主动切的视角。  
 > 默认归并会掩盖"某条路由其实更贵"这类信息（§3.5）。
@@ -411,7 +411,7 @@ GET /admin/usage/summary
 | `GET /admin/usage/summary`               | admin | 见 §5.1，返回 tokens / 金额 / 调用次数              |
 | `GET /admin/usage/by-user`               | admin | 按人小计（含会话数、平均单次消耗）                         |
 | `GET /admin/usage/by-agent`              | admin | 按 agent，支持"含子 agent"/"仅主 agent"开关         |
-| `GET /admin/usage/top-sessions?limit=50` | admin | 最烧钱的会话，反白嫖主入口                             |
+| `GET /admin/usage/top-sessions?limit=50` | admin | 消费最高的会话，反白嫖主入口                             |
 | `GET /admin/usage/session/{id}`          | admin | 下钻：该会话每次调用明细 + 原始消息                       |
 | `GET /admin/usage/export.csv`            | admin | CSV 导出（老板要 Excel），参数同 summary             |
 | `GET/POST /admin/usage/pricing`          | admin | 单价查询 / **新增**（不提供 UPDATE，见 §2.2 铁律）       |
