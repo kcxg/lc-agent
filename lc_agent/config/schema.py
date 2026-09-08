@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class ModelConfig(BaseModel):
-    model_id: str       # 配置者自命名的全局唯一模型 id（标识/统计/显示都用它）
-    raw_model_id: str   # 渠道提供的原始模型名（定价兜底 + 统计归并用，不参与显示）
+    model_id: str       # 自己命名的、全局唯一（标识/统计/前端显示都用它）
+    raw_model_id: str   # 供应商提供的原始模型名（定价兜底 + 统计归并用）
     context_limit: int = 8000  # maps to LangChain profile["max_input_tokens"]
     max_output_tokens: int = 65536
 
