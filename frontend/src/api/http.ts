@@ -208,12 +208,12 @@ export const api = {
 
   // File changes
   getFileChanges: (sessionId: string) =>
-    fetchApi<{ session_id: string; git_base_hash: string | null; files: any[]; sub_sessions?: any[] }>(
+    fetchApi<{ session_id: string; git_base_hash: string | null; files: any[]; sub_sessions?: any[]; rounds?: any[] }>(
       `/sessions/${sessionId}/file-changes`
     ),
-  getFileDiff: (sessionId: string, filePath: string) =>
+  getFileDiff: (sessionId: string, filePath: string, round?: number | null) =>
     fetchApi<{ file_path: string; final_type: string; hunks: any[]; change_count: number }>(
-      `/sessions/${sessionId}/file-changes/diff?file_path=${encodeURIComponent(filePath)}`
+      `/sessions/${sessionId}/file-changes/diff?file_path=${encodeURIComponent(filePath)}${round != null ? `&round=${round}` : ''}`
     ),
   getGitDiff: (sessionId: string, baseline: string = 'session', commit?: string) =>
     fetchApi<{

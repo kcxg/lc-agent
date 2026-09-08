@@ -37,6 +37,21 @@
             </el-button>
           </el-button-group>
           <el-select
+            v-if="changeSource === 'agent' && store.rounds.length > 0"
+            v-model="store.selectedRound"
+            size="small"
+            class="round-select"
+            aria-label="对话轮次"
+          >
+            <el-option label="全部轮次" :value="null" />
+            <el-option
+              v-for="r in store.rounds"
+              :key="r.round_number"
+              :label="`第 ${r.round_number} 轮`"
+              :value="r.round_number"
+            />
+          </el-select>
+          <el-select
             v-if="changeSource === 'git'"
             v-model="gitBaseline"
             size="small"
@@ -81,9 +96,13 @@
       <p>当前会话没有文件变更</p>
     </div>
 
-    <div v-if="changeSource === 'agent' && store.hasChanges" class="file-list">
+    <div v-if="changeSource === 'agent' && store.hasChanges && store.displayFiles.length === 0 && store.displaySubSessions.length === 0" class="empty-state">
+      <p>当前轮次没有文件变更</p>
+    </div>
+
+    <div v-if="changeSource === 'agent' && store.hasChanges && store.displayFiles.length > 0" class="file-list">
       <div
-        v-for="file in store.files"
+        v-for="file in store.displayFiles"
         :key="file.file_path"
         class="file-item"
       >
@@ -125,10 +144,10 @@
     </div>
 
     <!-- Sub-agent summaries -->
-    <div v-if="store.subSessions.length > 0" class="sub-agent-section">
+    <div v-if="changeSource === 'agent' && store.displaySubSessions.length > 0" class="sub-agent-section">
       <div class="sub-agent-section-title">子 Agent 变更</div>
       <div
-        v-for="sub in store.subSessions"
+        v-for="sub in store.displaySubSessions"
         :key="sub.sub_session_id"
         class="sub-agent-item"
       >
@@ -354,7 +373,7 @@ async function toggleExpand(filePath: string) {
 
   loadingDiffs.add(filePath)
   try {
-    const data = await api.getFileDiff(sessionId, filePath)
+    const data = await api.getFileDiff(sessionId, filePath, store.selectedRound)
     fileDiffs[filePath] = renderDiff(data, filePath)
   } catch {
     fileDiffs[filePath] = '<div class="diff-error">加载失败</div>'
@@ -417,6 +436,14 @@ function renderDiff(data: any, filePath: string): string {
   }
 }
 
+watch(() => store.selectedRound, () => {
+  // 轮次切换后缓存的 diff 内容不再适用，全部作废
+  expandedFiles.clear()
+  expandedSubSessions.clear()
+  loadingDiffs.clear()
+  Object.keys(fileDiffs).forEach(k => delete fileDiffs[k])
+})
+
 watch(diffMode, () => {
   for (const key of expandedFiles) {
     if (!fileDiffs[key]) continue
@@ -429,7 +456,7 @@ watch(diffMode, () => {
       : key
     if (!sessionId) continue
     loadingDiffs.add(key)
-    api.getFileDiff(sessionId, filePath).then(data => {
+    api.getFileDiff(sessionId, filePath, store.selectedRound).then(data => {
       fileDiffs[key] = renderDiff(data, filePath)
     }).catch(() => {}).finally(() => loadingDiffs.delete(key))
   }
@@ -559,7 +586,7 @@ async function toggleExpandSubFile(subSessionId: string, filePath: string) {
 
   loadingDiffs.add(key)
   try {
-    const data = await api.getFileDiff(subSessionId, filePath)
+    const data = await api.getFileDiff(subSessionId, filePath, store.selectedRound)
     fileDiffs[key] = renderDiff(data, filePath)
   } catch {
     fileDiffs[key] = '<div class="diff-error">加载失败</div>'
@@ -640,6 +667,10 @@ watch(() => store.isDrawerOpen, async (open) => {
 
 .git-baseline-select {
   width: 150px;
+}
+
+.round-select {
+  width: 120px;
 }
 
 .git-commit-select {

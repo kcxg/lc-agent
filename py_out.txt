@@ -1,0 +1,5 @@
+exe: D:\ProgramData\miniconda3\envs\py312\python.exe
+requests OK
+trafilatura MISSING No module named 'trafilatura'
+bs4 OK
+curl_cffi OK

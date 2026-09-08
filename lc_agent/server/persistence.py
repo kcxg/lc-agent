@@ -29,6 +29,25 @@ async def get_session_message_count(db_url: str, thread_id: str) -> int:
         return 0
 
 
+async def get_session_user_message_count(db_url: str, thread_id: str) -> int:
+    """Count user-role UI messages for a session.
+
+    Used as the conversation round number: the Nth user question = round N.
+    """
+    try:
+        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.repository import ChatUiMessageRepository
+
+        session = get_async_session(db_url)
+        try:
+            repo = ChatUiMessageRepository(session)
+            return await repo.count_by_session_role(thread_id, "user")
+        finally:
+            await session.close()
+    except Exception:
+        return 0
+
+
 async def ensure_session(
     db_url: str,
     thread_id: str,
@@ -311,6 +330,7 @@ async def save_file_change(
     new_string: str | None = None,
     tool_call_id: str | None = None,
     move_destination: str | None = None,
+    round_number: int | None = None,
 ) -> None:
     """Persist a file change record."""
     try:
@@ -328,6 +348,7 @@ async def save_file_change(
                 new_string=new_string,
                 tool_call_id=tool_call_id,
                 move_destination=move_destination,
+                round_number=round_number,
             )
         finally:
             await session.close()

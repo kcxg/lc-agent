@@ -1,12 +1,63 @@
 import subprocess
+from datetime import datetime
 from types import SimpleNamespace
 
 from lc_agent.server.routes.file_changes import (
     _build_hunk_diff,
+    _build_round_groups,
     _count_diff_lines,
     _git_files_for_baseline,
     _resolve_baseline,
 )
+
+
+def _change(file_path: str, change_type: str, round_number: int | None = None, **kwargs):
+    return SimpleNamespace(
+        file_path=file_path,
+        change_type=change_type,
+        round_number=round_number,
+        created_at=datetime(2026, 1, 1),
+        move_destination=None,
+        **kwargs,
+    )
+
+
+def test_build_round_groups_filters_legacy_and_merges_sub_sessions():
+    changes = [
+        _change("a.py", "create", 1),
+        _change("a.py", "edit", 1),
+        _change("b.py", "edit", 2),
+        _change("legacy.py", "edit", None),  # 旧数据无轮次
+    ]
+    sub_sessions = [
+        ("sess--sa--tc1", "子代理", [
+            _change("c.py", "create", 2),
+            _change("d.py", "edit", None),
+        ])
+    ]
+
+    rounds = _build_round_groups(changes, sub_sessions)
+
+    assert [r["round_number"] for r in rounds] == [1, 2]
+    round1, round2 = rounds
+    assert [f["file_path"] for f in round1["files"]] == ["a.py"]
+    assert round1["files"][0]["edit_count"] == 2
+    assert round1["sub_sessions"] == []
+    assert [f["file_path"] for f in round2["files"]] == ["b.py"]
+    assert round2["sub_sessions"][0]["sub_session_id"] == "sess--sa--tc1"
+    assert [f["file_path"] for f in round2["sub_sessions"][0]["files"]] == ["c.py"]
+
+
+def test_build_hunk_diff_respects_round_filtered_changes():
+    round1_changes = [_change("a.py", "edit", 1, old_string="old1", new_string="new1")]
+    round2_changes = [_change("a.py", "edit", 2, old_string="old2", new_string="new2")]
+
+    assert _build_hunk_diff(round1_changes, "a.py") == [
+        {"type": "edit", "removed": ["old1"], "added": ["new1"]}
+    ]
+    assert _build_hunk_diff(round2_changes, "a.py") == [
+        {"type": "edit", "removed": ["old2"], "added": ["new2"]}
+    ]
 
 
 def test_edit_after_create_does_not_render_created_file_as_full_addition():

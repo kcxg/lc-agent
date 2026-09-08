@@ -62,6 +62,7 @@ class AgentRunService:
                 "user",
                 content,
             )
+            round_number = await persistence.get_session_user_message_count(self.db_url, session_id)
             self.engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
             display_map = self.engine.get_subagent_display_name_map(
                 preset_id, model_id=model_id, llm_params=llm_params,
@@ -81,7 +82,7 @@ class AgentRunService:
             trace_token = bind_http_trace_collector(trace_collector)
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
 
-            file_token = bind_session_for_file_tracking(session_id)
+            file_token = bind_session_for_file_tracking(session_id, round_number=round_number)
             try:
                 async for event in self.engine.chat_stream(
                     content,
@@ -125,6 +126,7 @@ class AgentRunService:
                                 new_string=payload.get("new_string"),
                                 tool_call_id=payload.get("tool_call_id"),
                                 move_destination=payload.get("move_destination"),
+                                round_number=payload.get("round_number"),
                             )
                         elif event_type == "file_change_git_snapshot":
                             await persistence.save_git_base_hash(

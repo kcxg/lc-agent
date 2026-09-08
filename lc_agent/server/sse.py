@@ -338,6 +338,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             await engine.reset_thread(thread_id)
 
         await persistence.save_ui_message(_db_url, thread_id, "user", content)
+        round_number = await persistence.get_session_user_message_count(_db_url, thread_id)
     except Exception as e:
         traceback.print_exc()
         error = e
@@ -421,7 +422,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 stream_kwargs["history"] = req.history or []
 
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
-            bind_session_for_file_tracking(thread_id)
+            bind_session_for_file_tracking(thread_id, round_number=round_number)
 
             model_info = engine._find_model(model_id) if model_id else None
             provider = model_info.provider if model_info else None
@@ -501,6 +502,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                                 new_string=evt_data.get("new_string"),
                                 tool_call_id=evt_data.get("tool_call_id"),
                                 move_destination=evt_data.get("move_destination"),
+                                round_number=evt_data.get("round_number"),
                             ))
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                             last_event_time = time.time()
@@ -676,8 +678,10 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     async def event_stream():
         await lock.acquire()
         try:
+            # Resume continues the existing round: round = current user message count.
+            round_number = await persistence.get_session_user_message_count(_db_url, thread_id)
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
-            bind_session_for_file_tracking(thread_id)
+            bind_session_for_file_tracking(thread_id, round_number=round_number)
 
             usage_rounds: list[dict] = []
             usage_run_id = str(uuid.uuid4())
@@ -822,6 +826,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                                 new_string=evt_data.get("new_string"),
                                 tool_call_id=evt_data.get("tool_call_id"),
                                 move_destination=evt_data.get("move_destination"),
+                                round_number=evt_data.get("round_number"),
                             ))
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                             last_event_time = time.time()

@@ -320,6 +320,7 @@ def convert_stream_event(
         elif custom_name == "file_change_record":
             results.append(("file_change", {
                 "session_id": data.get("session_id", ""),
+                "round_number": data.get("round_number"),
                 "file_path": data.get("file_path", ""),
                 "change_type": data.get("change_type", ""),
                 "old_string": data.get("old_string"),

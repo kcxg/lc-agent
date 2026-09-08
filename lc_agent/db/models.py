@@ -148,6 +148,7 @@ class FileChange(SQLModel, table=True):
     new_string: str | None = Field(default=None)
     tool_call_id: str | None = Field(default=None)
     move_destination: str | None = Field(default=None)
+    round_number: int | None = Field(default=None, index=True)  # 第几轮用户提问（1-based），旧数据为 None
     created_at: datetime = Field(default_factory=utcnow)
 
 

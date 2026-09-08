@@ -436,6 +436,15 @@ class ChatUiMessageRepository:
         )
         return int(result.scalar_one())
 
+    async def count_by_session_role(self, session_id: str, role: str) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(ChatUiMessage).where(
+                ChatUiMessage.session_id == session_id,
+                ChatUiMessage.role == role,
+            )
+        )
+        return int(result.scalar_one())
+
 
 class FileChangeRepository:
     def __init__(self, session: AsyncSession):

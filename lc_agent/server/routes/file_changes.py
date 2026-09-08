@@ -61,6 +61,41 @@ def _aggregate_file_changes(changes: list) -> list[dict]:
     return list(file_map.values())
 
 
+def _build_round_groups(
+    changes: list,
+    sub_sessions: list[tuple[str, str, list]],
+) -> list[dict]:
+    """Group main-session and sub-session changes by conversation round number.
+
+    sub_sessions: list of (sub_session_id, title, changes). Changes with a None
+    round_number (legacy rows) are excluded from rounds and only appear in the
+    aggregate views.
+    """
+    round_numbers = sorted(
+        {c.round_number for c in changes if c.round_number is not None}
+        | {c.round_number for _, _, sub_changes in sub_sessions for c in sub_changes if c.round_number is not None}
+    )
+    rounds: list[dict] = []
+    for number in round_numbers:
+        round_changes = [c for c in changes if c.round_number == number]
+        round_sub_sessions = []
+        for sub_session_id, title, sub_changes in sub_sessions:
+            sub_in_round = [c for c in sub_changes if c.round_number == number]
+            if sub_in_round:
+                round_sub_sessions.append({
+                    "sub_session_id": sub_session_id,
+                    "title": title,
+                    "file_count": len({c.file_path for c in sub_in_round}),
+                    "files": _aggregate_file_changes(sub_in_round),
+                })
+        rounds.append({
+            "round_number": number,
+            "files": _aggregate_file_changes(round_changes),
+            "sub_sessions": round_sub_sessions,
+        })
+    return rounds
+
+
 def _run_git(cwd: str, args: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", *args],
@@ -357,6 +392,7 @@ async def list_file_changes(
     fc_repo = FileChangeRepository(db)
     changes = await fc_repo.list_by_session(session_id)
     sub_sessions: list[dict] = []
+    sub_session_changes: list[tuple[str, str, list]] = []
     if include_subagents:
         child_sessions = await repo.list_children(session_id)
         for child in child_sessions:
@@ -368,12 +404,18 @@ async def list_file_changes(
                     "file_count": len(set(change.file_path for change in child_changes)),
                     "files": _aggregate_file_changes(child_changes),
                 })
+                sub_session_changes.append((
+                    child.id,
+                    child.title or child.id.split("--sa--")[-1][:8],
+                    child_changes,
+                ))
 
     return {
         "session_id": session_id,
         "git_base_hash": sess.git_base_hash,
         "files": _aggregate_file_changes(changes),
         "sub_sessions": sub_sessions,
+        "rounds": _build_round_groups(changes, sub_session_changes),
     }
 
 
@@ -381,6 +423,7 @@ async def list_file_changes(
 async def get_file_diff(
     session_id: str,
     file_path: str = Query(..., description="Absolute path of the file"),
+    round_number: int | None = Query(None, alias="round", description="按轮次过滤（仅返回 DB 记录的 hunks diff）"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -394,6 +437,8 @@ async def get_file_diff(
     fc_repo = FileChangeRepository(db)
     all_changes = await fc_repo.list_by_session(session_id)
     file_changes = [change for change in all_changes if change.file_path == file_path]
+    if round_number is not None:
+        file_changes = [change for change in file_changes if change.round_number == round_number]
     if not file_changes:
         raise HTTPException(status_code=404, detail="No changes found for this file")
 
@@ -402,7 +447,7 @@ async def get_file_diff(
         final_type = "delete"
 
     unified_diff = None
-    if sess.git_base_hash and await asyncio.to_thread(_is_git_tracked, file_path):
+    if round_number is None and sess.git_base_hash and await asyncio.to_thread(_is_git_tracked, file_path):
         unified_diff = await asyncio.to_thread(_try_git_file_diff, sess.git_base_hash, file_path)
 
     if unified_diff:
