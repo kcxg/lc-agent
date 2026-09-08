@@ -1,18 +1,19 @@
 <template>
-  <aside class="right-panel" :class="{ collapsed }" :style="panelWidth !== undefined ? { width: panelWidth + 'px' } : {}">
-    <div class="right-panel-header">
-      <span v-if="!collapsed" class="right-panel-title">设置</span>
-      <button
-        type="button"
-        class="toggle-btn"
-        :title="collapsed ? '展开右侧面板' : '收起右侧面板'"
-        @click="emit('toggle-collapse')"
-      >
-        <span class="toggle-icon">»</span>
-      </button>
-    </div>
+  <aside
+    class="right-panel"
+    :class="{ collapsed }"
+    :style="!collapsed && panelWidth !== undefined ? { width: panelWidth + 'px' } : {}"
+  >
+    <button
+      type="button"
+      class="collapse-handle"
+      :title="collapsed ? '展开右侧面板' : '收起右侧面板'"
+      @click="emit('toggle-collapse')"
+    >
+      <span class="collapse-handle-icon">{{ collapsed ? '«' : '»' }}</span>
+    </button>
 
-    <template v-if="!collapsed">
+    <div v-if="!collapsed" class="right-panel-body">
     <div class="right-panel-fixed">
       <div class="settings-collapsible" :class="{ collapsed: fixedCollapsed }">
         <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
@@ -445,7 +446,7 @@
       :mode="detailModal.mode"
       :data="detailModal.data"
     />
-    </template>
+    </div>
   </aside>
 </template>
 
@@ -653,70 +654,53 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   background: var(--el-bg-color);
   border-left: 1px solid var(--el-border-color);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: stretch;
   overflow: hidden;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .right-panel.collapsed {
-  width: 44px;
+  width: 22px;
+  border-left-width: 1px;
 }
 
-.right-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  padding: 10px 12px;
+.collapse-handle {
   flex-shrink: 0;
-  border-bottom: 1px solid var(--el-border-color);
-}
-
-.right-panel.collapsed .right-panel-header {
-  flex-direction: column;
-  justify-content: flex-start;
-  padding: 10px 8px;
-  border-bottom: none;
-}
-
-.right-panel-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  letter-spacing: 0.3px;
-}
-
-.right-panel.collapsed .right-panel-title {
-  display: none;
-}
-
-.right-panel-header .toggle-btn {
-  width: 28px;
-  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 22px;
+  height: 100%;
   border: none;
-  border-radius: 6px;
-  background: transparent;
+  border-right: 1px solid var(--el-border-color);
+  background: var(--el-fill-color-light);
   color: var(--el-text-color-secondary);
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.15s ease;
+  transition: background 0.15s, color 0.15s;
 }
 
-.right-panel-header .toggle-btn:hover {
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-primary);
+.collapse-handle:hover {
+  background: var(--el-fill-color);
+  color: var(--el-color-primary);
 }
 
-.toggle-icon {
-  display: inline-block;
+.collapse-handle-icon {
+  font-size: 13px;
+  line-height: 1;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.right-panel.collapsed .toggle-icon {
+.right-panel.collapsed .collapse-handle-icon {
   transform: rotate(180deg);
+}
+
+.right-panel-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .right-panel-fixed {
