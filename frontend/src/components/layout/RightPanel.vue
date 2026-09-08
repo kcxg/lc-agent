@@ -4,14 +4,17 @@
     :class="{ collapsed }"
     :style="!collapsed && panelWidth !== undefined ? { width: panelWidth + 'px' } : {}"
   >
-    <button
-      type="button"
-      class="collapse-handle"
-      :title="collapsed ? '展开右侧面板' : '收起右侧面板'"
-      @click="emit('toggle-collapse')"
-    >
-      <span class="collapse-handle-icon">{{ collapsed ? '«' : '»' }}</span>
-    </button>
+    <div class="right-panel-header">
+      <span v-if="!collapsed" class="right-panel-title">设置</span>
+      <button
+        type="button"
+        class="toggle-btn"
+        :title="collapsed ? '展开右侧面板' : '收起右侧面板'"
+        @click="emit('toggle-collapse')"
+      >
+        <span class="toggle-icon">{{ collapsed ? '«' : '»' }}</span>
+      </button>
+    </div>
 
     <div v-if="!collapsed" class="right-panel-body">
     <div class="right-panel-fixed">
@@ -654,44 +657,69 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   background: var(--el-bg-color);
   border-left: 1px solid var(--el-border-color);
   display: flex;
-  flex-direction: row;
-  align-items: stretch;
+  flex-direction: column;
   overflow: hidden;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .right-panel.collapsed {
-  width: 22px;
-  border-left-width: 1px;
+  width: 44px;
 }
 
-.collapse-handle {
+.right-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 10px 12px;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--el-border-color);
+}
+
+.right-panel.collapsed .right-panel-header {
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 10px 8px;
+  border-bottom: none;
+}
+
+.right-panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  letter-spacing: 0.3px;
+}
+
+.right-panel.collapsed .right-panel-title {
+  display: none;
+}
+
+.right-panel-header .toggle-btn {
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 100%;
   border: none;
-  border-right: 1px solid var(--el-border-color);
-  background: var(--el-fill-color-light);
+  border-radius: 6px;
+  background: transparent;
   color: var(--el-text-color-secondary);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  font-size: 14px;
+  transition: all 0.15s ease;
 }
 
-.collapse-handle:hover {
-  background: var(--el-fill-color);
-  color: var(--el-color-primary);
+.right-panel-header .toggle-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
 }
 
-.collapse-handle-icon {
-  font-size: 13px;
-  line-height: 1;
+.toggle-icon {
+  display: inline-block;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.right-panel.collapsed .collapse-handle-icon {
+.right-panel.collapsed .toggle-icon {
   transform: rotate(180deg);
 }
 
