@@ -1,5 +1,18 @@
 <template>
-  <aside class="right-panel" :style="panelWidth !== undefined ? { width: panelWidth + 'px' } : {}">
+  <aside class="right-panel" :class="{ collapsed }" :style="panelWidth !== undefined ? { width: panelWidth + 'px' } : {}">
+    <div class="right-panel-header">
+      <span v-if="!collapsed" class="right-panel-title">设置</span>
+      <button
+        type="button"
+        class="toggle-btn"
+        :title="collapsed ? '展开右侧面板' : '收起右侧面板'"
+        @click="emit('toggle-collapse')"
+      >
+        <span class="toggle-icon">»</span>
+      </button>
+    </div>
+
+    <template v-if="!collapsed">
     <div class="right-panel-fixed">
       <div class="settings-collapsible" :class="{ collapsed: fixedCollapsed }">
         <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
@@ -432,14 +445,15 @@
       :mode="detailModal.mode"
       :data="detailModal.data"
     />
+    </template>
   </aside>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
-defineProps<{ panelWidth?: number }>()
-const emit = defineEmits<{ 'open-automation': [] }>()
+defineProps<{ collapsed?: boolean; panelWidth?: number }>()
+const emit = defineEmits<{ 'toggle-collapse': []; 'open-automation': [] }>()
 
 import { useToolsStore } from '@/stores/tools'
 import { api, fetchApi } from '@/api/http'
@@ -641,6 +655,68 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.right-panel.collapsed {
+  width: 44px;
+}
+
+.right-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 10px 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--el-border-color);
+}
+
+.right-panel.collapsed .right-panel-header {
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 10px 8px;
+  border-bottom: none;
+}
+
+.right-panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  letter-spacing: 0.3px;
+}
+
+.right-panel.collapsed .right-panel-title {
+  display: none;
+}
+
+.right-panel-header .toggle-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s ease;
+}
+
+.right-panel-header .toggle-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+}
+
+.toggle-icon {
+  display: inline-block;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.right-panel.collapsed .toggle-icon {
+  transform: rotate(180deg);
 }
 
 .right-panel-fixed {
