@@ -331,6 +331,9 @@ async def save_file_change(
     tool_call_id: str | None = None,
     move_destination: str | None = None,
     round_number: int | None = None,
+    line_start: int | None = None,
+    context_before: str | None = None,
+    context_after: str | None = None,
 ) -> None:
     """Persist a file change record."""
     try:
@@ -349,6 +352,9 @@ async def save_file_change(
                 tool_call_id=tool_call_id,
                 move_destination=move_destination,
                 round_number=round_number,
+                line_start=line_start,
+                context_before=context_before,
+                context_after=context_after,
             )
         finally:
             await session.close()

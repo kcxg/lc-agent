@@ -32,6 +32,21 @@ def _check_session_access(sess, user: User) -> None:
         raise HTTPException(status_code=403, detail="权限不足")
 
 
+def _change_line_counts(change) -> tuple[int, int]:
+    """Estimate added/removed line counts of one tool-level change."""
+    old_string = getattr(change, "old_string", None)
+    new_string = getattr(change, "new_string", None)
+    added = removed = 0
+    if change.change_type == "edit":
+        if old_string:
+            removed = old_string.count("\n") + 1
+        if new_string:
+            added = new_string.count("\n") + 1
+    elif change.change_type in ("create", "append") and new_string:
+        added = new_string.count("\n") + 1
+    return added, removed
+
+
 def _aggregate_file_changes(changes: list) -> list[dict]:
     """Aggregate per-file tool changes into summary entries."""
     file_map: dict[str, dict] = {}
@@ -43,10 +58,15 @@ def _aggregate_file_changes(changes: list) -> list[dict]:
                 "change_type": change.change_type,
                 "edit_count": 0,
                 "last_change_at": change.created_at.isoformat(),
+                "additions": 0,
+                "deletions": 0,
             }
         entry = file_map[file_path]
         entry["edit_count"] += 1
         entry["last_change_at"] = change.created_at.isoformat()
+        added, removed = _change_line_counts(change)
+        entry["additions"] += added
+        entry["deletions"] += removed
 
         if change.change_type == "delete":
             entry["change_type"] = "delete"
@@ -347,22 +367,33 @@ def _git_files_for_baseline(cwd: str, baseline: dict, changes: list) -> dict:
         return {"available": False, "reason": str(exc)}
 
 
+def _split_context(change, name: str) -> list[str]:
+    raw = getattr(change, name, None)
+    return raw.split("\n") if raw else []
+
+
 def _build_hunk_diff(file_changes: list, file_path: str) -> list[dict]:
     """Build diff hunks from recorded changes when Git is unavailable."""
     hunks = []
     has_edit = any(change.change_type == "edit" for change in file_changes)
     for change in file_changes:
+        line_start = change.line_start or 1
         if change.change_type == "edit" and change.old_string and change.new_string is not None:
             hunks.append({
                 "type": "edit",
+                "line_start": line_start,
+                "context_before": _split_context(change, "context_before"),
                 "removed": change.old_string.split("\n"),
                 "added": change.new_string.split("\n"),
+                "context_after": _split_context(change, "context_after"),
             })
         elif change.change_type == "create" and has_edit:
             continue
         elif change.change_type in ("create", "append") and change.new_string:
             hunks.append({
                 "type": change.change_type,
+                "line_start": line_start,
+                "context_before": _split_context(change, "context_before"),
                 "added": change.new_string.split("\n"),
             })
         elif change.change_type == "delete":

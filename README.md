@@ -45,6 +45,7 @@
 | Memory | 支持会话持久化、历史消息、checkpoint 与长期上下文扩展 |
 | Knowledge Base | 不内置强绑定 RAG，可通过 MCP 接入 [nbrag](https://github.com/ydf0509/nbrag) 等 agentic search 知识库 |
 | Observability | HTTP trace、token 面板、工具调用卡片、子 Agent 过程可视化 |
+| Token 费用统计 | 独立用量页面（管理页 + 个人页），每次 LLM 调用落库，按用户/agent/模型/天聚合金额，单价可配，可导出 CSV |
 | Auth & Permission | 支持登录认证、用户隔离、管理员能力、审批白名单 |
 | 联网、rag知识库 | 同时通过接入对应的mcp来给llm提供能力，例如anysearch 和 nbrag |
 | ai coding | 内置工具组和第三方mcp例如serena mcp都能使lc-aegnt 实现ai coding |

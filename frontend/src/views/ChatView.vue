@@ -201,7 +201,11 @@
                   />
                 </div>
               </template>
-              <HttpTracesGroup
+              <RoundFileChangesCard
+              v-if="item.role === 'ai' && !item.isSystem && roundFileCards[item.messageId]"
+              :round="roundFileCards[item.messageId].round"
+            />
+            <HttpTracesGroup
                 v-if="item.httpTraces?.length || item.httpTracesCount"
                 :traces="item.httpTraces"
                 :traces-count="item.httpTracesCount"
@@ -339,6 +343,7 @@ import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAg
 import type { ContentBlock, Attachment } from '@/utils/fileUpload'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
+import { useFileChangesStore } from '@/stores/file-changes'
 import { renderMarkdown } from '@/utils/markdown'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import InterruptDialog from '@/components/chat/InterruptDialog.vue'
@@ -347,6 +352,7 @@ import SubAgentCard from '@/components/chat/SubAgentCard.vue'
 import TodoProgressCard from '@/components/chat/TodoProgressCard.vue'
 import HttpTracesGroup from '@/components/chat/HttpTracesGroup.vue'
 import TokenUsagePanel from '@/components/chat/TokenUsagePanel.vue'
+import RoundFileChangesCard from '@/components/chat/RoundFileChangesCard.vue'
 import MessageToolbar from '@/components/chat/MessageToolbar.vue'
 import CodeBlockModal from '@/components/chat/CodeBlockModal.vue'
 
@@ -640,6 +646,29 @@ const bubbleList = computed((): ChatBubbleItem[] => {
 const lastUserMessage = computed(() =>
   [...messages.value].reverse().find(msg => msg.role === 'user'),
 )
+
+// 每轮回复末尾的「文件已更改」卡片：messageId → 轮次。
+// 轮次号 = 用户消息序号；卡片挂在每轮最后一条非系统 assistant 消息上。
+const roundFileCards = computed((): Record<string, { round: number }> => {
+  const fc = useFileChangesStore()
+  const map: Record<string, { round: number }> = {}
+  if (fc.rounds.length === 0) return map
+  let round = 0
+  const lastAiIdByRound: Record<number, string> = {}
+  for (const msg of messages.value) {
+    if (msg.isSystem) continue
+    if (msg.role === 'user') {
+      round++
+      continue
+    }
+    if (msg.role === 'assistant') lastAiIdByRound[round] = msg.id
+  }
+  for (const r of fc.rounds) {
+    const id = lastAiIdByRound[r.round_number]
+    if (id && r.files.length > 0) map[id] = { round: r.round_number }
+  }
+  return map
+})
 
 const sessionModel = computed(() => getModelLabel())
 

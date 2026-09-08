@@ -858,6 +858,8 @@ export const useChatStore = defineStore('chat', () => {
         change_type: (msg as any).change_type || 'edit',
         move_destination: (msg as any).move_destination,
         round_number: (msg as any).round_number ?? null,
+        old_string: (msg as any).old_string,
+        new_string: (msg as any).new_string,
       })
     })
 

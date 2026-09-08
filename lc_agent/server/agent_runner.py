@@ -127,6 +127,9 @@ class AgentRunService:
                                 tool_call_id=payload.get("tool_call_id"),
                                 move_destination=payload.get("move_destination"),
                                 round_number=payload.get("round_number"),
+                                line_start=payload.get("line_start"),
+                                context_before=payload.get("context_before"),
+                                context_after=payload.get("context_after"),
                             )
                         elif event_type == "file_change_git_snapshot":
                             await persistence.save_git_base_hash(

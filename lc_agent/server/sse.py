@@ -503,6 +503,9 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                                 tool_call_id=evt_data.get("tool_call_id"),
                                 move_destination=evt_data.get("move_destination"),
                                 round_number=evt_data.get("round_number"),
+                                line_start=evt_data.get("line_start"),
+                                context_before=evt_data.get("context_before"),
+                                context_after=evt_data.get("context_after"),
                             ))
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                             last_event_time = time.time()
@@ -827,6 +830,9 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                                 tool_call_id=evt_data.get("tool_call_id"),
                                 move_destination=evt_data.get("move_destination"),
                                 round_number=evt_data.get("round_number"),
+                                line_start=evt_data.get("line_start"),
+                                context_before=evt_data.get("context_before"),
+                                context_after=evt_data.get("context_after"),
                             ))
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                             last_event_time = time.time()

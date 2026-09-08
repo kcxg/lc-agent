@@ -8,6 +8,7 @@
     :close-on-click-modal="true"
     :close-on-press-escape="true"
     class="file-changes-drawer"
+    @opened="handleDrawerOpened"
   >
     <template #header>
       <div class="drawer-header">
@@ -110,6 +111,7 @@
           class="file-header"
           role="button"
           tabindex="0"
+          :data-file-path="file.file_path"
           :aria-expanded="expandedFiles.has(file.file_path)"
           @click="toggleExpand(file.file_path)"
           @keydown.enter="toggleExpand(file.file_path)"
@@ -263,7 +265,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import { useFileChangesStore } from '@/stores/file-changes'
 import { useSessionsStore } from '@/stores/sessions'
@@ -382,6 +384,27 @@ async function toggleExpand(filePath: string) {
   }
 }
 
+// 卡片点击：打开 Drawer 后自动展开并滚动定位到该文件
+watch(() => store.pendingOpenFile, (path) => {
+  if (path) void handlePendingOpenFile(path)
+})
+
+async function handleDrawerOpened() {
+  if (store.pendingOpenFile) await handlePendingOpenFile(store.pendingOpenFile)
+}
+
+async function handlePendingOpenFile(path: string) {
+  store.pendingOpenFile = null
+  if (!expandedFiles.has(path)) await toggleExpand(path)
+  await nextTick()
+  try {
+    const el = document.querySelector(`[data-file-path="${CSS.escape(path)}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  } catch {
+    // 选择器转义失败则忽略滚动定位
+  }
+}
+
 function renderUnifiedDiff(unifiedDiff: string, filePath: string): string {
   try {
     return diff2htmlHtml(unifiedDiff, {
@@ -406,15 +429,23 @@ function renderDiff(data: any, filePath: string): string {
   unifiedLines.push(`+++ b/${getFileName(filePath)}`)
 
   for (const hunk of hunks) {
+    const lineStart = hunk.line_start ?? 1
+    const ctxBefore = hunk.context_before || []
+    const ctxAfter = hunk.context_after || []
     if (hunk.type === 'edit') {
       const removed = hunk.removed || []
       const added = hunk.added || []
-      unifiedLines.push(`@@ -1,${removed.length} +1,${added.length} @@`)
+      const oldStart = Math.max(1, lineStart - ctxBefore.length)
+      unifiedLines.push(`@@ -${oldStart},${ctxBefore.length + removed.length} +${oldStart},${ctxBefore.length + added.length} @@`)
+      for (const line of ctxBefore) unifiedLines.push(` ${line}`)
       for (const line of removed) unifiedLines.push(`-${line}`)
       for (const line of added) unifiedLines.push(`+${line}`)
+      for (const line of ctxAfter) unifiedLines.push(` ${line}`)
     } else if (hunk.type === 'create' || hunk.type === 'append') {
       const added = hunk.added || []
-      unifiedLines.push(`@@ -0,0 +1,${added.length} @@`)
+      const oldStart = Math.max(1, lineStart - ctxBefore.length)
+      unifiedLines.push(`@@ -${oldStart},${ctxBefore.length} +${oldStart},${ctxBefore.length + added.length} @@`)
+      for (const line of ctxBefore) unifiedLines.push(` ${line}`)
       for (const line of added) unifiedLines.push(`+${line}`)
     } else if (hunk.type === 'delete') {
       unifiedLines.push(`@@ -1,1 +0,0 @@`)
@@ -437,6 +468,7 @@ function renderDiff(data: any, filePath: string): string {
 }
 
 watch(() => store.selectedRound, () => {
+
   // 轮次切换后缓存的 diff 内容不再适用，全部作废
   expandedFiles.clear()
   expandedSubSessions.clear()
@@ -830,6 +862,11 @@ watch(() => store.isDrawerOpen, async (open) => {
   min-width: 40px !important;
   padding: 0 4px !important;
   box-sizing: border-box !important;
+}
+
+/* 上下文行的旧/新行号相同，只显示新文件一侧，避免重复。 */
+.diff-content :deep(.d2h-cntx .line-num1) {
+  display: none;
 }
 
 .diff-content :deep(.d2h-code-line) {

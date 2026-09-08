@@ -10,10 +10,11 @@ def _build_pydantic_model(tool_name: str, input_schema: dict) -> type[BaseModel]
     """Dynamically create a Pydantic model from JSON Schema."""
     properties = input_schema.get("properties", {})
     required = set(input_schema.get("required", []))
+    defs = input_schema.get("$defs", {}) or input_schema.get("definitions", {})
 
     fields: dict[str, Any] = {}
     for prop_name, prop_def in properties.items():
-        python_type = _json_type_to_python(prop_def.get("type", "string"))
+        python_type = _json_type_to_python(prop_def, defs)
         description = prop_def.get("description", "")
         if prop_name in required:
             fields[prop_name] = (python_type, Field(description=description))
@@ -27,8 +28,14 @@ def _build_pydantic_model(tool_name: str, input_schema: dict) -> type[BaseModel]
     return create_model(model_name, **fields)
 
 
-def _json_type_to_python(json_type: str) -> type:
-    """Map JSON Schema type to Python type."""
+def _json_type_to_python(prop_def: dict, defs: dict | None = None) -> type:
+    """Map a JSON Schema property definition to a Python type.
+
+    Handles the common JSON Schema shapes emitted by MCP servers (e.g. FastMCP):
+    a plain ``type``, ``anyOf``/``oneOf`` unions — Optional fields are rendered as
+    ``[type, "null"]`` without a top-level ``type`` — and ``$ref`` into
+    ``$defs``/``definitions``. Unknown or unresolvable shapes fall back to ``str``.
+    """
     mapping = {
         "string": str,
         "integer": int,
@@ -37,7 +44,28 @@ def _json_type_to_python(json_type: str) -> type:
         "array": list,
         "object": dict,
     }
-    return mapping.get(json_type, str)
+
+    json_type = prop_def.get("type")
+    if json_type:
+        return mapping.get(json_type, str)
+
+    for key in ("anyOf", "oneOf"):
+        variants = prop_def.get(key)
+        if not variants:
+            continue
+        for variant in variants:
+            if isinstance(variant, dict) and variant.get("type") == "null":
+                continue
+            return _json_type_to_python(variant, defs)
+        return str  # union contained only "null"
+
+    ref = prop_def.get("$ref")
+    if ref and defs:
+        target = defs.get(str(ref).rsplit("/", 1)[-1])
+        if isinstance(target, dict):
+            return _json_type_to_python(target, defs)
+
+    return str
 
 
 def create_langchain_tools_from_schemas(

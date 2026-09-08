@@ -8,6 +8,8 @@ export interface FileChangeItem {
   edit_count: number
   last_change_at: string
   move_destination?: string
+  additions: number
+  deletions: number
 }
 
 export interface SubSessionChanges {
@@ -23,6 +25,10 @@ export interface RoundGroup {
   sub_sessions: SubSessionChanges[]
 }
 
+function countLines(text?: string | null): number {
+  return text ? text.split('\n').length : 0
+}
+
 export const useFileChangesStore = defineStore('fileChanges', () => {
   const files = ref<FileChangeItem[]>([])
   const subSessions = ref<SubSessionChanges[]>([])
@@ -31,6 +37,8 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
   const gitBaseHash = ref<string | null>(null)
   const isDrawerOpen = ref(false)
   const loadedSessionId = ref<string | null>(null)
+  // 待定位展开的文件：卡片点击后由 Drawer 消费（展开 diff 并滚动定位）
+  const pendingOpenFile = ref<string | null>(null)
 
   const displayFiles = computed(() => {
     if (selectedRound.value == null) return files.value
@@ -59,11 +67,19 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     file_path: string
     change_type: string
     move_destination?: string
+    old_string?: string | null
+    new_string?: string | null
   }) {
+    const additions = change.change_type === 'edit'
+      ? countLines(change.new_string)
+      : (change.change_type === 'create' || change.change_type === 'append') ? countLines(change.new_string) : 0
+    const deletions = change.change_type === 'edit' ? countLines(change.old_string) : 0
     const existing = list.find(f => f.file_path === change.file_path)
     if (existing) {
       existing.edit_count += 1
       existing.last_change_at = new Date().toISOString()
+      existing.additions += additions
+      existing.deletions += deletions
       if (change.change_type === 'delete') {
         existing.change_type = 'delete'
       } else if (change.change_type === 'move') {
@@ -79,6 +95,8 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
         edit_count: 1,
         last_change_at: new Date().toISOString(),
         move_destination: change.move_destination,
+        additions,
+        deletions,
       })
     }
   }
@@ -88,6 +106,8 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     change_type: string
     move_destination?: string
     round_number?: number | null
+    old_string?: string | null
+    new_string?: string | null
   }) {
     mergeIntoFileList(files.value, change)
     if (change.round_number != null) {
@@ -127,6 +147,7 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     gitBaseHash.value = null
     isDrawerOpen.value = false
     loadedSessionId.value = null
+    pendingOpenFile.value = null
   }
 
   return {
@@ -137,6 +158,7 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     gitBaseHash,
     isDrawerOpen,
     loadedSessionId,
+    pendingOpenFile,
     displayFiles,
     displaySubSessions,
     fileCount,

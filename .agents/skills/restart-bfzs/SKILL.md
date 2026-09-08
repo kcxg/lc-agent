@@ -61,5 +61,3 @@ The script (`scripts/restart.ps1`) performs three steps:
 - Frontend build output: `D:\codes\lc-agent\lc_agent\web\dist\`
 - Working directory for bfzs: `D:\codes\lc-agent-bfzs`
 - The script sets `PYTHONUNBUFFERED=1` for immediate log output
-
-

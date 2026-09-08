@@ -326,6 +326,9 @@ def convert_stream_event(
                 "old_string": data.get("old_string"),
                 "new_string": data.get("new_string"),
                 "move_destination": data.get("move_destination"),
+                "line_start": data.get("line_start"),
+                "context_before": data.get("context_before"),
+                "context_after": data.get("context_after"),
                 "tool_call_id": tool_call_id,
             }))
         elif custom_name == "file_change_git_snapshot":

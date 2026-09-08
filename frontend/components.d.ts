@@ -65,6 +65,7 @@ declare module 'vue' {
     ModelSelector: typeof import('./src/components/panels/ModelSelector.vue')['default']
     PermissionsPanel: typeof import('./src/components/settings/PermissionsPanel.vue')['default']
     RightPanel: typeof import('./src/components/layout/RightPanel.vue')['default']
+    RoundFileChangesCard: typeof import('./src/components/chat/RoundFileChangesCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SubAgentCard: typeof import('./src/components/chat/SubAgentCard.vue')['default']

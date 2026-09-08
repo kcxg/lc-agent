@@ -149,6 +149,9 @@ class FileChange(SQLModel, table=True):
     tool_call_id: str | None = Field(default=None)
     move_destination: str | None = Field(default=None)
     round_number: int | None = Field(default=None, index=True)  # 第几轮用户提问（1-based），旧数据为 None
+    line_start: int | None = Field(default=None)  # 变更起始行号（编辑时刻，1-based），旧数据为 None
+    context_before: str | None = Field(default=None)  # 变更点前 5 行（编辑时刻原文）
+    context_after: str | None = Field(default=None)  # 变更点后 5 行（编辑时刻原文）
     created_at: datetime = Field(default_factory=utcnow)
 
 

@@ -40,22 +40,16 @@ function Get-PortProcessIds {
         Write-Host "  Get-NetTCPConnection failed: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 
-    # netstat 兜底：某些受限环境下 & 调用 exe 会抛 "Cannot run a document in the
-    # middle of a pipeline"，Get-NetTCPConnection 已够用，这里失败只告警不中断
-    try {
-        $netstatLines = & $Netstat -ano | Select-String ":$TargetPort"
-        foreach ($line in $netstatLines) {
-            $parts = ($line.ToString().Trim() -split "\s+")
-            if ($parts.Length -ge 5 -and $parts[1] -match ":$TargetPort$") {
-                $foundPid = [int]$parts[-1]
-                # 只保留进程实际存活的 PID
-                if ($foundPid -ne 0 -and (Get-Process -Id $foundPid -ErrorAction SilentlyContinue)) {
-                    $ids += $foundPid
-                }
+    $netstatLines = & $Netstat -ano | Select-String ":$TargetPort"
+    foreach ($line in $netstatLines) {
+        $parts = ($line.ToString().Trim() -split "\s+")
+        if ($parts.Length -ge 5 -and $parts[1] -match ":$TargetPort$") {
+            $foundPid = [int]$parts[-1]
+            # 只保留进程实际存活的 PID
+            if ($foundPid -ne 0 -and (Get-Process -Id $foundPid -ErrorAction SilentlyContinue)) {
+                $ids += $foundPid
             }
         }
-    } catch {
-        Write-Host "  netstat fallback failed: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 
     $ids | Sort-Object -Unique | Where-Object { $_ -ne 0 }
@@ -104,10 +98,7 @@ if ($SkipBuild) {
     try {
         # Skip vue-tsc type checking (IDE handles it); run vite build only to avoid Zone OOM.
         $env:NODE_OPTIONS = "--max-old-space-size=3072"
-        # 用 node 直跑 vite.js：npx.ps1 垫片在严格模式下读未定义 $LASTEXITCODE 会抛错，
-        # cmd.exe 又被安全策略拦截，node.exe 原生调用最稳
-        $Node = "C:\Users\ydf6\.workbuddy\binaries\node\versions\22.22.2-2\node.exe"
-        & $Node "node_modules\vite\bin\vite.js" build
+        npx vite build
         if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
         Write-Host "Frontend build OK" -ForegroundColor Green
     } finally {

@@ -94,8 +94,17 @@ def emit_file_change(
     old_string: str | None = None,
     new_string: str | None = None,
     move_destination: str | None = None,
+    line_start: int | None = None,
+    context_before: str | None = None,
+    context_after: str | None = None,
 ) -> None:
-    """Emit a file change event for the SSE layer to persist."""
+    """Emit a file change event for the SSE layer to persist.
+
+    line_start: 1-based line number where this change begins in the file
+    (at the moment of the edit), used to render real line numbers in hunks.
+    context_before/context_after: up to 5 unchanged lines surrounding the
+    change (content as it was at edit time), rendered as diff context.
+    """
     session_id = _session_id_var.get(None)
     if not session_id:
         return
@@ -112,6 +121,9 @@ def emit_file_change(
             "old_string": old_string,
             "new_string": new_string,
             "move_destination": move_destination,
+            "line_start": line_start,
+            "context_before": context_before,
+            "context_after": context_after,
         })
     except Exception:
         pass
