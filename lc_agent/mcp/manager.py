@@ -1,8 +1,106 @@
 
 import asyncio
+import logging
 import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+from lc_agent.config.utils import DEFAULT_MCP_TOOL_TIMEOUT
+
+logger = logging.getLogger(__name__)
+
+
+class _PerServerRwLock:
+    """Per-server reader/writer lock (no third-party dependency).
+
+    - ``read()``: shared — any number of concurrent ``call_tool`` invokes.
+    - ``write()``: exclusive — reconnect / refresh / teardown paths.
+    - Writer-preferring: once a writer is waiting, new readers queue behind
+      it, so a reconnect is never starved by a steady stream of calls.
+    - The object itself used as ``async with lock:`` means ``write()``
+      (exclusive), keeping one-off external uses safe.
+    """
+
+    def __init__(self) -> None:
+        self._cond = asyncio.Condition()
+        self._readers = 0
+        self._writer = False
+        self._writers_waiting = 0
+
+    async def _acquire_read(self) -> None:
+        async with self._cond:
+            while self._writer or self._writers_waiting > 0:
+                await self._cond.wait()
+            self._readers += 1
+
+    async def _release_read(self) -> None:
+        async with self._cond:
+            self._readers -= 1
+            if self._readers == 0:
+                self._cond.notify_all()
+
+    async def _acquire_write(self) -> None:
+        async with self._cond:
+            self._writers_waiting += 1
+            try:
+                while self._writer or self._readers > 0:
+                    await self._cond.wait()
+                self._writer = True
+            finally:
+                self._writers_waiting -= 1
+
+    async def _release_write(self) -> None:
+        async with self._cond:
+            self._writer = False
+            self._cond.notify_all()
+
+    @asynccontextmanager
+    async def read(self):
+        await self._acquire_read()
+        try:
+            yield
+        finally:
+            await self._release_read()
+
+    @asynccontextmanager
+    async def write(self):
+        await self._acquire_write()
+        try:
+            yield
+        finally:
+            await self._release_write()
+
+    async def __aenter__(self):
+        await self._acquire_write()
+        return self
+
+    async def __aexit__(self, *exc):
+        await self._release_write()
+        return None
+
+
+def resolve_tool_timeout(value: Any) -> float:
+    """解析 mcp.tool_timeout 配置值，非法值回落默认 300s。
+
+    接受正数（int/float/数字字符串）；0、负数、非数字、None
+    一律回落 DEFAULT_MCP_TOOL_TIMEOUT 并打 warning，不阻断启动。
+    """
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid mcp.tool_timeout=%r, falling back to %ss",
+            value, DEFAULT_MCP_TOOL_TIMEOUT,
+        )
+        return float(DEFAULT_MCP_TOOL_TIMEOUT)
+    if timeout <= 0:
+        logger.warning(
+            "Invalid mcp.tool_timeout=%r (must be > 0), falling back to %ss",
+            value, DEFAULT_MCP_TOOL_TIMEOUT,
+        )
+        return float(DEFAULT_MCP_TOOL_TIMEOUT)
+    return timeout
 
 
 @dataclass
@@ -28,15 +126,47 @@ def _resolve_server_type(conf: dict) -> str:
 
 
 class McpManager:
-    """Manages persistent MCP server connections and tool invocation."""
+    """Manages persistent MCP server connections and tool invocation.
 
-    def __init__(self, config: dict[str, dict], on_state_change: Callable[[], None] | None = None):
+    Lock protocol (deadlock avoidance — read before touching):
+
+    - ``_locks[name]`` (per-server reader/writer lock): concurrent
+      ``call_tool`` invokes on one server hold the SHARED side, so they
+      run in parallel; every path that tears a session down
+      (refresh/reconnect/merge/clear/shutdown) takes the EXCLUSIVE side.
+      The lock object itself is never replaced, only created once via
+      ``_call_lock``.
+    - ``_refresh_locks[name]``: serializes concurrent reconnects for one
+      server. Acquisition order is ALWAYS call lock → refresh lock,
+      never the reverse.
+    - Locks are not reentrant: code running under the call lock
+      (``call_tool`` → ``_reconnect_server`` → ``_refresh_server_impl``)
+      must NEVER acquire the call lock again. That is why ``refresh_server``
+      (public, takes the call lock) and ``_refresh_server_impl`` (assumes
+      the caller already holds it) are split — routing the reconnect path
+      through the public entry would self-deadlock.
+    - Session identity is additionally guarded by a generation counter
+      (``_generations``): every teardown/establish bumps it, so a caller
+      can detect that its snapshot was replaced out from under it and
+      retry on the current session instead of reconnecting redundantly.
+      This is what makes parallel same-session calls safe when a
+      concurrent writer swaps the session mid-flight.
+    """
+
+    def __init__(
+        self,
+        config: dict[str, dict],
+        on_state_change: Callable[[], None] | None = None,
+        tool_timeout: Any = DEFAULT_MCP_TOOL_TIMEOUT,
+    ):
         self._config = config
         self._on_state_change = on_state_change
+        self._tool_timeout = resolve_tool_timeout(tool_timeout)
         self._servers: dict[str, McpServerStatus] = {}
         self._sessions: dict[str, Any] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, _PerServerRwLock] = {}
         self._refresh_locks: dict[str, asyncio.Lock] = {}
+        self._generations: dict[str, int] = {}
         self._server_contexts: dict[str, tuple[Any, Any]] = {}
         self._project_server_names: set[str] = set()
 
@@ -61,6 +191,17 @@ class McpManager:
     def get_server(self, name: str) -> McpServerStatus | None:
         return self._servers.get(name)
 
+    def _call_lock(self, name: str) -> _PerServerRwLock:
+        """Return the never-replaced per-server reader/writer lock, creating it once."""
+        return self._locks.setdefault(name, _PerServerRwLock())
+
+    def _snapshot(self, name: str) -> tuple[Any | None, int]:
+        """Current (session, generation) pair for stale-session comparison."""
+        return self._sessions.get(name), self._generations.get(name, 0)
+
+    def _bump_generation(self, name: str) -> None:
+        self._generations[name] = self._generations.get(name, 0) + 1
+
     def _notify_state_change(self) -> None:
         """Notify the owner that MCP state changed without coupling to the engine."""
         if self._on_state_change is None:
@@ -81,10 +222,23 @@ class McpManager:
         self._notify_state_change()
 
     async def _cleanup_server(self, name: str) -> None:
-        """Close and forget a single server's persistent connection."""
-        self._sessions.pop(name, None)
-        self._locks.pop(name, None)
+        """Close and forget a single server's persistent connection.
+
+        The per-server lock object is intentionally kept: concurrent callers
+        may be waiting on it, and destroying it would orphan them onto a dead
+        lock while a fresh lock guards the new session (TOCTOU).
+
+        Callers that can run concurrently with in-flight calls must hold the
+        EXCLUSIVE side around this (see ``refresh_server``/``shutdown``);
+        otherwise ``__aexit__`` may run in a different task than the
+        in-flight ``call_tool`` and anyio will refuse to exit its cancel
+        scope ("Attempted to exit cancel scope in a different task"),
+        leaking the connection.
+        """
+        had_session = self._sessions.pop(name, None) is not None
         contexts = self._server_contexts.pop(name, None)
+        if had_session or contexts is not None:
+            self._bump_generation(name)
         if contexts is None:
             return
 
@@ -99,17 +253,34 @@ class McpManager:
             pass
 
     async def _reconnect_server(self, name: str) -> bool:
-        """Reconnect one enabled configured server after a persistent session fails."""
-        server = self._servers.get(name)
-        conf = self._config.get(name)
-        if server is None or conf is None or not server.enabled:
-            return False
+        """Reconnect one enabled configured server after a persistent session fails.
 
-        await self.refresh_server(name)
-        return name in self._sessions and self._servers[name].status == "connected"
+        Must be called WITHOUT holding the call lock: it takes the EXCLUSIVE
+        side itself (via ``refresh_server``), which serializes against
+        in-flight shared-side ``call_tool`` invokes. Never call this from a
+        context that already holds any side of the same per-server lock —
+        locks are not reentrant and that would self-deadlock.
+        """
+        return (await self.refresh_server(name)).status == "connected"
 
     async def refresh_server(self, name: str) -> McpServerStatus:
-        """Reconnect one configured server and refresh its tool schemas."""
+        """Reconnect one configured server and refresh its tool schemas.
+
+        Public entry: takes the EXCLUSIVE side of the per-server lock, so
+        the teardown below waits for in-flight shared-side ``call_tool``
+        invokes to drain (cross-task cancel-scope exit), and new invokes
+        queue behind the reconnect instead of racing it.
+        """
+        async with self._call_lock(name):
+            return await self._refresh_server_impl(name)
+
+    async def _refresh_server_impl(self, name: str) -> McpServerStatus:
+        """Reconnect internals. Assumes the caller holds the EXCLUSIVE side.
+
+        MUST NOT acquire the per-server lock itself (locks are not
+        reentrant — doing so from a locked context deadlocks). Only takes
+        the refresh lock, after the call lock: the documented global order.
+        """
         server = self._servers.get(name)
         conf = self._config.get(name)
         if server is None or conf is None:
@@ -158,7 +329,12 @@ class McpManager:
         added: list[str] = []
         for name, conf in project_config.items():
             if name in self._servers and name not in self._project_server_names:
-                await self._cleanup_server(name)
+                # Exclusive side: drain in-flight shared-side calls first.
+                # Tearing the session down while another task is inside
+                # session.call_tool makes anyio refuse the cross-task
+                # cancel-scope exit (leaked connection).
+                async with self._call_lock(name):
+                    await self._cleanup_server(name)
             self._project_server_names.add(name)
             self._config[name] = conf
             server_type = _resolve_server_type(conf)
@@ -188,7 +364,8 @@ class McpManager:
     async def clear_project_servers(self) -> None:
         """Remove all project-level MCP servers and disconnect them."""
         for name in list(self._project_server_names):
-            await self._cleanup_server(name)
+            async with self._call_lock(name):
+                await self._cleanup_server(name)
             self._servers.pop(name, None)
             self._config.pop(name, None)
         if self._project_server_names:
@@ -314,26 +491,45 @@ class McpManager:
         self._servers[name].tools = tool_names
         self._servers[name].tool_schemas = tool_schemas
         self._servers[name].error = None
-        self._locks[name] = asyncio.Lock()
+        self._bump_generation(name)
+        self._call_lock(name)
         self._notify_state_change()
 
     async def _call_tool_once(self, server_name: str, tool_name: str, arguments: dict) -> str:
+        """Invoke once on the current session.
+
+        Looks the session up at call time so a concurrent reconnect cannot
+        swap it out from under an in-flight call (stale-session TOCTOU).
+        May be called without holding the call lock (e.g. in tests); the
+        multi-step ``call_tool`` always holds it.
+        """
         session = self._sessions.get(server_name)
         if session is None:
             raise RuntimeError(f"MCP server '{server_name}' not connected")
+        return await self._invoke_session(session, server_name, tool_name, arguments)
 
-        lock = self._locks.get(server_name)
-        if lock:
-            async with lock:
-                result = await asyncio.wait_for(
-                    session.call_tool(tool_name, arguments),
-                    timeout=60.0,
-                )
-        else:
+    async def _invoke_session(self, session: Any, server_name: str, tool_name: str, arguments: dict) -> str:
+        """Invoke once on an already-resolved session object.
+
+        Bare CancelledError is normalized to RuntimeError: our own
+        tool timeout surfaces as TimeoutError, so a bare CancelledError
+        here means an inner MCP scope was torn down mid-call — except
+        when the outer task itself is being cancelled (user stop), which
+        must keep propagating as CancelledError.
+        """
+        try:
             result = await asyncio.wait_for(
                 session.call_tool(tool_name, arguments),
-                timeout=60.0,
+                timeout=self._tool_timeout,
             )
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling() > 0:
+                raise
+            raise RuntimeError(
+                f"MCP tool '{tool_name}' was interrupted mid-call "
+                f"(connection to '{server_name}' was torn down)"
+            ) from None
 
         parts = []
         for content in result.content:
@@ -344,48 +540,79 @@ class McpManager:
         return "\n".join(parts) if parts else "(empty result)"
 
     async def call_tool(self, server_name: str, tool_name: str, arguments: dict) -> str:
-        """Invoke a tool on a connected MCP server, reconnecting once if needed."""
-        server = self._servers.get(server_name)
-        if server is not None and not server.enabled:
-            await self._cleanup_server(server_name)
-            server.status = "disabled"
-            return f"MCP server '{server_name}' is disabled"
+        """Invoke a tool on a connected MCP server, reconnecting once if needed.
 
-        if self._sessions.get(server_name) is None:
-            if server is not None and server_name in self._config:
-                if await self._reconnect_server(server_name):
+        Concurrency: the fast path (snapshot → invoke) holds the SHARED side
+        of the per-server lock, so concurrent invokes on one server run in
+        parallel. A failed invoke drops the shared side, takes the EXCLUSIVE
+        side for reconnect → retry (serialized against other invokes via the
+        writer-preferring lock), then releases it.
+
+        Stale-snapshot guard: the (session, generation) pair is captured
+        before invoking. If the invoke fails but the pair has since changed,
+        someone repaired the connection out-of-band (e.g. a refresh that
+        raced us) — retry once on the current session instead of triggering
+        a redundant reconnect. Retries always re-snapshot under the shared
+        side, never reuse a session object across a lock release.
+        """
+        lock = self._call_lock(server_name)
+        async with lock.read():
+            server = self._servers.get(server_name)
+            if server is not None and not server.enabled:
+                server.status = "disabled"
+                return f"MCP server '{server_name}' is disabled"
+
+            session, _ = self._snapshot(server_name)
+            if session is None:
+                needs_reconnect = server is not None and server_name in self._config
+                initial_error = f"MCP server '{server_name}' not connected"
+            else:
+                try:
+                    return await self._invoke_session(session, server_name, tool_name, arguments)
+                except asyncio.TimeoutError:
+                    initial_error = f"MCP tool '{tool_name}' timed out after {self._tool_timeout:g}s"
+                except Exception as e:
+                    initial_error = f"MCP tool error: {e}"
+
+                current_session, _ = self._snapshot(server_name)
+                if current_session is not None and current_session is not session:
+                    # Repaired out from under us — retry on the current
+                    # session, no reconnect of our own.
                     try:
-                        return await self._call_tool_once(server_name, tool_name, arguments)
+                        return await self._invoke_session(
+                            current_session, server_name, tool_name, arguments
+                        )
                     except Exception as e:
-                        self._set_server_error(server_name, str(e))
-                        await self._cleanup_server(server_name)
-                        return f"MCP tool error after reconnect: {e}"
-                reconnect_error = server.error or f"MCP server '{server_name}' not connected"
-                return f"MCP server '{server_name}' reconnect failed: {reconnect_error}"
+                        initial_error = f"MCP tool error after external reconnect: {e}"
+
+                needs_reconnect = True
+
+        # Shared side released: reconnect (exclusive) + retry, then report.
+        if not needs_reconnect:
             return f"MCP server '{server_name}' not connected"
 
-        try:
-            return await self._call_tool_once(server_name, tool_name, arguments)
-        except asyncio.TimeoutError:
-            initial_error = f"MCP tool '{tool_name}' timed out after 60s"
-        except Exception as e:
-            initial_error = f"MCP tool error: {e}"
-
-        self._set_server_error(server_name, initial_error)
         if not await self._reconnect_server(server_name):
             server = self._servers.get(server_name)
-            reconnect_error = server.error if server and server.error else initial_error
-            return f"MCP server '{server_name}' reconnect failed: {reconnect_error}"
+            err = server.error if server and server.error else initial_error
+            return f"MCP server '{server_name}' reconnect failed: {err}"
 
-        try:
-            return await self._call_tool_once(server_name, tool_name, arguments)
-        except asyncio.TimeoutError:
-            final_error = f"MCP tool '{tool_name}' timed out after reconnect"
-        except Exception as e:
-            final_error = f"MCP tool error after reconnect: {e}"
+        # Retry on the fresh session under a new shared hold. On failure the
+        # session is torn down under the exclusive side so a broken session
+        # is never left behind for the next caller.
+        async with lock.read():
+            try:
+                return await self._call_tool_once(server_name, tool_name, arguments)
+            except asyncio.TimeoutError:
+                final_error = (
+                    f"MCP tool '{tool_name}' timed out "
+                    f"after {self._tool_timeout:g}s (after reconnect)"
+                )
+            except Exception as e:
+                final_error = f"MCP tool error after reconnect: {e}"
 
-        self._set_server_error(server_name, final_error)
-        await self._cleanup_server(server_name)
+        async with lock:
+            self._set_server_error(server_name, final_error)
+            await self._cleanup_server(server_name)
         return final_error
 
     def get_tools_for_server(self, server_name: str) -> list[str]:
@@ -429,4 +656,5 @@ class McpManager:
     async def shutdown(self):
         """Clean up all persistent connections."""
         for name in list(self._server_contexts):
-            await self._cleanup_server(name)
+            async with self._call_lock(name):
+                await self._cleanup_server(name)

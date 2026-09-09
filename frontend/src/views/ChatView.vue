@@ -745,8 +745,7 @@ function getModelLabel(): string {
   if (agentsStore.isCodeAgent) return '代码内定义'
   const model = toolsStore.currentModel || agentsStore.currentAgent?.default_model || ''
   if (!model) return '模型未选择'
-  const parts = model.split('/')
-  return parts[parts.length - 1] || model
+  return model
 }
 
 const thinkingExpandedBySegment = ref<Record<string, boolean>>({})

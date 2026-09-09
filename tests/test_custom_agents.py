@@ -63,7 +63,7 @@ async def test_api_agents_includes_custom(tmp_path):
         "database": {"url": db_url, "checkpoint_path": ":memory:"},
     }
     app_instance = LcAgentApp(config)
-    headers = await setup_test_auth(app_instance.fastapi_app, db_url)
+    headers = await setup_test_auth(app_instance.fastapi_app)
 
     mock_graph = MagicMock()
     app_instance.add_agent("api_agent", mock_graph, description="API test")
@@ -98,7 +98,7 @@ async def test_api_custom_agent_not_deletable(tmp_path):
         "database": {"url": db_url, "checkpoint_path": ":memory:"},
     }
     app_instance = LcAgentApp(config)
-    headers = await setup_test_auth(app_instance.fastapi_app, db_url)
+    headers = await setup_test_auth(app_instance.fastapi_app)
 
     mock_graph = MagicMock()
     app_instance.add_agent("protected", mock_graph)

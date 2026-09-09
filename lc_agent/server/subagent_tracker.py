@@ -31,14 +31,12 @@ class SubAgentRunTracker:
     def __init__(
         self,
         *,
-        db_url: str,
         parent_thread_id: str,
         user_id: str,
         subagent_display_map: dict[str, str],
         tool_calls: list[dict[str, Any]],
         existing_subsession_ids: set[str] | None = None,
     ) -> None:
-        self.db_url = db_url
         self.parent_thread_id = parent_thread_id
         self.user_id = user_id
         self.subagent_display_map = subagent_display_map
@@ -123,7 +121,6 @@ class SubAgentRunTracker:
             self._enqueue_persistence(
                 tool_call_id,
                 lambda: persistence.create_subsession(
-                    self.db_url,
                     sub_session_id,
                     self.parent_thread_id,
                     tool_call_id,
@@ -135,7 +132,6 @@ class SubAgentRunTracker:
             self._enqueue_persistence(
                 tool_call_id,
                 lambda: persistence.save_subsession_delegation_message(
-                    self.db_url,
                     sub_session_id,
                     query,
                 ),
@@ -206,7 +202,6 @@ class SubAgentRunTracker:
         self._enqueue_persistence(
             tool_call_id,
             lambda: persistence.finalize_subsession_message(
-                self.db_url,
                 run.sub_session_id,
                 content,
                 tool_calls=run.inner_tool_calls or None,

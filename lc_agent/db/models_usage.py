@@ -31,11 +31,11 @@ class LlmUsage(SQLModel, table=True):
     session_id: str = Field(default="", index=True)
     parent_session_id: str | None = Field(default=None, index=True)
     agent_id: str = Field(default="", index=True)
-    model_id: str = Field(default="", index=True)  # 自己命名的、全局唯一（标识/统计/显示都用它），见 §3.5
+    model_id: str = Field(default="", index=True)  # 前端用的全局唯一别名（标识/统计/显示用，从不进请求体），见 §3.5
     raw_model_id: str = Field(
         default="",
         sa_column=Column(String, nullable=False, server_default=text("''")),
-    )  # 供应商提供的原始模型名（定价兜底 + 统计归并用）
+    )  # 渠道期望的真实模型名（请求一律发这个）兼定价兜底 + 统计归并用
     provider: str = Field(default="")  # 纯记录字段：凭据分组，不参与任何 key
     role: str = "main"  # main(主会话) | sub(子 agent)
     sub_session_id: str = ""  # role=sub 时为子会话 id

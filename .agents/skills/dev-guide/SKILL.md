@@ -5,8 +5,7 @@ description: >-
   编写、修改、运行这两个项目代码时必须遵循此 Skill。
 ---
 
-# 禁止行为
-不要在代码里面写 `from __future__ import annotations` 
+
 
 # lc-agent 开发指南
 
@@ -162,13 +161,18 @@ def build_my_agent(config: dict):
     """构建自定义 Agent Graph"""
     # 从 config 获取 LLM 配置
     provider_conf = list(config.get("provider", {}).values())[0]
-    # default_model 的值域是配置里的 model_id（自己命名的全局唯一模型名，
-    # 标识/统计/显示都用它；渠道原始模型名另存于条目的 raw_model_id，仅定价兜底/统计归并用）
+    # default_model 的值域是配置里的 model_id（前端用的全局唯一别名）。
+    # 请求一律发同条目的 raw_model_id（渠道真实模型名），model_id 从不进请求体。
+    # 框架内用 engine.resolve_request_model(model_id) 换真实名；
+    # 手写 LLM 时自己按 model_id 查到条目再取 raw_model_id。
+    from lc_agent import get_config
+    from lc_agent.core.engine import AgentEngine
+    _engine = AgentEngine(get_config())
     model_id = config.get("agent", {}).get("default_model", "")
-    
+
     from lc_agent.core.chat_model import ChatOpenAIReasoning
     llm = ChatOpenAIReasoning(
-        model=model_id,
+        model=_engine.resolve_request_model(model_id),
         base_url=provider_conf.get("base_url", ""),
         api_key=provider_conf.get("api_key", ""),
         temperature=0.3,
@@ -466,7 +470,7 @@ from lc_agent import get_app_name, get_database_url
 from lc_agent.config import get_config_value
 config = get_config()
 app_name = get_app_name()
-db_url = get_database_url()
+
 value = get_config_value(config, "agent.default_model", "")  # 点路径读取
 
 # 兼容写法：显式加载并传 dict（会同步注册为全局）

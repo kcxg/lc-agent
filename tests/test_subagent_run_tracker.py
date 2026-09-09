@@ -6,7 +6,6 @@ def test_tracker_enriches_subagent_tool_call_event():
 
     tool_calls = [{"name": "research_expert", "runId": "task123", "status": "running"}]
     tracker = SubAgentRunTracker(
-        db_url="db",
         parent_thread_id="parent1",
         user_id="",
         subagent_display_map={"research_expert": "研究专家"},
@@ -45,7 +44,6 @@ async def test_tracker_start_uses_task_payload_display_name(monkeypatch):
 
     tool_calls = [{"name": "funboost教程查询智能体", "runId": "task123", "status": "running"}]
     tracker = SubAgentRunTracker(
-        db_url="db",
         parent_thread_id="parent1",
         user_id="",
         subagent_display_map={"funboost": "funboost教程查询智能体"},
@@ -91,7 +89,6 @@ async def test_tracker_creates_subsession_when_parent_tool_call_is_only_enriched
     monkeypatch.setattr(subagent_tracker.persistence, "save_subsession_delegation_message", fake_delegation)
 
     tracker = SubAgentRunTracker(
-        db_url="db",
         parent_thread_id="parent1",
         user_id="",
         subagent_display_map={"research_expert": "研究专家"},
@@ -131,7 +128,6 @@ async def test_tracker_does_not_recreate_resume_subsession(monkeypatch):
     monkeypatch.setattr(subagent_tracker.persistence, "save_subsession_delegation_message", fake_delegation)
 
     tracker = SubAgentRunTracker(
-        db_url="db",
         parent_thread_id="parent1",
         user_id="",
         subagent_display_map={"research_expert": "研究专家"},
@@ -162,14 +158,14 @@ async def test_tracker_start_token_done_persists_subsession(monkeypatch):
 
     calls = []
 
-    async def fake_create_subsession(db_url, sub_session_id, parent_session_id, tool_call_id, agent_id, title, user_id=""):
-        calls.append(("create", db_url, sub_session_id, parent_session_id, tool_call_id, agent_id, title, user_id))
+    async def fake_create_subsession(sub_session_id, parent_session_id, tool_call_id, agent_id, title, user_id=""):
+        calls.append(("create", sub_session_id, parent_session_id, tool_call_id, agent_id, title, user_id))
 
-    async def fake_delegation(db_url, sub_session_id, query):
-        calls.append(("delegation", db_url, sub_session_id, query))
+    async def fake_delegation(sub_session_id, query):
+        calls.append(("delegation", sub_session_id, query))
 
-    async def fake_finalize(db_url, sub_session_id, content, tool_calls=None, http_traces=None):
-        calls.append(("finalize", db_url, sub_session_id, content, tool_calls, http_traces))
+    async def fake_finalize(sub_session_id, content, tool_calls=None, http_traces=None):
+        calls.append(("finalize", sub_session_id, content, tool_calls, http_traces))
 
     monkeypatch.setattr(subagent_tracker.persistence, "create_subsession", fake_create_subsession)
     monkeypatch.setattr(subagent_tracker.persistence, "save_subsession_delegation_message", fake_delegation)
@@ -178,7 +174,6 @@ async def test_tracker_start_token_done_persists_subsession(monkeypatch):
 
     tool_calls = [{"name": "research_expert", "runId": "task123", "status": "running"}]
     tracker = SubAgentRunTracker(
-        db_url="sqlite+aiosqlite:///test.db",
         parent_thread_id="parent1",
         user_id="user1",
         subagent_display_map={"research_expert": "研究专家"},
@@ -228,7 +223,6 @@ async def test_tracker_start_token_done_persists_subsession(monkeypatch):
     await tracker.drain()
     assert calls[0] == (
         "create",
-        "sqlite+aiosqlite:///test.db",
         "parent1--sa--task123",
         "parent1",
         "task123",
@@ -236,10 +230,9 @@ async def test_tracker_start_token_done_persists_subsession(monkeypatch):
         "研究专家: quantum",
         "user1",
     )
-    assert calls[1] == ("delegation", "sqlite+aiosqlite:///test.db", "parent1--sa--task123", "quantum")
+    assert calls[1] == ("delegation", "parent1--sa--task123", "quantum")
     assert calls[2] == (
         "finalize",
-        "sqlite+aiosqlite:///test.db",
         "parent1--sa--task123",
         "hello world",
         None,
@@ -258,16 +251,16 @@ async def test_tracker_persists_each_run_in_create_delegation_finalize_order(mon
     create_started = asyncio.Event()
     allow_create_finish = asyncio.Event()
 
-    async def fake_create_subsession(db_url, sub_session_id, parent_session_id, tool_call_id, agent_id, title, user_id=""):
+    async def fake_create_subsession(sub_session_id, parent_session_id, tool_call_id, agent_id, title, user_id=""):
         calls.append(("create-start", sub_session_id))
         create_started.set()
         await allow_create_finish.wait()
         calls.append(("create-end", sub_session_id))
 
-    async def fake_delegation(db_url, sub_session_id, query):
+    async def fake_delegation(sub_session_id, query):
         calls.append(("delegation", sub_session_id))
 
-    async def fake_finalize(db_url, sub_session_id, content, tool_calls=None, http_traces=None):
+    async def fake_finalize(sub_session_id, content, tool_calls=None, http_traces=None):
         calls.append(("finalize", sub_session_id))
 
     monkeypatch.setattr(subagent_tracker.persistence, "create_subsession", fake_create_subsession)
@@ -276,7 +269,6 @@ async def test_tracker_persists_each_run_in_create_delegation_finalize_order(mon
     monkeypatch.setattr(subagent_tracker, "pop_subagent_traces", lambda sub_session_id: None)
 
     tracker = SubAgentRunTracker(
-        db_url="db",
         parent_thread_id="parent1",
         user_id="",
         subagent_display_map={},
@@ -312,7 +304,7 @@ async def test_tracker_records_thinking_and_internal_tools(monkeypatch):
     async def fake_noop(*args, **kwargs):
         return None
 
-    async def fake_finalize(db_url, sub_session_id, content, tool_calls=None, http_traces=None):
+    async def fake_finalize(sub_session_id, content, tool_calls=None, http_traces=None):
         finalized.append((content, tool_calls, http_traces))
 
     monkeypatch.setattr(subagent_tracker.persistence, "create_subsession", fake_noop)
@@ -321,7 +313,6 @@ async def test_tracker_records_thinking_and_internal_tools(monkeypatch):
     monkeypatch.setattr(subagent_tracker, "pop_subagent_traces", lambda sub_session_id: None)
 
     tracker = SubAgentRunTracker(
-        db_url="db",
         parent_thread_id="parent1",
         user_id="",
         subagent_display_map={},
@@ -357,7 +348,7 @@ async def test_tracker_preserves_token_tool_token_order(monkeypatch):
     async def fake_noop(*args, **kwargs):
         return None
 
-    async def fake_finalize(db_url, sub_session_id, content, tool_calls=None, http_traces=None):
+    async def fake_finalize(sub_session_id, content, tool_calls=None, http_traces=None):
         finalized.append((content, tool_calls, http_traces))
 
     monkeypatch.setattr(subagent_tracker.persistence, "create_subsession", fake_noop)
@@ -366,7 +357,6 @@ async def test_tracker_preserves_token_tool_token_order(monkeypatch):
     monkeypatch.setattr(subagent_tracker, "pop_subagent_traces", lambda sub_session_id: None)
 
     tracker = SubAgentRunTracker(
-        db_url="db",
         parent_thread_id="parent1",
         user_id="",
         subagent_display_map={},
@@ -395,7 +385,7 @@ async def test_tracker_finalize_open_runs_marks_error(monkeypatch):
     async def fake_noop(*args, **kwargs):
         return None
 
-    async def fake_finalize(db_url, sub_session_id, content, tool_calls=None, http_traces=None):
+    async def fake_finalize(sub_session_id, content, tool_calls=None, http_traces=None):
         finalized.append((sub_session_id, content, tool_calls, http_traces))
 
     monkeypatch.setattr(subagent_tracker.persistence, "create_subsession", fake_noop)
@@ -404,7 +394,6 @@ async def test_tracker_finalize_open_runs_marks_error(monkeypatch):
     monkeypatch.setattr(subagent_tracker, "pop_subagent_traces", lambda sub_session_id: None)
 
     tracker = SubAgentRunTracker(
-        db_url="db",
         parent_thread_id="parent1",
         user_id="",
         subagent_display_map={},
@@ -636,7 +625,7 @@ async def test_resume_stream_routes_subagent_events_through_tracker(monkeypatch)
     assert handled_events[2][0] == "subagent_done"
     assert "tracked" in "".join(body_chunks)
     assert appended_messages
-    assert "<!--HTTP:2-->" in appended_messages[0][0][2]
+    assert "<!--HTTP:2-->" in appended_messages[0][0][1]
 
 
 @pytest.mark.asyncio

@@ -417,7 +417,12 @@
                         可以作为子 Agent
                       </el-checkbox>
                     </div>
-                    <div v-if="form.can_be_subagent" class="subagent-default-description">
+                    <div class="subagent-capability-toggle">
+                      <el-checkbox v-model="form.can_be_mcp">
+                        对外暴露为 MCP（外部 Agent 可调用，无鉴权下请谨慎开启）
+                      </el-checkbox>
+                    </div>
+                    <div v-if="form.can_be_subagent || form.can_be_mcp" class="subagent-default-description">
                       <el-input
                         v-model="form.default_delegation_description"
                         type="textarea"
@@ -1282,6 +1287,7 @@ const form = ref({
   default_model: '',
   default_delegation_description: '',
   can_be_subagent: false,
+  can_be_mcp: false,
   llm_params: null as Record<string, any> | null,
   subagents: [] as AgentSubagentConfig[],
   enable_general_purpose_subagent: false,
@@ -1488,6 +1494,7 @@ async function _populateFormFromAgent(
   form.value.default_model = agent.default_model
   form.value.default_delegation_description = agent.default_delegation_description ?? ''
   form.value.can_be_subagent = agent.can_be_subagent ?? false
+  form.value.can_be_mcp = (agent as any).can_be_mcp ?? false
   form.value.llm_params = agent.llm_params ? { ...agent.llm_params } : null
   form.value.subagents = agent.subagents ? agent.subagents.map(item => ({ ...item })) : []
   form.value.enable_general_purpose_subagent = agent.enable_general_purpose_subagent ?? false
@@ -1547,6 +1554,7 @@ async function _loadNewForm() {
     default_model: toolsStore.currentModel,
     default_delegation_description: '',
     can_be_subagent: false,
+    can_be_mcp: false,
     llm_params: null,
     subagents: [],
     enable_general_purpose_subagent: false,
@@ -1784,10 +1792,10 @@ async function handleSave() {
       }
     }
 
-    if (form.value.can_be_subagent && !form.value.default_delegation_description.trim()) {
+    if ((form.value.can_be_subagent || (form.value as any).can_be_mcp) && !form.value.default_delegation_description.trim()) {
       activeTab.value = 'basic'
       await ElMessageBox.alert(
-        '已勾选「可以作为子 Agent」，请填写「作为子 Agent 时候的触发描述」，否则其他 Agent 无法判断何时委派给它。',
+        '已勾选「可以作为子 Agent」或「对外暴露为 MCP」，请填写触发描述（两者共用同一描述），否则其他 Agent 无法判断何时委派给它。',
         '无法保存',
         { type: 'error', confirmButtonText: '去填写' }
       )
@@ -1822,6 +1830,7 @@ async function handleSave() {
       default_model: form.value.default_model,
       default_delegation_description: form.value.default_delegation_description.trim(),
       can_be_subagent: form.value.can_be_subagent,
+      can_be_mcp: (form.value as any).can_be_mcp ?? false,
       allowed_tool_groups,
       allowed_mcp_servers,
       allowed_skills,

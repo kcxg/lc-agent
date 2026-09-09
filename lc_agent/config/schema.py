@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class ModelConfig(BaseModel):
-    model_id: str       # 自己命名的、全局唯一（标识/统计/前端显示都用它）
-    raw_model_id: str   # 供应商提供的原始模型名（定价兜底 + 统计归并用）
+    model_id: str       # 前端用的全局唯一别名（标识/统计/显示用，从不进请求体）
+    raw_model_id: str   # 渠道期望的真实模型名（请求一律发这个）兼定价兜底 + 统计归并用
     context_limit: int = 8000  # maps to LangChain profile["max_input_tokens"]
     max_output_tokens: int = 65536
 
@@ -61,6 +61,9 @@ class McpServerConfig(BaseModel):
 class AuthConfig(BaseModel):
     secret: str = ""
     token_expire_days: int = 7
+    # 系统账号名：框架自动创建，用于归属非真人发起的调用（见 docs/tasks/lcagent_as_mcp.md）。
+    # 管理界面把它标记为"系统"，角色锁定为 user、不可删除（见 docs/tasks/user_role_management.md §2.2）。
+    service_username: str = "lcagent_as_mcp_user"
 
 
 class UsageStatsConfig(BaseModel):

@@ -7,26 +7,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 
-from lc_agent.config import get_database_url
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.models import AgentPreset, SubAgentLink
-from lc_agent.db.engine import get_async_session as _get_db_session
 from lc_agent.db.models import AgentPresetDB
 from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.db.repository import PromptRepository
 from lc_agent.server.auth_middleware import get_current_user, require_admin
+from lc_agent.server.dependencies import get_db_session as get_db
 from lc_agent.server.dependencies import get_engine
 
 router = APIRouter(tags=["agents"])
-
-
-async def get_db(request: Request):
-    db_url = get_database_url()
-    session = _get_db_session(db_url)
-    try:
-        yield session
-    finally:
-        await session.close()
 
 
 _AGENT_NAME_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]*$')
@@ -61,6 +51,7 @@ class AgentCreateRequest(BaseModel):
     default_model: str
     default_delegation_description: str = ""
     can_be_subagent: bool = False
+    can_be_mcp: bool = False
     allowed_tool_groups: list[str] | None = None
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
@@ -106,6 +97,7 @@ class AgentUpdateRequest(BaseModel):
     default_model: str | None = None
     default_delegation_description: str | None = None
     can_be_subagent: bool | None = None
+    can_be_mcp: bool | None = None
     allowed_tool_groups: list[str] | None = None
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
@@ -155,6 +147,7 @@ def _preset_to_dict(p: AgentPreset) -> dict:
             "default_model": "custom",
             "default_delegation_description": p.default_delegation_description or "",
             "can_be_subagent": p.can_be_subagent,
+            "can_be_mcp": getattr(p, "can_be_mcp", False),
             "allowed_tool_groups": [],
             "allowed_mcp_servers": [],
             "allowed_skills": [],
@@ -194,6 +187,7 @@ async def list_agents(
             "default_model": row.default_model,
             "default_delegation_description": row.default_delegation_description or "",
             "can_be_subagent": row.can_be_subagent,
+            "can_be_mcp": row.can_be_mcp,
             "allowed_tool_groups": row.allowed_tool_groups,
             "allowed_mcp_servers": row.allowed_mcp_servers,
             "allowed_skills": row.allowed_skills,
@@ -240,6 +234,14 @@ def _validate_can_be_subagent_description(can_be_subagent: bool, description: st
         raise HTTPException(
             status_code=422,
             detail="已允许此 Agent 作为子 Agent，但未填写作为子 Agent 时候的触发描述",
+        )
+
+
+def _validate_can_be_mcp_description(can_be_mcp: bool, description: str | None) -> None:
+    if can_be_mcp and not (description or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="已允许此 Agent 对外暴露为 MCP，但未填写委派触发描述（与子 Agent 共用同一描述）",
         )
 
 
@@ -335,6 +337,7 @@ async def create_agent(
     _validate_subagent_ids_exist(engine, body.subagents)
     _validate_subagent_descriptions(engine, body.subagents)
     _validate_can_be_subagent_description(body.can_be_subagent, body.default_delegation_description)
+    _validate_can_be_mcp_description(body.can_be_mcp, body.default_delegation_description)
     _validate_project_paths_or_raise(body.project_mode, body.project_root, body.project_extra_dirs)
     _validate_extra_skill_dirs_or_raise(body.extra_skill_dirs)
     preset_db = AgentPresetDB(
@@ -345,6 +348,7 @@ async def create_agent(
         default_model=body.default_model,
         default_delegation_description=(body.default_delegation_description or "").strip(),
         can_be_subagent=body.can_be_subagent,
+        can_be_mcp=body.can_be_mcp,
         allowed_tool_groups=body.allowed_tool_groups,
         allowed_mcp_servers=body.allowed_mcp_servers,
         allowed_skills=body.allowed_skills,
@@ -368,6 +372,7 @@ async def create_agent(
         default_model=preset_db.default_model,
         default_delegation_description=preset_db.default_delegation_description or "",
         can_be_subagent=preset_db.can_be_subagent,
+        can_be_mcp=preset_db.can_be_mcp,
         allowed_tool_groups=preset_db.allowed_tool_groups,
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,
@@ -474,10 +479,12 @@ async def update_agent(
         update_data["default_delegation_description"] = update_data["default_delegation_description"].strip()
 
     merged_can_be_subagent = update_data.get("can_be_subagent", preset_db.can_be_subagent)
+    merged_can_be_mcp = update_data.get("can_be_mcp", preset_db.can_be_mcp)
     merged_delegation_description = update_data.get(
         "default_delegation_description", preset_db.default_delegation_description
     )
     _validate_can_be_subagent_description(merged_can_be_subagent, merged_delegation_description)
+    _validate_can_be_mcp_description(merged_can_be_mcp, merged_delegation_description)
     merged_mode = update_data.get("project_mode", preset_db.project_mode)
     merged_root = update_data.get("project_root", preset_db.project_root)
     merged_extra = update_data.get("project_extra_dirs", preset_db.project_extra_dirs)
@@ -499,6 +506,7 @@ async def update_agent(
         default_model=preset_db.default_model,
         default_delegation_description=preset_db.default_delegation_description or "",
         can_be_subagent=preset_db.can_be_subagent,
+        can_be_mcp=preset_db.can_be_mcp,
         allowed_tool_groups=preset_db.allowed_tool_groups,
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,

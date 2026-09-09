@@ -13,6 +13,7 @@ from langchain_agentskills.loaders import CompositeSkillLoader, DirectorySkillLo
 from lc_agent.config import (
     DEFAULT_CHECKPOINT_PATH,
     DEFAULT_DATABASE_URL,
+    DEFAULT_MCP_TOOL_TIMEOUT,
     get_config,
     get_config_value,
     set_config,
@@ -111,7 +112,12 @@ class LcAgentApp:
             self.filtered_loader = None
             self.skills_toolkit = None
         mcp_config = config.get("mcpServers", {})
-        self.mcp_manager = McpManager(mcp_config, on_state_change=self._on_mcp_state_change)
+        mcp_tool_timeout = get_config_value(config, "mcp.tool_timeout", DEFAULT_MCP_TOOL_TIMEOUT)
+        self.mcp_manager = McpManager(
+            mcp_config,
+            on_state_change=self._on_mcp_state_change,
+            tool_timeout=mcp_tool_timeout,
+        )
         self.fastapi_app = create_app(config, lifespan=self._lifespan)
         self.fastapi_app.state.mcp_manager = self.mcp_manager
         self.fastapi_app.state.skills_toolkit = self.skills_toolkit
@@ -123,9 +129,16 @@ class LcAgentApp:
         self.engine._permissions_service = self._permissions_service
         self.fastapi_app.state.db_url = self._db_url
         self.fastapi_app.state.checkpoint_path = self._checkpoint_path
-        sse_module.configure(self.engine, self._db_url)
-        self.automation_scheduler = AutomationScheduler(self.engine, self._db_url, self.fastapi_app)
+        sse_module.configure(self.engine)
+        self.automation_scheduler = AutomationScheduler(self.engine, self.fastapi_app)
         self.fastapi_app.state.automation_scheduler = self.automation_scheduler
+
+        # lc-agent 自身作为 MCP server 对外暴露（与 mcp 客户端无关，见包内说明）
+        # 必须在 mount_static_files 之前调用，否则 /mcp 被静态文件兜底吃掉
+        from lc_agent.lcagent_as_mcp import mount_lcagent_as_mcp
+
+        mount_lcagent_as_mcp(self.fastapi_app, self.engine)
+
         mount_static_files(self.fastapi_app)
 
     def _on_mcp_state_change(self):
@@ -249,6 +262,7 @@ class LcAgentApp:
                     default_model=row.default_model,
                     default_delegation_description=row.default_delegation_description or "",
                     can_be_subagent=row.can_be_subagent,
+                    can_be_mcp=getattr(row, "can_be_mcp", False) or False,
                     allowed_tool_groups=row.allowed_tool_groups,
                     allowed_mcp_servers=row.allowed_mcp_servers,
                     allowed_skills=row.allowed_skills,

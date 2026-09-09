@@ -33,7 +33,7 @@ async def app_and_headers(setup):
         "database": {"url": db_url, "checkpoint_path": ":memory:"},
     }
     app = LcAgentApp(config)
-    headers = await setup_test_auth(app.fastapi_app, db_url)
+    headers = await setup_test_auth(app.fastapi_app)
     return app, headers
 
 

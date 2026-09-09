@@ -37,16 +37,16 @@ def sample_config() -> dict:
     }
 
 
-async def setup_test_auth(app, db_url: str, user_id: str = "test-admin", username: str = "testadmin") -> dict:
+async def setup_test_auth(app, user_id: str = "test-admin", username: str = "testadmin") -> dict:
     """Configure auth on a test app and return Authorization headers."""
     import lc_agent.db.models_auth  # noqa: F401 — register User table
 
-    from lc_agent.db.engine import get_async_session
+    from lc_agent.db.engine import get_business_async_session
 
     auth_service = AuthService(secret="test-secret-key-minimum16chars", token_expire_days=7)
     app.state.auth_service = auth_service
 
-    async with get_async_session(db_url) as session:
+    async with get_business_async_session() as session:
         admin = User(
             id=user_id,
             username=username,

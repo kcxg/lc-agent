@@ -478,3 +478,33 @@ class TestCreateLlm:
         )
         llm = engine._create_llm(model_info, "gpt-4o")
         assert llm.stream_usage is True
+
+    def test_request_uses_raw_model_id_not_alias(self, sample_config):
+        """请求一律发 raw_model_id（渠道真实模型名），model_id 只是前端别名。"""
+        from lc_agent.core.engine import AgentEngine
+        from lc_agent.core.models import ModelInfo
+
+        engine = AgentEngine({
+            **sample_config,
+            "provider": {
+                "opencodego": {
+                    "api_key": "test-key",
+                    "base_url": "https://api.commandcode.ai/provider/v1",
+                    "models": [{
+                        "model_id": "cm-meta/muse-spark-1.3-contributor",
+                        "raw_model_id": "meta/muse-spark-1.3-contributor",
+                    }],
+                },
+            },
+        })
+        model_info = ModelInfo(
+            model_id="cm-meta/muse-spark-1.3-contributor",
+            raw_model_id="meta/muse-spark-1.3-contributor",
+            provider="opencodego",
+            base_url="https://api.commandcode.ai/provider/v1",
+            api_key="test-key",
+        )
+        llm = engine._create_llm(model_info, "cm-meta/muse-spark-1.3-contributor")
+        assert llm.model_name == "meta/muse-spark-1.3-contributor"
+        assert engine.resolve_request_model("cm-meta/muse-spark-1.3-contributor") == "meta/muse-spark-1.3-contributor"
+        assert engine.resolve_request_model("unknown-alias") == "unknown-alias"

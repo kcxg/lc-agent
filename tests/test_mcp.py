@@ -2,7 +2,8 @@ import asyncio
 
 import pytest
 
-from lc_agent.mcp.manager import McpManager, McpServerStatus
+from lc_agent.config.utils import DEFAULT_MCP_TOOL_TIMEOUT
+from lc_agent.mcp.manager import McpManager, McpServerStatus, resolve_tool_timeout
 
 
 def test_mcp_manager_init():
@@ -289,3 +290,260 @@ def test_lc_agent_app_wires_mcp_state_changes_to_generation():
     app.mcp_manager._set_server_error("http_test", "connection dropped")
 
     assert app.engine._mcp_generation == gen_before + 1
+
+
+class _TornDownSession:
+    """Simulates a session torn down mid-call: raises bare CancelledError."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def call_tool(self, tool_name, arguments):
+        self.calls.append((tool_name, arguments))
+        raise asyncio.CancelledError()
+
+
+class _HangingSession:
+    """Never resolves; used to test genuine outer cancellation."""
+
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    async def call_tool(self, tool_name, arguments):
+        self.started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+@pytest.mark.asyncio
+async def test_call_tool_parallel_callers_share_one_reconnect(monkeypatch):
+    """Two concurrent callers, first fails: second must run on the new session.
+
+    Regression test for the stale-session TOCTOU: session lookup used to
+    happen before lock acquisition while reconnect tore the session down,
+    so the waiter invoked a dead session (bare CancelledError → tools-node
+    NodeCancelledError). Exactly one reconnect may happen.
+    """
+    manager = McpManager({"http_test": {"type": "http", "url": "http://example.test/mcp"}})
+    manager._servers["http_test"].status = "connected"
+
+    first_calls = []
+
+    class _FirstFailingSession:
+        async def call_tool(self, tool_name, arguments):
+            first_calls.append((tool_name, arguments))
+            raise ConnectionError("boom")
+
+    manager._sessions["http_test"] = _FirstFailingSession()
+    replacement = _SuccessfulSession()
+    reconnects = []
+
+    async def fake_connect_server(name, conf, **kwargs):
+        reconnects.append(name)
+        manager._sessions[name] = replacement
+        manager._servers[name].status = "connected"
+        manager._servers[name].error = None
+
+    monkeypatch.setattr(manager, "_connect_server", fake_connect_server)
+
+    results = await asyncio.gather(
+        manager.call_tool("http_test", "ping", {"n": 1}),
+        manager.call_tool("http_test", "ping", {"n": 2}),
+    )
+
+    assert results == ["ok after reconnect", "ok after reconnect"]
+    assert reconnects == ["http_test"]
+    assert len(first_calls) == 1  # only the pre-reconnect caller saw the dead session
+    assert replacement.calls == [("ping", {"n": 1}), ("ping", {"n": 2})]
+
+
+@pytest.mark.asyncio
+async def test_call_tool_once_converts_inner_cancel_to_readable_error():
+    """Bare CancelledError from a torn-down session must not escape.
+
+    Genuine outer cancellation (our own task cancelled) still propagates;
+    anything else becomes a RuntimeError so callers see text, never a
+    tools-node NodeCancelledError.
+    """
+    manager = McpManager({"http_test": {"type": "http", "url": "http://example.test/mcp"}})
+    manager._sessions["http_test"] = _TornDownSession()
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await manager._call_tool_once("http_test", "ping", {})
+
+
+@pytest.mark.asyncio
+async def test_call_tool_recovers_from_torn_down_session(monkeypatch):
+    """End-to-end of the reported incident: torn session → readable retry."""
+    manager = McpManager({"http_test": {"type": "http", "url": "http://example.test/mcp"}})
+    manager._servers["http_test"].status = "connected"
+    manager._sessions["http_test"] = _TornDownSession()
+
+    replacement = _SuccessfulSession()
+
+    async def fake_connect_server(name, conf, **kwargs):
+        manager._sessions[name] = replacement
+        manager._servers[name].status = "connected"
+        manager._servers[name].error = None
+
+    monkeypatch.setattr(manager, "_connect_server", fake_connect_server)
+
+    result = await manager.call_tool("http_test", "ping", {})
+    assert result == "ok after reconnect"
+    assert replacement.calls == [("ping", {})]
+
+
+@pytest.mark.asyncio
+async def test_call_tool_propagates_genuine_outer_cancellation():
+    """User-stop (outer task.cancel()) must not be swallowed or converted."""
+    manager = McpManager({"http_test": {"type": "http", "url": "http://example.test/mcp"}})
+    manager._servers["http_test"].status = "connected"
+    hanging = _HangingSession()
+    manager._sessions["http_test"] = hanging
+
+    task = asyncio.ensure_future(manager.call_tool("http_test", "ping", {}))
+    await hanging.started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+def test_tool_timeout_defaults_to_300():
+    manager = McpManager({})
+    assert manager._tool_timeout == float(DEFAULT_MCP_TOOL_TIMEOUT) == 300.0
+
+
+def test_tool_timeout_custom_value():
+    manager = McpManager({}, tool_timeout=60)
+    assert manager._tool_timeout == 60.0
+
+
+@pytest.mark.parametrize("bad_value", [0, -5, "abc", None, ""])
+def test_tool_timeout_invalid_falls_back_to_default(bad_value):
+    assert resolve_tool_timeout(bad_value) == float(DEFAULT_MCP_TOOL_TIMEOUT)
+    manager = McpManager({}, tool_timeout=bad_value)
+    assert manager._tool_timeout == float(DEFAULT_MCP_TOOL_TIMEOUT)
+
+
+@pytest.mark.asyncio
+async def test_call_tool_timeout_uses_configured_value(monkeypatch):
+    """_invoke_session 必须用配置的超时，而不是写死的 60s。"""
+    manager = McpManager(
+        {"http_test": {"type": "http", "url": "http://example.test/mcp"}},
+        tool_timeout=5,
+    )
+    manager._servers["http_test"].status = "connected"
+
+    seen_timeouts = []
+    real_wait_for = asyncio.wait_for
+
+    async def spy_wait_for(awaitable, *, timeout=None):
+        seen_timeouts.append(timeout)
+        awaitable.close()
+        raise asyncio.TimeoutError()
+
+    async def fake_reconnect(name):
+        return False
+
+    monkeypatch.setattr(asyncio, "wait_for", spy_wait_for)
+    monkeypatch.setattr(manager, "_reconnect_server", fake_reconnect)
+
+    class _NeverSession:
+        async def call_tool(self, tool_name, arguments):
+            raise AssertionError("should be wrapped by wait_for spy")
+
+    manager._sessions["http_test"] = _NeverSession()
+    result = await manager.call_tool("http_test", "ping", {})
+
+    assert seen_timeouts == [5]
+    assert "timed out after 5s" in result
+
+
+class _SlowSession:
+    """Simulates a slow-but-healthy server: tracks max concurrency."""
+
+    def __init__(self, delay: float = 0.2):
+        self.delay = delay
+        self.in_flight = 0
+        self.max_in_flight = 0
+
+    async def call_tool(self, tool_name, arguments):
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(self.delay)
+            return _ToolResult(f"ok:{tool_name}")
+        finally:
+            self.in_flight -= 1
+
+
+@pytest.mark.asyncio
+async def test_call_tool_same_server_runs_in_parallel():
+    """同 server 的并发调用必须并行，不再串行排队。
+
+    Regression test for the 24.9s + 41.8s incident: two parallel
+    invoke_lca_agent calls on one server were serialized by the old
+    exclusive call lock; now they overlap (2 x 0.2s ≈ 0.2s, not 0.4s).
+    """
+    manager = McpManager({"http_test": {"type": "http", "url": "http://example.test/mcp"}})
+    manager._servers["http_test"].status = "connected"
+    session = _SlowSession(delay=0.2)
+    manager._sessions["http_test"] = session
+
+    start = asyncio.get_running_loop().time()
+    results = await asyncio.gather(
+        manager.call_tool("http_test", "a", {}),
+        manager.call_tool("http_test", "b", {}),
+    )
+    elapsed = asyncio.get_running_loop().time() - start
+
+    assert sorted(results) == ["ok:a", "ok:b"]
+    assert session.max_in_flight == 2
+    assert elapsed < 0.35
+
+
+@pytest.mark.asyncio
+async def test_call_tool_reconnect_drains_inflight_calls(monkeypatch):
+    """失败触发的重连（独占）必须等 in-flight 调用完成后再 teardown。
+
+    slow 调用占着共享侧 0.2s；fail 调用立即失败 → 走独占重连。
+    若重连不等排空就 teardown，slow 的 session 会被换掉导致它报错；
+    正确行为：slow 在旧 session 上成功，fail 在新 session 上重试成功。
+    """
+    manager = McpManager({"http_test": {"type": "http", "url": "http://example.test/mcp"}})
+    manager._servers["http_test"].status = "connected"
+
+    slow_done = asyncio.Event()
+    reconnect_started = asyncio.Event()
+
+    class _MixedSession:
+        async def call_tool(self, tool_name, arguments):
+            if tool_name == "slow":
+                await asyncio.sleep(0.2)
+                slow_done.set()
+                return _ToolResult("ok:slow")
+            raise ConnectionError("connection dropped")
+
+    manager._sessions["http_test"] = _MixedSession()
+    replacement = _SuccessfulSession()
+
+    async def fake_connect_server(name, conf, **kwargs):
+        # 重连拿的是独占侧：此时 in-flight 的 slow 必须已完成，
+        # 否则就是 teardown 撕了正在跑的调用。
+        assert slow_done.is_set(), "reconnect tore down an in-flight call"
+        reconnect_started.set()
+        manager._sessions[name] = replacement
+        manager._servers[name].status = "connected"
+        manager._servers[name].error = None
+
+    monkeypatch.setattr(manager, "_connect_server", fake_connect_server)
+
+    slow_result, fail_result = await asyncio.gather(
+        manager.call_tool("http_test", "slow", {}),
+        manager.call_tool("http_test", "fail", {}),
+    )
+
+    assert slow_result == "ok:slow"
+    assert fail_result == "ok after reconnect"
+    assert reconnect_started.is_set()
+    assert replacement.calls == [("fail", {})]

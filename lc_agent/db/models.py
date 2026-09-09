@@ -87,7 +87,8 @@ class AgentPresetDB(SQLModel, table=True):
     __tablename__ = "agent_presets"
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
-    name: str
+    # name 是 MCP 调用与内部委派的定位键，必须唯一（迁移 20260909_unique_preset_name）
+    name: str = Field(sa_column=Column(String, nullable=False, unique=True))
     display_name: str | None = Field(default=None)
     system_prompt: str = ""
     default_model: str = ""
@@ -96,6 +97,10 @@ class AgentPresetDB(SQLModel, table=True):
         sa_column=Column(String, nullable=False, server_default=text("''")),
     )
     can_be_subagent: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=false()),
+    )
+    can_be_mcp: bool = Field(
         default=False,
         sa_column=Column(Boolean, nullable=False, server_default=false()),
     )

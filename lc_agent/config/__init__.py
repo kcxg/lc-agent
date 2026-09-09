@@ -11,6 +11,7 @@ from lc_agent.config.utils import (
     DEFAULT_APP_NAME,
     DEFAULT_CHECKPOINT_PATH,
     DEFAULT_DATABASE_URL,
+    DEFAULT_MCP_TOOL_TIMEOUT,
     ENV_CONFIG_PATH,
     get_config_value,
 )
@@ -29,5 +30,6 @@ __all__ = [
     "DEFAULT_DATABASE_URL",
     "DEFAULT_CHECKPOINT_PATH",
     "DEFAULT_APP_NAME",
+    "DEFAULT_MCP_TOOL_TIMEOUT",
     "ENV_CONFIG_PATH",
 ]

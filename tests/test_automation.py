@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from lc_agent.config.runtime import reset_config, set_config
 from lc_agent.db.engine import get_async_session, init_db, reset_engine
 from lc_agent.db.repository import AutomationRunRepository, AutomationTaskRepository
 from lc_agent.server.agent_runner import AgentRunService
@@ -15,8 +16,10 @@ async def db_url(tmp_path):
     reset_engine()
     url = f"sqlite+aiosqlite:///{tmp_path / 'automation.db'}"
     await init_db(url)
+    set_config({"database": {"url": url}})
     yield url
     reset_engine()
+    reset_config()
 
 
 def test_normalize_schedule_variants():
@@ -133,10 +136,10 @@ async def test_automation_runner_persists_notification_delivery_summary(db_url, 
 
     from lc_agent.config import set_config
 
-    # 新设计：_notify_run 从全局配置读 app_name
-    set_config({"ui": {"app_name": "心有灵犀"}})
+    # 新设计：_notify_run 从全局配置读 app_name（保留 database.url，业务库走全局）
+    set_config({"ui": {"app_name": "心有灵犀"}, "database": {"url": db_url}})
     app = SimpleNamespace(state=SimpleNamespace(config={}))
-    runner = AutomationRunner(object(), db_url, app)
+    runner = AutomationRunner(object(), app)
     await runner._notify_run(task, run.id, "success", final_output="摘要正文")
     assert service_app_names == ["心有灵犀"]
 
@@ -176,7 +179,7 @@ async def test_automation_runner_contains_unexpected_notification_errors(db_url,
         "lc_agent.server.automation.AutomationNotificationService.deliver_run",
         raise_unexpected_error,
     )
-    runner = AutomationRunner(object(), db_url, object())
+    runner = AutomationRunner(object(), object())
     await runner._notify_run(task, run.id, "success", final_output="摘要正文")
 
     async with get_async_session(db_url) as db:
@@ -233,7 +236,7 @@ async def test_agent_run_service_persists_a_standalone_execution(db_url):
             user_id="user-1",
         )
 
-    result = await AgentRunService(FakeEngine(), db_url).run(
+    result = await AgentRunService(FakeEngine()).run(
         session_id=session_id,
         prompt="执行测试",
         preset_id="fake-agent",
@@ -258,7 +261,7 @@ async def test_automation_scheduler_starts_and_stops_with_application(db_url):
     from types import SimpleNamespace
 
     app = SimpleNamespace(state=SimpleNamespace())
-    scheduler = AutomationScheduler(object(), db_url, app)
+    scheduler = AutomationScheduler(object(), app)
     await scheduler.start()
     assert scheduler.scheduler.running is True
     await scheduler.stop()

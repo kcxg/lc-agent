@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from starlette.routing import Mount
 
 from lc_agent.app import LcAgentApp
+from lc_agent.config.runtime import reset_config, set_config
 from lc_agent.db.engine import init_db, reset_engine
 from lc_agent.db.models import SessionMeta
 from lc_agent.db.models_usage import LlmUsage, ModelPrice
@@ -114,8 +115,10 @@ async def db_env(tmp_path):
     reset_engine()
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'usage.db'}"
     await init_db(db_url)
+    set_config({"database": {"url": db_url}})
     yield db_url
     reset_engine()
+    reset_config()
 
 
 async def _add_sub_session(db_url: str, sub_id: str, parent_id: str, agent_id: str = "researcher", user_id: str = "u1"):
@@ -142,7 +145,7 @@ async def test_record_usage_batch_and_sub_attribution(db_env):
          "sub_session_id": "s-sub", "input_tokens": 100, "output_tokens": 50},
     ]
     inserted = await record_usage(
-        db_env, rows, session_id="s-main", user_id="u1", agent_id="chat", run_id="run-1",
+        rows, session_id="s-main", user_id="u1", agent_id="chat", run_id="run-1",
     )
     assert inserted == 2
 
@@ -170,9 +173,9 @@ async def test_record_usage_run_seq_unique(db_env):
     """中断恢复重放：同 run_id+seq 二次提交不得产生重复行（§2.1 幂等键）。"""
     rows = [{"model_id": "m1", "raw_model_id": "r1", "provider": "p", "role": "main",
              "sub_session_id": "", "input_tokens": 10, "output_tokens": 5}]
-    assert await record_usage(db_env, rows, session_id="s1", user_id="u1", agent_id="chat", run_id="run-x") == 1
+    assert await record_usage(rows, session_id="s1", user_id="u1", agent_id="chat", run_id="run-x") == 1
     # 同 run_id 再次提交 → 唯一索引冲突，recorder 吞掉异常只记日志
-    assert await record_usage(db_env, rows, session_id="s1", user_id="u1", agent_id="chat", run_id="run-x") == 0
+    assert await record_usage(rows, session_id="s1", user_id="u1", agent_id="chat", run_id="run-x") == 0
 
     from lc_agent.db.engine import get_async_session
 
@@ -429,7 +432,7 @@ async def app_with_usage(tmp_path):
         "database": {"url": db_url, "checkpoint_path": ":memory:"},
     }
     app_instance = LcAgentApp(config)
-    headers = await setup_test_auth(app_instance.fastapi_app, db_url)
+    headers = await setup_test_auth(app_instance.fastapi_app)
     routes = app_instance.fastapi_app.router.routes
     mounts = [r for r in routes if isinstance(r, Mount)]
     app_instance.fastapi_app.router.routes = [r for r in routes if not isinstance(r, Mount)]

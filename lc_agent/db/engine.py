@@ -36,6 +36,13 @@ def get_async_session(url: str = "sqlite+aiosqlite:///./lc_agent_data.db") -> As
     return _async_session_factory()
 
 
+def get_business_async_session() -> AsyncSession:
+    """获取业务数据库连接，数据库地址由全局运行时配置提供。"""
+    from lc_agent.config.runtime import get_database_url
+
+    return get_async_session(get_database_url())
+
+
 _ASYNC_TO_SYNC_SCHEME = {
     "sqlite+aiosqlite": "sqlite",
     "postgresql+asyncpg": "postgresql+psycopg2",

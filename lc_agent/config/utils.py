@@ -6,6 +6,8 @@ _MISSING = object()
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./lc_agent_data.db"
 DEFAULT_CHECKPOINT_PATH = "./lc_agent_checkpoints.db"
 DEFAULT_APP_NAME = "lc-agent"
+# MCP 工具单次调用超时（秒），对应配置键 mcp.tool_timeout
+DEFAULT_MCP_TOOL_TIMEOUT = 300
 
 # set_config_path 注册配置路径所用的环境变量名
 ENV_CONFIG_PATH = "LC_AGENT_CONFIG_PATH"

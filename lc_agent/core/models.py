@@ -10,8 +10,8 @@ class SubAgentLink(BaseModel):
 class ModelInfo(BaseModel):
     """LLM model metadata."""
 
-    model_id: str       # 自己命名的、全局唯一（标识/统计/前端显示都用它）
-    raw_model_id: str   # 供应商提供的原始模型名（定价兜底 + 统计归并用）
+    model_id: str       # 前端用的全局唯一别名（标识/统计/显示用，从不进请求体）
+    raw_model_id: str   # 渠道期望的真实模型名（请求一律发这个）兼定价兜底 + 统计归并用
     provider: str
     base_url: str
     context_limit: int = 8000
@@ -38,6 +38,7 @@ class AgentPreset(BaseModel):
     default_model: str
     default_delegation_description: str = ""
     can_be_subagent: bool = False
+    can_be_mcp: bool = False
 
     allowed_tool_groups: list[str] | None = None
     allowed_mcp_servers: list[str] | None = None

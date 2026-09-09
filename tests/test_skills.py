@@ -96,7 +96,7 @@ async def app_with_skills(skills_dir, tmp_path):
         "database": {"url": db_url, "checkpoint_path": ":memory:"},
     }
     app = LcAgentApp(config)
-    headers = await setup_test_auth(app.fastapi_app, db_url)
+    headers = await setup_test_auth(app.fastapi_app)
     yield app, headers
     reset_engine()
 

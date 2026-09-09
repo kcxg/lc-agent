@@ -27,10 +27,10 @@
             "base_url": "https://api.deepseek.com/v1",
             "models": [
                 {
-                    // model_id：自己命名的、全局唯一（跨 provider 也算），标识/统计/前端显示都用它
+                    // model_id：前端用的全局唯一别名，标识/统计/前端显示用，从不进请求体
                     "model_id": "deepseek-chat",
-                    // raw_model_id：供应商提供的原始模型名，定价兜底 + 统计归并用。
-                    // 原厂直连时它就是厂商 id（与 model_id 相同是合法且正确的）
+                    // raw_model_id：渠道期望的真实模型名，请求一律发这个，兼定价兜底 + 统计归并用。
+                    // 与 model_id 相同是合法且正确的
                     "raw_model_id": "deepseek-chat",
                     "context_limit": 64000,       // 上下文窗口大小（tokens），对应 LangChain 的 max_input_tokens
                     "max_output_tokens": 65536    // 最大输出 tokens，0 = 不限制
@@ -55,8 +55,8 @@
         //     "api_key": "sk-no-key-needed",
         //     "base_url": "http://localhost:4000/v1",
         //     "models": [
-        //         // 反代下 model_id = litellm 的 model_name（请求时原样发给 litellm），
-        //         // raw_model_id 填 litellm 背后的上游真实模型名（定价兜底/统计归并）
+        //         // model_id 只是前端别名；请求一律发 raw_model_id，
+        //         // 所以 raw_model_id 必须填 litellm 认识的 model_name
         //         {"model_id": "my-model", "raw_model_id": "gpt-4o", "context_limit": 64000, "max_output_tokens": 65536}
         //     ]
         // }
@@ -130,6 +130,26 @@
     // ----- Skills -----
     // 技能扫描目录列表，支持多个目录
     "skills": ["./skills"],
+
+    // ----- lc-agent 自身作为 MCP server -----
+    // 与上面的 mcpServers（lc-agent 作为客户端去连别人）方向相反：
+    // 这里是把 lc-agent 的 agent 暴露成 MCP 工具，给 Claude Code / Cursor / WorkBuddy 等客户端调用。
+    // 端点默认 /mcp；本期无鉴权，开启后服务务必只监听 127.0.0.1。
+    // 暴露规则：勾了 can_be_mcp 的 agent 进入目录与调用（与内部委派的 can_be_subagent 独立，
+    // 委派描述共用 default_delegation_description；勾选即代表显式授权对外暴露其全部工具能力）。
+    // tools/list 每次实时查库，前端改动后客户端重连即见最新，服务不用重启。
+    // 调用量统一记到服务用户 auth.service_username（默认 lcagent_as_mcp_user，系统自动创建）头上。
+    // "lcagent_as_mcp": {
+    //     "enabled": true,
+    //     "path": "/mcp"
+    // },
+
+    // ----- MCP 配置 -----
+    // tool_timeout：单次 MCP 工具调用超时（秒），默认 300。
+    // 超时后自动重连再试一次，最坏耗时约 2 倍；非法值（0/负数/非数字）回落 300 并打 warning。
+    "mcp": {
+        "tool_timeout": 300
+    },
 
     // ----- MCP 服务器 -----
     // 支持 local（stdio）、sse、http 三种传输方式

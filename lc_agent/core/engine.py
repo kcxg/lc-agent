@@ -580,7 +580,8 @@ class AgentEngine:
 
     def _build_tracing_async_client(self, model_info: ModelInfo | None, model_id: str):
         provider = model_info.provider if model_info else None
-        resolved_model = model_info.model_id if model_info else model_id
+        # 请求一律发 raw_model_id，model_id 只是前端别名；trace 记真实请求名
+        resolved_model = (model_info.raw_model_id or model_id) if model_info else model_id
         base_url = model_info.base_url if model_info and model_info.base_url else None
         return TracingAsyncClient(
             collector_getter=get_http_trace_collector,
@@ -598,6 +599,8 @@ class AgentEngine:
     ):
         """Create a chat model instance.
 
+        请求一律发 raw_model_id（渠道期望的真实模型名）；model_id 只是前端用的
+        全局唯一别名，从不进请求体。
         Uses ChatOpenAIReasoning when base_url is set — extracts reasoning_content
         from any provider that returns it (DeepSeek, GLM, etc).
         Uses init_chat_model for standard providers (handles provider routing).
@@ -612,7 +615,7 @@ class AgentEngine:
         if model_info and model_info.base_url:
             from lc_agent.core.chat_model import ChatOpenAIReasoning
             kwargs: dict[str, Any] = dict(
-                model=model_info.model_id,
+                model=model_info.raw_model_id or model_id,
                 base_url=model_info.base_url,
                 api_key=model_info.api_key or "not-set",
                 temperature=temperature,
@@ -629,7 +632,8 @@ class AgentEngine:
         from langchain.chat_models import init_chat_model
 
         if model_info:
-            model_str = f"{model_info.provider}:{model_info.model_id}" if model_info.provider else model_info.model_id
+            _raw = model_info.raw_model_id or model_id
+            model_str = f"{model_info.provider}:{_raw}" if model_info.provider else _raw
             kwargs: dict[str, Any] = dict(
                 api_key=model_info.api_key or "not-set",
                 temperature=temperature,
@@ -646,11 +650,18 @@ class AgentEngine:
         return init_chat_model(model_id, **kwargs)
 
     def _find_model(self, model_id: str) -> ModelInfo | None:
-        """Find model info by model_id."""
+        """Find model info by model_id (frontend alias)."""
         for m in self._models:
             if m.model_id == model_id:
                 return m
         return None
+
+    def resolve_request_model(self, model_id: str) -> str:
+        """Alias → 渠道真实模型名：请求一律发 raw_model_id，model_id 只做前端别名。"""
+        info = self._find_model(model_id) if model_id else None
+        if info and info.raw_model_id:
+            return info.raw_model_id
+        return model_id
 
     def _build_summarization_middleware(self, preset: AgentPreset) -> list:
         """Build SummarizationMiddleware based on config, returns empty list if disabled."""

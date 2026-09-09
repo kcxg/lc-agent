@@ -15,7 +15,7 @@ from tzlocal import get_localzone_name
 
 from lc_agent.core.engine import AgentEngine
 from lc_agent.config import get_app_name
-from lc_agent.db.engine import get_async_session
+from lc_agent.db.engine import get_business_async_session
 from lc_agent.db.models import AutomationRun, AutomationTask
 from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.db.repository import (
@@ -236,9 +236,8 @@ def serialize_run(run: AutomationRun) -> dict[str, Any]:
 
 
 class AutomationRunner:
-    def __init__(self, engine: AgentEngine, db_url: str, app):
+    def __init__(self, engine: AgentEngine, app):
         self.engine = engine
-        self.db_url = db_url
         self.app = app
         self._task_locks: dict[str, asyncio.Lock] = {}
 
@@ -250,7 +249,7 @@ class AutomationRunner:
         return lock
 
     async def recover_interrupted_runs(self) -> None:
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             runs = await AutomationRunRepository(db).list_active()
             if not runs:
@@ -274,7 +273,7 @@ class AutomationRunner:
     async def _user_can_use_agent(self, user_id: str, agent_id: str) -> bool:
         if not getattr(self.app.state, "auth_service", None) or user_id == "__anonymous__":
             return True
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             user = await db.get(User, user_id)
             if user is None:
@@ -298,7 +297,7 @@ class AutomationRunner:
             return await self._record_skipped(task, scheduled_at)
 
         async with lock:
-            db = get_async_session(self.db_url)
+            db = get_business_async_session()
             try:
                 task_repo = AutomationTaskRepository(db)
                 run_repo = AutomationRunRepository(db)
@@ -321,7 +320,7 @@ class AutomationRunner:
                 await db.close()
 
     async def _record_skipped(self, task: AutomationTask, scheduled_at: datetime) -> AutomationRun:
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             run = await AutomationRunRepository(db).create(
                 task_id=task.id,
@@ -342,7 +341,7 @@ class AutomationRunner:
             await db.close()
 
     async def run_scheduled(self, task_id: str, scheduled_at: datetime | None = None) -> AutomationRun | None:
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             task = await AutomationTaskRepository(db).get_by_id(task_id)
         finally:
@@ -352,7 +351,7 @@ class AutomationRunner:
         return await self._run(task, scheduled_at or datetime.now(timezone.utc))
 
     async def run_now(self, task_id: str) -> AutomationRun:
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             task = await AutomationTaskRepository(db).get_by_id(task_id)
         finally:
@@ -378,7 +377,7 @@ class AutomationRunner:
             return run
 
         now = datetime.now(timezone.utc)
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         session_id = str(uuid4())
         setup_error: str | None = None
         try:
@@ -410,7 +409,7 @@ class AutomationRunner:
             await self._finish(run.id, task.id, "failed", setup_error, now)
             await self._notify_run(task, run.id, "failed")
             if task.schedule_type == "one_time":
-                db = get_async_session(self.db_url)
+                db = get_business_async_session()
                 try:
                     await AutomationTaskRepository(db).update(task.id, enabled=False, next_run_at=None)
                 finally:
@@ -420,7 +419,7 @@ class AutomationRunner:
         try:
             from lc_agent.server.agent_runner import AgentRunService
 
-            service = AgentRunService(self.engine, self.db_url)
+            service = AgentRunService(self.engine)
             result = await service.run(
                 session_id=session_id,
                 prompt=task.prompt,
@@ -446,7 +445,7 @@ class AutomationRunner:
             await self._notify_run(task, run.id, "failed")
 
         if task.schedule_type == "one_time":
-            db = get_async_session(self.db_url)
+            db = get_business_async_session()
             try:
                 await AutomationTaskRepository(db).update(task.id, enabled=False, next_run_at=None)
             finally:
@@ -456,7 +455,7 @@ class AutomationRunner:
     async def _load_user(self, user_id: str) -> User | None:
         if not getattr(self.app.state, "auth_service", None):
             return None
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             return await db.get(User, user_id)
         finally:
@@ -470,7 +469,7 @@ class AutomationRunner:
         error: str | None,
         finished_at: datetime,
     ) -> None:
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             await AutomationRunRepository(db).update(
                 run_id,
@@ -505,7 +504,7 @@ class AutomationRunner:
         except Exception:
             logger.exception("Automation notification failed unexpectedly: task=%s run=%s", task.id, run_id)
             summary = NotificationDeliverySummary(status="failed", error="通知服务异常")
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             await AutomationRunRepository(db).update(
                 run_id,
@@ -516,7 +515,7 @@ class AutomationRunner:
             await db.close()
 
     async def _get_run(self, run_id: str) -> AutomationRun:
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             run = await AutomationRunRepository(db).get_by_id(run_id)
             if run is None:
@@ -527,11 +526,10 @@ class AutomationRunner:
 
 
 class AutomationScheduler:
-    def __init__(self, engine: AgentEngine, db_url: str, app):
+    def __init__(self, engine: AgentEngine, app):
         self.engine = engine
-        self.db_url = db_url
         self.app = app
-        self.runner = AutomationRunner(engine, db_url, app)
+        self.runner = AutomationRunner(engine, app)
         self.scheduler = AsyncIOScheduler(timezone=ZoneInfo(local_timezone_name()))
         self._started = False
 
@@ -541,7 +539,7 @@ class AutomationScheduler:
         await self.runner.recover_interrupted_runs()
         self.scheduler.start()
         self._started = True
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             tasks = await AutomationTaskRepository(db).list_all()
         finally:
@@ -580,7 +578,7 @@ class AutomationScheduler:
         job = self.scheduler.get_job(job_id)
         next_run_at = getattr(job, "next_run_time", None) if job else None
         if next_run_at:
-            db = get_async_session(self.db_url)
+            db = get_business_async_session()
             try:
                 await AutomationTaskRepository(db).update(
                     task.id,
@@ -593,14 +591,14 @@ class AutomationScheduler:
         job_id = self._job_id(task_id)
         if self.scheduler.get_job(job_id):
             self.scheduler.remove_job(job_id)
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             await AutomationTaskRepository(db).update(task_id, next_run_at=None)
         finally:
             await db.close()
 
     async def refresh_task(self, task_id: str) -> None:
-        db = get_async_session(self.db_url)
+        db = get_business_async_session()
         try:
             task = await AutomationTaskRepository(db).get_by_id(task_id)
         finally:
@@ -617,7 +615,7 @@ class AutomationScheduler:
             await self.runner.run_scheduled(task_id)
             job = self.scheduler.get_job(self._job_id(task_id))
             next_run_at = getattr(job, "next_run_time", None) if job else None
-            db = get_async_session(self.db_url)
+            db = get_business_async_session()
             try:
                 await AutomationTaskRepository(db).update(
                     task_id,

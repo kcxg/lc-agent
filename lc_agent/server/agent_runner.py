@@ -27,9 +27,8 @@ class AgentRunResult:
 class AgentRunService:
     """Consume one Agent stream and persist its complete UI execution record."""
 
-    def __init__(self, engine: AgentEngine, db_url: str):
+    def __init__(self, engine: AgentEngine):
         self.engine = engine
-        self.db_url = db_url
 
     async def run(
         self,
@@ -57,12 +56,11 @@ class AgentRunService:
 
         try:
             await persistence.save_ui_message(
-                self.db_url,
                 session_id,
                 "user",
                 content,
             )
-            round_number = await persistence.get_session_user_message_count(self.db_url, session_id)
+            round_number = await persistence.get_session_user_message_count(session_id)
             self.engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
             display_map = self.engine.get_subagent_display_name_map(
                 preset_id, model_id=model_id, llm_params=llm_params,
@@ -71,14 +69,16 @@ class AgentRunService:
                 preset_id, model_id=model_id, llm_params=llm_params,
             )
             tracker = SubAgentRunTracker(
-                db_url=self.db_url,
                 parent_thread_id=session_id,
                 user_id=user_id,
                 subagent_display_map=display_map,
                 tool_calls=tool_calls,
             )
             init_subagent_collector_registry()
-            trace_collector = HttpTraceCollector(provider=None, model=model_id or None)
+            trace_collector = HttpTraceCollector(
+                provider=None,
+                model=self.engine.resolve_request_model(model_id) if model_id else None,
+            )
             trace_token = bind_http_trace_collector(trace_collector)
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
 
@@ -118,7 +118,6 @@ class AgentRunService:
                                 active_subagent_tool_call_ids.discard(tool_call_id)
                         elif event_type == "file_change":
                             await persistence.save_file_change(
-                                self.db_url,
                                 payload.get("session_id", session_id),
                                 payload.get("file_path", ""),
                                 payload.get("change_type", ""),
@@ -133,7 +132,6 @@ class AgentRunService:
                             )
                         elif event_type == "file_change_git_snapshot":
                             await persistence.save_git_base_hash(
-                                self.db_url,
                                 payload.get("session_id", session_id),
                                 payload.get("git_base_hash", ""),
                             )
@@ -158,7 +156,7 @@ class AgentRunService:
 
             await tracker.drain()
             await record_usage(
-                self.db_url, usage_rounds,
+                usage_rounds,
                 session_id=session_id,
                 user_id=user_id,
                 agent_id=preset_id,
@@ -168,8 +166,7 @@ class AgentRunService:
             traces = trace_collector.snapshot()
             if content_parts or tool_calls or usage_rounds or traces:
                 await persistence.save_ui_message(
-                    self.db_url,
-                    session_id,
+                session_id,
                     "assistant",
                     [{"type": "text", "text": "".join(content_parts)}],
                     tool_calls=tool_calls or None,
@@ -180,7 +177,7 @@ class AgentRunService:
                     },
                     http_traces=traces or None,
                 )
-            await persistence.increment_session_message_count(self.db_url, session_id)
+            await persistence.increment_session_message_count(session_id)
             try:
                 agent = self.engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
                 config = {"configurable": {"thread_id": session_id}, "recursion_limit": self.engine.recursion_limit}
@@ -198,7 +195,7 @@ class AgentRunService:
             return AgentRunResult(final_output="".join(content_parts))
         except Exception as exc:
             await record_usage(
-                self.db_url, usage_rounds,
+                usage_rounds,
                 session_id=session_id,
                 user_id=user_id,
                 agent_id=preset_id,

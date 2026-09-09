@@ -160,3 +160,99 @@ async def test_cannot_delete_self(client_and_token):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_user_with_role(client_and_token):
+    client, token = client_and_token
+    resp = await client.post(
+        "/api/admin/users",
+        json={"username": "boss", "role": "admin"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_create_user_rejects_bad_role(client_and_token):
+    client, token = client_and_token
+    resp = await client.post(
+        "/api/admin/users",
+        json={"username": "bad", "role": "superuser"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_set_user_role(client_and_token):
+    client, token = client_and_token
+    create_resp = await client.post(
+        "/api/admin/users",
+        json={"username": "promote-me"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    user_id = create_resp.json()["id"]
+
+    resp = await client.patch(
+        f"/api/admin/users/{user_id}/role",
+        json={"role": "admin"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["role"] == "admin"
+
+    list_resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {token}"})
+    row = next(u for u in list_resp.json() if u["id"] == user_id)
+    assert row["role"] == "admin"
+    assert row["is_system"] is False
+
+
+@pytest.mark.asyncio
+async def test_cannot_change_own_role(client_and_token):
+    """管理员不能给自己降/升级（docs/tasks/user_role_management.md §2.4）。"""
+    client, token = client_and_token
+    resp = await client.patch(
+        "/api/admin/users/admin-id/role",
+        json={"role": "user"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_system_account_role_locked_and_undeletable(client_and_token):
+    """系统账号角色锁定为 user、不可删除（§2.2）。
+
+    这是硬安全规则：MCP 端点不鉴权，系统账号一旦变成 admin
+    等于把管理员权限开放给任何能访问端口的人。
+    """
+    client, token = client_and_token
+    from lc_agent.server.routes.admin import _service_username
+
+    create_resp = await client.post(
+        "/api/admin/users",
+        json={"username": _service_username()},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert create_resp.status_code == 201
+    user_id = create_resp.json()["id"]
+
+    role_resp = await client.patch(
+        f"/api/admin/users/{user_id}/role",
+        json={"role": "admin"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert role_resp.status_code == 400
+
+    del_resp = await client.delete(
+        f"/api/admin/users/{user_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert del_resp.status_code == 400
+
+    list_resp = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {token}"})
+    row = next(u for u in list_resp.json() if u["id"] == user_id)
+    assert row["role"] == "user"
+    assert row["is_system"] is True

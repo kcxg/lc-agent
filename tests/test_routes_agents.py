@@ -32,7 +32,7 @@ async def app_and_headers(setup):
         "database": {"url": db_url, "checkpoint_path": ":memory:"},
     }
     app = LcAgentApp(config)
-    headers = await setup_test_auth(app.fastapi_app, db_url)
+    headers = await setup_test_auth(app.fastapi_app)
     return app, headers
 
 
@@ -416,6 +416,23 @@ async def test_create_agent_rejects_can_be_subagent_without_default_description(
 
         assert create_resp.status_code == 422
         assert "触发描述" in create_resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_agent_rejects_can_be_mcp_without_default_description(app_and_headers):
+    """can_be_mcp=True requires the shared delegation description."""
+    app, headers = app_and_headers
+    transport = ASGITransport(app=app.fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        create_resp = await client.post("/api/agents", json={
+            "name": "blank-description-mcp",
+            "system_prompt": "Handle delegated work.",
+            "default_model": "gpt-4",
+            "can_be_mcp": True,
+        }, headers=headers)
+
+        assert create_resp.status_code == 422
+        assert "MCP" in create_resp.json()["detail"]
 
 
 @pytest.mark.asyncio

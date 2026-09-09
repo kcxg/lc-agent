@@ -223,6 +223,12 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 ### Agent 预设过滤
 - Agent 预设可按 MCP 服务器名称过滤可用工具（三值语义）
 
+### 作为 MCP Server 对外暴露（lcagent_as_mcp）
+- 固定 2 个工具，不随 agent 数增长：`list_lca_agents`（实时查库的 agent 目录）+ `invoke_lca_agent`（按名委派，prompt 必须自包含）
+- Agent 面板独立开关 `can_be_mcp`（与内部委派的 `can_be_subagent` 解耦，委派描述共用），勾选即显式授权其全部工具能力
+- 外部 Agent（Claude Code / Cursor 等）连 `/mcp` 即发现调用，新增 agent 重连可见；调不存在的名字时报错里自带最新目录
+- 调用量记到服务用户头上；本期无鉴权，需显式开启且只监听 127.0.0.1
+
 ---
 
 ## 5. Skills 系统

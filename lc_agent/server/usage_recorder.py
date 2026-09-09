@@ -46,7 +46,6 @@ def build_model_map(engine) -> dict[str, Any]:
 
 
 async def record_usage(
-    db_url: str,
     rows: list[dict],
     *,
     session_id: str,
@@ -72,10 +71,10 @@ async def record_usage(
     sub_info: dict[str, dict] = {}
     if sub_ids:
         try:
-            from lc_agent.db.engine import get_async_session
+            from lc_agent.db.engine import get_business_async_session
             from lc_agent.db.models import SessionMeta
 
-            session = get_async_session(db_url)
+            session = get_business_async_session()
             try:
                 result = await session.execute(
                     select(SessionMeta).where(SessionMeta.id.in_(sub_ids))
@@ -91,11 +90,11 @@ async def record_usage(
         except Exception:
             server_logger.exception("Failed to resolve sub-session info for usage recording")
 
-    from lc_agent.db.engine import get_async_session
+    from lc_agent.db.engine import get_business_async_session
     from lc_agent.db.models_usage import LlmUsage
 
     try:
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         inserted = 0
         try:
             for seq, r in enumerate(rows):

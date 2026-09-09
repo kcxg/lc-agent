@@ -48,7 +48,7 @@ async def app_with_models(tmp_path):
         "database": {"url": db_url, "checkpoint_path": ":memory:"},
     }
     app_instance = LcAgentApp(config)
-    headers = await setup_test_auth(app_instance.fastapi_app, db_url)
+    headers = await setup_test_auth(app_instance.fastapi_app)
     # Register before StaticFiles mount so /api/models is reachable in tests
     routes = app_instance.fastapi_app.router.routes
     mounts = [r for r in routes if isinstance(r, Mount)]

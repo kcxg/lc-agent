@@ -128,8 +128,7 @@ const renderedSegments = computed((): RenderedSegment[] => {
 const modelLabel = computed(() => {
   const model = toolsStore.currentModel
   if (!model) return 'AI'
-  const parts = model.split('/')
-  return parts[parts.length - 1] || 'AI'
+  return model
 })
 
 function shouldShowSubAgentCard(tc: ToolCall): boolean {

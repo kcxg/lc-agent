@@ -15,6 +15,7 @@ export interface AgentPreset {
   default_model: string
   default_delegation_description?: string | null
   can_be_subagent?: boolean
+  can_be_mcp?: boolean
   allowed_tool_groups: string[] | null
   allowed_mcp_servers: string[] | null
   allowed_skills: string[] | null

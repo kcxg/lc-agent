@@ -528,7 +528,7 @@ def resolve_model_identity(
     Priority (token_stats.md §4.1):
     1. reported name (response_metadata.model_name / metadata.ls_model_name)
        matched against the config map — by model_id first, then raw_model_id
-       (a proxy may report the upstream name instead of our model_id);
+       (a proxy may report the upstream name instead of our alias);
     2. the current request's model_id (default_model_id);
     3. "unknown" — a row with a token count is worth more than no row.
     """

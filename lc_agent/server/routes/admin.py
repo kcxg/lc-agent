@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from lc_agent.config import get_config, get_config_value
 from lc_agent.db.models import ChatUiMessage, SessionMeta
 from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.server.auth_middleware import get_auth_service, require_admin
@@ -13,9 +14,33 @@ from lc_agent.utils.loggers import server_logger
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
+VALID_ROLES = ("admin", "user")
+
+
+def _service_username() -> str:
+    """系统账号名：框架自动创建，归属非真人发起的调用。
+
+    见 docs/tasks/user_role_management.md §2.2 —— 该账号角色锁定为 user、不可删除。
+    """
+    return str(get_config_value(get_config(), "auth.service_username", "lcagent_as_mcp_user"))
+
+
+async def _assert_not_last_admin(db: AsyncSession, user: User) -> None:
+    """拒绝把系统里最后一名管理员降级或删除（fail-fast，不做自动提拔）。"""
+    if user.role != "admin":
+        return
+    result = await db.execute(select(func.count()).select_from(User).where(User.role == "admin"))
+    if (result.scalar() or 0) <= 1:
+        raise HTTPException(status_code=400, detail="系统至少需要保留一名管理员")
+
 
 class CreateUserRequest(BaseModel):
     username: str
+    role: str = "user"
+
+
+class SetRoleRequest(BaseModel):
+    role: str
 
 
 class SetAgentsRequest(BaseModel):
@@ -29,8 +54,15 @@ async def list_users(
 ):
     result = await db.execute(select(User).order_by(User.created_at))
     users = result.scalars().all()
+    service_username = _service_username()
     return [
-        {"id": u.id, "username": u.username, "role": u.role, "created_at": u.created_at.isoformat()}
+        {
+            "id": u.id,
+            "username": u.username,
+            "role": u.role,
+            "created_at": u.created_at.isoformat(),
+            "is_system": u.username == service_username,
+        }
         for u in users
     ]
 
@@ -44,6 +76,9 @@ async def create_user(
 ):
     auth_service = get_auth_service(request)
 
+    if body.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"角色只能是 admin 或 user，收到 {body.role!r}")
+
     existing = await db.execute(select(User).where(User.username == body.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="用户名已存在")
@@ -52,7 +87,7 @@ async def create_user(
     user = User(
         username=body.username,
         password_hash=auth_service.hash_password(password),
-        role="user",
+        role=body.role,
     )
     db.add(user)
 
@@ -63,6 +98,38 @@ async def create_user(
     await db.refresh(user)
 
     return {"id": user.id, "username": user.username, "role": user.role, "password": password}
+
+
+@router.patch("/users/{user_id}/role")
+async def set_user_role(
+    user_id: str,
+    body: SetRoleRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """修改用户角色。见 docs/tasks/user_role_management.md。"""
+    if body.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"角色只能是 admin 或 user，收到 {body.role!r}")
+
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="不能修改自己的角色")
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    if user.username == _service_username():
+        raise HTTPException(status_code=400, detail="系统账号的角色不可修改")
+
+    if user.role == "admin" and body.role != "admin":
+        await _assert_not_last_admin(db, user)
+
+    user.role = body.role
+    user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {"id": user.id, "username": user.username, "role": user.role}
 
 
 @router.delete("/users/{user_id}", status_code=204)
@@ -78,6 +145,10 @@ async def delete_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    if user.username == _service_username():
+        raise HTTPException(status_code=400, detail="系统账号不可删除")
+    await _assert_not_last_admin(db, user)
 
     # Delete messages for user's sessions
     user_sessions = await db.execute(select(SessionMeta.id).where(SessionMeta.user_id == user_id))

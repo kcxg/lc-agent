@@ -37,6 +37,7 @@
 | Hot-swappable Config | 前端运行时切换模型、LLM 参数、工具、MCP、Skills，无需重启代码 |
 | Tools | `@tool` 装饰器注册 Python 工具，支持分组展示与权限控制 |
 | MCP | 支持 `stdio`、`SSE`、Streamable HTTP，自动适配 MCP 工具 schema |
+| MCP Server | 自身可作为 MCP Server 对外暴露 Agent（`list_lca_agents` 目录 + `invoke_lca_agent` 委派），供 Claude Code / Cursor 等外部 Agent 调用 |
 | Skills | 扫描 `SKILL.md` 技能目录，支持渐进式发现与运行时开关 |
 | Sub-agents | 支持子 Agent / 通用子 Agent 委派，并保留独立执行过程 |
 | Human Control | 支持 Human-in-the-loop 审批与 Human-in-the-top 总控式调度 |
@@ -163,8 +164,8 @@ app.run()
 大多数用户只需要关心这几个配置块：
 
 - `provider`：模型提供商与模型列表。每个模型条目必填两个字段：
-  - `model_id`：自己命名的、**全局唯一**（跨 provider 也算）的模型名，标识、统计、前端显示都用它
-  - `raw_model_id`：渠道提供的原始模型名，定价兜底与统计归并用（原厂直连时与 `model_id` 相同是合法且正确的）
+  - `model_id`：自己命名的、**全局唯一**（跨 provider 也算）的前端别名，标识、统计、前端显示用，从不进请求体
+  - `raw_model_id`：渠道期望的真实模型名，请求一律发这个，兼定价兜底与统计归并用（两者相同是合法且正确的）
   - 缺任一字段或唯一性冲突，服务启动时直接报错并列出全部问题项
 - `agent.default_model`：默认模型
 - `skills`：Skills 目录
@@ -190,6 +191,7 @@ app.run()
 - **MCP**：按标准协议（stdio / Streamable HTTP）接入的外部工具服务器，不写代码就能给 Agent 扩展联网搜索、文档检索、知识库等能力
 - **Skills**：写给 Agent 看的能力说明与工作流指令（SKILL.md），AI 按需加载，可带脚本执行
 - **[nbrag](https://github.com/ydf0509/nbrag) / RAG**：作为 MCP 工具接入，保持知识库与 Agent 框架低耦合
+- **反向开放**：`lc-agent` 自己也能当 MCP Server，在管理界面里挑好愿意对外服务的 Agent，Claude Code、Cursor 这类外部工具连上 `/mcp` 就能直接调用它们干活
 
 ## 项目文件夹模式
 
