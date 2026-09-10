@@ -261,3 +261,8 @@ docs/superpowers/
 # Local skill symlinks (aionui etc.)
 .claude/skills/session-message
 
+# >>> Comet managed project state >>>
+!/.comet/
+/.comet/*
+!/.comet/config.yaml
+# <<< Comet managed project state <<<
