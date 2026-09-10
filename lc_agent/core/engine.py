@@ -13,6 +13,7 @@ from langchain_core.tools import tool as lc_tool
 from pydantic import Field as _PydanticField
 
 from lc_agent.config import get_config_value
+from lc_agent.core.model_resolve import find_model, parse_models, resolve_request_model
 from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, _convert_text_file_blocks
 from lc_agent.core.engine_helpers.project_context import _build_project_context_text
 from lc_agent.skills.skill_middleware import _LcAgentSkillMiddleware
@@ -87,60 +88,8 @@ class AgentEngine:
         self._code_agent_factories[name] = factory
 
     def _parse_models(self, config: dict) -> list[ModelInfo]:
-        """Extract ModelInfo list from config.
-
-        Fail fast: collect ALL problems (missing model_id/raw_model_id, duplicate
-        ids) and raise once with the full list, instead of failing one at a time.
-        """
-        problems: list[str] = []
-        parsed: list[tuple[str, dict, dict]] = []  # (provider_name, provider_conf, model_conf)
-        seen_model_ids: dict[str, str] = {}        # model_id -> provider（全局唯一，跨 provider 也算）
-        seen_raw: dict[tuple[str, str], str] = {}  # (provider, raw_model_id) -> model_id
-        for provider_name, provider_conf in config.get("provider", {}).items():
-            if not isinstance(provider_conf, dict):
-                continue
-            for model_conf in provider_conf.get("models", []):
-                model_id = model_conf.get("model_id", "")
-                raw_model_id = model_conf.get("raw_model_id", "")
-                if not model_id:
-                    problems.append(f"provider={provider_name} 的模型条目缺少 model_id：{model_conf}")
-                if not raw_model_id:
-                    problems.append(f"provider={provider_name} 的模型 {model_id or model_conf} 缺少 raw_model_id")
-                if model_id:
-                    if model_id in seen_model_ids:
-                        problems.append(
-                            f"model_id 重复：{model_id!r} 同时被 provider={seen_model_ids[model_id]} "
-                            f"和 provider={provider_name} 使用（model_id 必须全局唯一，跨 provider 也算）"
-                        )
-                    else:
-                        seen_model_ids[model_id] = provider_name
-                if raw_model_id:
-                    key = (provider_name, raw_model_id)
-                    if key in seen_raw:
-                        problems.append(
-                            f"(provider, raw_model_id) 重复：({provider_name}, {raw_model_id!r}) 同时被 "
-                            f"model_id={seen_raw[key]} 和 model_id={model_id} 使用；"
-                            "同一渠道同一底层模型只允许一个入口，路由/故障转移请在渠道侧（litellm）配置"
-                        )
-                    else:
-                        seen_raw[key] = model_id
-                parsed.append((provider_name, provider_conf, model_conf))
-        if problems:
-            raise ValueError(
-                "模型配置校验失败（共 %d 处）：\n  - " % len(problems) + "\n  - ".join(problems)
-            )
-        return [
-            ModelInfo(
-                model_id=model_conf["model_id"],
-                raw_model_id=model_conf["raw_model_id"],
-                provider=provider_name,
-                base_url=provider_conf.get("base_url", ""),
-                context_limit=model_conf.get("context_limit", 8000),
-                max_output_tokens=model_conf.get("max_output_tokens", 0),
-                api_key=provider_conf.get("api_key", ""),
-            )
-            for provider_name, provider_conf, model_conf in parsed
-        ]
+        """Extract ModelInfo list from config (校验逻辑见 model_resolve.parse_models)."""
+        return parse_models(config)
 
     def get_models(self) -> list[ModelInfo]:
         """Return available models."""
@@ -651,17 +600,16 @@ class AgentEngine:
 
     def _find_model(self, model_id: str) -> ModelInfo | None:
         """Find model info by model_id (frontend alias)."""
+        if not model_id:
+            return None
         for m in self._models:
             if m.model_id == model_id:
                 return m
         return None
 
     def resolve_request_model(self, model_id: str) -> str:
-        """Alias → 渠道真实模型名：请求一律发 raw_model_id，model_id 只做前端别名。"""
-        info = self._find_model(model_id) if model_id else None
-        if info and info.raw_model_id:
-            return info.raw_model_id
-        return model_id
+        """Alias → 渠道真实模型名（兼容旧调用；新代码直接用 model_resolve）。"""
+        return resolve_request_model(model_id, self.config)
 
     def _build_summarization_middleware(self, preset: AgentPreset) -> list:
         """Build SummarizationMiddleware based on config, returns empty list if disabled."""
@@ -670,7 +618,7 @@ class AgentEngine:
             return []
 
         summ_model_id = summ_conf.get("default_model", "") or preset.default_model
-        model_info = self._find_model(summ_model_id)
+        model_info = find_model(summ_model_id, self.config)
         llm = self._create_llm(model_info, summ_model_id)
 
         trigger = self._parse_context_size(summ_conf.get("trigger")) or ("fraction", 0.85)
@@ -968,7 +916,7 @@ class AgentEngine:
         usage_sink：可选出参列表，调用后追加一条本次调用的 usage 摘要
         （供 usage_recorder 落 source="title" 行，token_stats.md §4.4）。
         """
-        model_info = self._find_model(model_id) if model_id else None
+        model_info = find_model(model_id, self.config)
         if model_info is None and self._models:
             model_info = self._models[0]
         if model_info is None:

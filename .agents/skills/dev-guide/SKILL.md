@@ -149,7 +149,7 @@ import bfzs.tools.my_new_tools  # noqa: F401
 ```python
 # bfzs/agents/my_agent.py
 from typing import Annotated, TypedDict
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 
@@ -157,31 +157,14 @@ class MyState(TypedDict):
     messages: Annotated[list, add_messages]
     # ... 其他状态字段
 
-def build_my_agent(config: dict):
-    """构建自定义 Agent Graph"""
-    # 从 config 获取 LLM 配置
-    provider_conf = list(config.get("provider", {}).values())[0]
-    # default_model 的值域是配置里的 model_id（前端用的全局唯一别名）。
-    # 请求一律发同条目的 raw_model_id（渠道真实模型名），model_id 从不进请求体。
-    # 框架内用 engine.resolve_request_model(model_id) 换真实名；
-    # 手写 LLM 时自己按 model_id 查到条目再取 raw_model_id。
-    from lc_agent import get_config
-    from lc_agent.core.engine import AgentEngine
-    _engine = AgentEngine(get_config())
-    model_id = config.get("agent", {}).get("default_model", "")
-
-    from lc_agent.core.chat_model import ChatOpenAIReasoning
-    llm = ChatOpenAIReasoning(
-        model=_engine.resolve_request_model(model_id),
-        base_url=provider_conf.get("base_url", ""),
-        api_key=provider_conf.get("api_key", ""),
-        temperature=0.3,
-        stream_usage=True,
-    )
+def build_my_agent():
+    """构建自定义 Agent Graph：直接写代码，不读配置。"""
+    from langchain_openai import ChatOpenAI  # 按需换自己的模型类
+    llm = ChatOpenAI(model="...", api_key="...")  # 写死或读环境变量
 
     async def node_a(state: MyState) -> dict:
-        # ...
-        return {"messages": [AIMessage(content="...")]}
+        resp = await llm.ainvoke(state["messages"])
+        return {"messages": [AIMessage(content=resp.content)]}
 
     graph = StateGraph(MyState)
     graph.add_node("node_a", node_a)
@@ -192,11 +175,18 @@ def build_my_agent(config: dict):
 
 在 `bfzs/main.py` 注册:
 ```python
-from lc_agent import get_config
 from bfzs.agents.my_agent import build_my_agent
-my_graph = build_my_agent(get_config())
-app.add_agent(name="my_agent", graph=my_graph, description="描述")
+app.add_agent(name="my_agent", graph=build_my_agent(), description="描述")
 ```
+
+想复用 `config.jsonc` 里配好的模型时，用 `resolve_model(model_id)` 一行拿连接参数
+（`raw_model_id` / `base_url` / `api_key` / `provider`），不用自己翻配置：
+```python
+from lc_agent import resolve_model
+info = resolve_model("my-model-id")  # config 省略时自动用全局配置
+llm = ChatOpenAI(model=info.raw_model_id, base_url=info.base_url, api_key=info.api_key)
+```
+（框架内部约定：`model_id` 只是前端别名，请求一律发 `raw_model_id`。）
 
 ### 4.3 修改框架核心 (在 lc-agent 项目)
 

@@ -415,7 +415,8 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
             bind_session_for_file_tracking(thread_id, round_number=round_number)
 
-            model_info = engine._find_model(model_id) if model_id else None
+            from lc_agent.core.model_resolve import find_model
+            model_info = find_model(model_id, engine.config) if model_id else None
             provider = model_info.provider if model_info else None
             resolved_model = (model_info.raw_model_id or model_id) if model_info else model_id
             trace_collector = HttpTraceCollector(provider=provider, model=resolved_model)
@@ -734,7 +735,8 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
 
             config = {"configurable": {"thread_id": thread_id}, "recursion_limit": engine.recursion_limit}
 
-            model_info = engine._find_model(model_id) if model_id else None
+            from lc_agent.core.model_resolve import find_model
+            model_info = find_model(model_id, engine.config) if model_id else None
             provider = model_info.provider if model_info else None
             resolved_model = (model_info.raw_model_id or model_id) if model_info else model_id
             trace_collector = HttpTraceCollector(

@@ -16,6 +16,7 @@ from lc_agent.config import (
     load_config,
     set_config_path,
 )
+from lc_agent.core.model_resolve import find_model, resolve_model, resolve_request_model
 from lc_agent.core.traced_llm import (
     create_traced_chat_openai,
     create_traced_openai_http_client,
@@ -31,6 +32,9 @@ __all__ = [
     "get_database_url",
     "create_traced_chat_openai",
     "create_traced_openai_http_client",
+    "find_model",
+    "resolve_model",
+    "resolve_request_model",
     "ToolRegistry",
     "tool",
     "__version__",
