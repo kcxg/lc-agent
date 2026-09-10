@@ -43,7 +43,7 @@
       <el-select v-model="groupBy" multiple collapse-tags class="f-group" placeholder="分组维度" @change="loadAll">
         <el-option label="用户" value="user" />
         <el-option label="Agent" value="agent" />
-        <el-option label="时间桶" value="bucket" />
+        <el-option label="模型" value="model_id" />
       </el-select>
       <el-checkbox v-model="includeSub" @change="loadAll">含子 Agent</el-checkbox>
       <el-button type="primary" :loading="loading" @click="loadAll">查询</el-button>
@@ -102,7 +102,6 @@
             :label="dimLabel(dim)"
             min-width="110"
           />
-          <el-table-column prop="model_id" label="模型" min-width="150" />
           <el-table-column label="输入" min-width="100" align="right">
             <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
           </el-table-column>
@@ -211,18 +210,18 @@
           <p class="pricing-callout-title">价格说明</p>
           <p>
             每个模型需要设置输入、输出等价格后，才能统计出费用；没设置的模型费用会显示为「—」。
-            单位是「元 / 百万 tokens」，调整价格就新增一条更晚生效的记录，历史账单不受影响。
+            单位是「元 / 百万 tokens」，一个模型只有一行价格，修改即覆盖生效；把价格改成 0 即按免费计。
           </p>
         </div>
 
         <div class="pricing-toolbar">
-          <el-button type="primary" @click="openPriceDialog()">添加价格</el-button>
+          <el-button type="primary" @click="openPriceDialog()">设置价格</el-button>
           <span v-if="prices.length === 0 && !pricingLoading" class="pricing-empty-hint">
-            还没有设置任何价格，点「添加价格」开始
+            还没有设置任何价格，点「设置价格」开始
           </span>
         </div>
 
-        <!-- 按模型合并：一个模型一行，三档价格并列 -->
+        <!-- 单行制：一个模型一行，三档价格并列，点修改回填弹窗 -->
         <el-table v-loading="pricingLoading" :data="priceGroups" stripe max-height="520">
           <el-table-column prop="model" label="模型" min-width="200">
             <template #default="{ row }">
@@ -241,8 +240,12 @@
           <el-table-column label="写入缓存" width="110" align="right">
             <template #default="{ row }">{{ row.cache_write ?? '—' }}</template>
           </el-table-column>
-          <el-table-column prop="effective_from" label="生效日期" width="115" />
           <el-table-column prop="note" label="备注" min-width="170" show-overflow-tooltip />
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openPriceDialog(row.model)">修改</el-button>
+            </template>
+          </el-table-column>
         </el-table>
         <p class="pricing-unit-hint">表中价格单位均为「元 / 百万 tokens」</p>
       </div>
@@ -251,8 +254,8 @@
       </template>
     </el-dialog>
 
-    <!-- 添加价格弹窗：三档价格一行录完 -->
-    <el-dialog v-model="priceVisible" title="添加价格" width="560px" append-to-body class="usage-page">
+    <!-- 设置价格弹窗：选已有模型自动回填当前价，改完保存即覆盖 -->
+    <el-dialog v-model="priceVisible" title="设置价格" width="560px" append-to-body class="usage-page">
       <el-form label-width="88px">
         <el-form-item label="模型">
           <el-select
@@ -262,6 +265,7 @@
             default-first-option
             placeholder="选择模型"
             style="width: 100%"
+            @change="onPriceModelChange"
           >
             <el-option v-for="m in modelKeyOptions.models" :key="m" :value="m" :label="m" />
           </el-select>
@@ -294,9 +298,6 @@
           </div>
           <div class="form-unit-hint">单位：元 / 百万 tokens（美元渠道请先换算成人民币）</div>
         </el-form-item>
-        <el-form-item label="生效日期">
-          <el-date-picker v-model="priceForm.effective_from" type="date" value-format="YYYY-MM-DD" />
-        </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="priceForm.note" placeholder="如：美元价 $5，汇率 7.1" />
         </el-form-item>
@@ -322,8 +323,10 @@ const monthStart = today.slice(0, 8) + '01'
 
 const range = ref<[string, string]>([monthStart, today])
 const granularity = ref<'day' | 'month'>('day')
-const groupBy = ref<string[]>(['user', 'bucket'])
+// 时间列永远显示（粒度由 granularity 控制），分组维度：用户 / Agent / 模型
+const groupBy = ref<string[]>(['user'])
 const includeSub = ref(true)
+const allModels = ref<string[]>([])
 const activeTab = ref('summary')
 
 const loading = ref(false)
@@ -344,16 +347,18 @@ const detailRows = ref<UsageCallRow[]>([])
 
 const priceVisible = ref(false)
 const priceSaving = ref(false)
-// 一个模型一次录齐三档价格（写入缓存选填），保存时拆成多条记录
+// 单行制：一个模型只有一行价格，修改即覆盖；0 = 明确免费
 const priceForm = ref({
   model: '',
   input: 0,
   cache_read: 0,
   output: 0,
   cache_write: undefined as number | undefined,
-  effective_from: today,
   note: '',
 })
+// 修改模式（回填了现价）vs 添加模式（空白）
+const priceEditMode = ref(false)
+const priceDialogTitle = computed(() => priceEditMode.value ? '修改价格' : '添加价格')
 
 // 模型下拉选项：来自 /models 的 model_id
 const modelKeyOptions = ref<{ models: string[] }>({ models: [] })
@@ -361,7 +366,7 @@ const modelKeyOptions = ref<{ models: string[] }>({ models: [] })
 const exporting = ref(false)
 
 const displayDims = computed(() => {
-  // '时间'列在汇总表固定显示（时间桶是每行的天然属性，不该被筛选藏掉）
+  // 时间列永远显示（粒度由 granularity 控制），其余按勾选的分组维度显示
   const dims = groupBy.value.filter((d) => d !== 'bucket')
   return ['bucket', ...dims]
 })
@@ -386,30 +391,27 @@ function dimLabel(dim: string): string {
   return labels[dim] || dim
 }
 
-// 按模型合并：一个模型一行，三档价格并列展示
+// 单行制：按模型合并，一个模型一行，三档价格并列展示
 interface PriceGroupRow {
   model: string
   input?: number
   cache_read?: number
   output?: number
   cache_write?: number
-  effective_from: string
   note: string
 }
 const priceGroups = computed<PriceGroupRow[]>(() => {
-  // 按（模型 × 生效日期）合并：同一模型的不同生效版本各占一行，
-  // 否则旧版本价格被新版本覆盖、日期却还显示旧的，误导
   const map = new Map<string, PriceGroupRow>()
   for (const p of prices.value) {
-    const key = `${p.model}|${p.effective_from ?? ''}`
-    let g = map.get(key)
+    let g = map.get(p.model)
     if (!g) {
-      g = { model: p.model, effective_from: p.effective_from ?? '', note: p.note ?? '' }
-      map.set(key, g)
+      g = { model: p.model, note: p.note ?? '' }
+      map.set(p.model, g)
     }
     if (p.kind === 'input' || p.kind === 'cache_read' || p.kind === 'output' || p.kind === 'cache_write') {
       g[p.kind] = p.price_per_1m
     }
+    if (p.note) g.note = p.note
   }
   return [...map.values()]
 })
@@ -507,17 +509,27 @@ function openDetail(row: UsageSessionRow) {
     .finally(() => { detailLoading.value = false })
 }
 
-function openPriceDialog(model?: unknown) {
+function fillPriceForm(name: string) {
+  const existing = name ? priceGroups.value.find((g) => g.model === name) : undefined
+  priceEditMode.value = !!existing
   priceForm.value = {
-    model: typeof model === 'string' ? model : '',
-    input: 0,
-    cache_read: 0,
-    output: 0,
-    cache_write: undefined,
-    effective_from: today,
-    note: '',
+    model: name,
+    input: existing?.input ?? 0,
+    cache_read: existing?.cache_read ?? 0,
+    output: existing?.output ?? 0,
+    cache_write: existing?.cache_write,
+    note: existing?.note ?? '',
   }
+}
+
+function openPriceDialog(model?: unknown) {
+  fillPriceForm(typeof model === 'string' ? model : '')
   priceVisible.value = true
+}
+
+// 弹窗内切换模型下拉：选中已有价格的模型自动回显该行
+function onPriceModelChange(val: string) {
+  fillPriceForm(val ?? '')
 }
 
 async function handleAddPrice() {
@@ -529,7 +541,6 @@ async function handleAddPrice() {
   try {
     const base = {
       model: priceForm.value.model.trim(),
-      effective_from: priceForm.value.effective_from,
       note: priceForm.value.note,
     }
     const rows = [
@@ -537,7 +548,7 @@ async function handleAddPrice() {
       { ...base, kind: 'cache_read', price_per_1m: priceForm.value.cache_read },
       { ...base, kind: 'output', price_per_1m: priceForm.value.output },
     ]
-    if (priceForm.value.cache_write !== undefined && priceForm.value.cache_write > 0) {
+    if (priceForm.value.cache_write !== undefined && priceForm.value.cache_write !== null) {
       rows.push({ ...base, kind: 'cache_write', price_per_1m: priceForm.value.cache_write })
     }
     for (const row of rows) {

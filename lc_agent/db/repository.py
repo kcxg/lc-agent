@@ -793,28 +793,36 @@ class UsageRepository:
             })
         return rows
 
-    # ---- 单价维护（改价 = INSERT，绝不 UPDATE —— §2.2 铁律）----
+    # ---- 单价维护（单行制：一个 (model, kind) 只有一条，保存即 upsert 覆盖）----
 
     async def list_pricing(self) -> list[ModelPrice]:
         result = await self.session.execute(
-            select(ModelPrice).order_by(ModelPrice.model, ModelPrice.kind, ModelPrice.effective_from)
+            select(ModelPrice).order_by(ModelPrice.model, ModelPrice.kind)
         )
         return list(result.scalars().all())
 
     async def add_pricing(
         self, *, model: str, kind: str, price_per_1m: float,
-        effective_from: datetime, note: str = "",
+        effective_from: datetime | None = None, note: str = "",
     ) -> ModelPrice:
         if kind not in ("input", "output", "cache_read", "cache_write"):
             raise ValueError(f"非法 kind: {kind}")
-        price = ModelPrice(
-            model=model,
-            kind=kind,
-            price_per_1m=price_per_1m,
-            effective_from=effective_from,
-            note=note,
+        existing = await self.session.execute(
+            select(ModelPrice).where(ModelPrice.model == model, ModelPrice.kind == kind)
         )
-        self.session.add(price)
+        price = existing.scalars().first()
+        if price is None:
+            price = ModelPrice(
+                model=model,
+                kind=kind,
+                price_per_1m=price_per_1m,
+                effective_from=effective_from or datetime.now(timezone.utc),
+                note=note,
+            )
+            self.session.add(price)
+        else:
+            price.price_per_1m = price_per_1m
+            price.note = note
         await self.session.commit()
         await self.session.refresh(price)
         return price

@@ -56,17 +56,22 @@ async def _annotate_cost(
     db: AsyncSession,
     rows: list[dict],
     granularity: str,
+    group_by: list[str] | None = None,
 ) -> list[dict]:
-    """按 (bucket, model_id) 找当时生效价换算金额（§3.2.1：桶末时刻匹配）。"""
+    """换算金额。SQL 永远按最细粒度返回（见 UsageRepository.summary），
+    这里按调用方实际勾选的维度归并：token 求和，金额按行内各模型分别算好再相加；
+    任一模型没配价则整行 cost 为 None（前端显示 —）。"""
     prices = await _price_rows(db)
     # 缓存解析出的"各 kind 单价"而非金额——同 (bucket, model) 的多行 token 数不同，金额必须各算各的
     price_cache: dict[tuple, dict[str, float | None]] = {}
-    for row in rows:
+    group_by = group_by or []
+
+    def _cost_of(row: dict) -> float | None:
         key = (row["bucket"], row["model_id"])
         if key not in price_cache:
             at = bucket_end(row["bucket"], granularity)
             price_cache[key] = resolve_prices_for(prices, row["model_id"], row["raw_model_id"], at)
-        row["cost"] = compute_cost(
+        return compute_cost(
             {
                 "input": row["input_tokens"],
                 "output": row["output_tokens"],
@@ -75,6 +80,49 @@ async def _annotate_cost(
             },
             price_cache[key],
         )
+
+    # 没勾模型维度时：同 (bucket + 勾选维度) 的多行合并，金额按各模型分别算后相加
+    if "model_id" not in group_by:
+        merged: dict[tuple, dict] = {}
+        for row in rows:
+            mkey = (row["bucket"], *(row.get(g, "") for g in group_by if g != "bucket"))
+            agg = merged.get(mkey)
+            if agg is None:
+                agg = merged[mkey] = {
+                    "bucket": row["bucket"],
+                    **({g: row.get(g, "") for g in group_by if g != "bucket"}),
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "reasoning_tokens": 0,
+                    "calls": 0,
+                    "cost": 0.0,
+                    "_missing": False,
+                }
+            agg["input_tokens"] += row["input_tokens"] or 0
+            agg["output_tokens"] += row["output_tokens"] or 0
+            agg["cache_read_tokens"] += row["cache_read_tokens"] or 0
+            agg["cache_write_tokens"] += row["cache_write_tokens"] or 0
+            agg["reasoning_tokens"] += row["reasoning_tokens"] or 0
+            agg["calls"] += row["calls"] or 0
+            c = _cost_of(row)
+            if c is None:
+                agg["_missing"] = True
+            else:
+                agg["cost"] += c
+        out = []
+        for agg in merged.values():
+            if agg.pop("_missing"):
+                agg["cost"] = None
+            else:
+                agg["cost"] = round(agg["cost"], 4)
+            out.append(agg)
+        out.sort(key=lambda r: r["bucket"])
+        return out
+
+    for row in rows:
+        row["cost"] = _cost_of(row)
     return rows
 
 
@@ -96,7 +144,7 @@ async def admin_usage_summary(
         date_from=date_from, date_to=date_to,
         group_by=dims, granularity=granularity, include_sub=include_sub,
     )
-    rows = await _annotate_cost(db, rows, granularity)
+    rows = await _annotate_cost(db, rows, granularity, dims)
     return {"rows": rows, "group_by": dims, "granularity": granularity}
 
 
@@ -115,7 +163,7 @@ async def _compute_total_cost(
         group_by=["bucket"], granularity="month", include_sub=include_sub,
         user_id=user_id,
     )
-    rows = await _annotate_cost(db, rows, "month")
+    rows = await _annotate_cost(db, rows, "month", ["bucket"])
     costs = [r["cost"] for r in rows]
     return None if any(c is None for c in costs) else round(sum(costs), 4)
 
@@ -153,7 +201,7 @@ async def admin_usage_by_user(
         date_from=date_from, date_to=date_to,
         group_by=["user"], granularity="month", include_sub=include_sub,
     )
-    rows = await _annotate_cost(db, rows, "month")
+    rows = await _annotate_cost(db, rows, "month", ["user"])
     rows.sort(key=lambda x: x["input_tokens"] + x["output_tokens"], reverse=True)
     return {"rows": rows}
 
@@ -173,7 +221,7 @@ async def admin_usage_by_agent(
         date_from=date_from, date_to=date_to,
         group_by=["agent"], granularity="month", include_sub=include_sub,
     )
-    rows = await _annotate_cost(db, rows, "month")
+    rows = await _annotate_cost(db, rows, "month", ["agent"])
     rows.sort(key=lambda x: x["input_tokens"] + x["output_tokens"], reverse=True)
     return {"rows": rows}
 
@@ -227,7 +275,7 @@ async def admin_usage_export_csv(
         date_from=date_from, date_to=date_to,
         group_by=dims, granularity=granularity, include_sub=include_sub,
     )
-    rows = await _annotate_cost(db, rows, granularity)
+    rows = await _annotate_cost(db, rows, granularity, dims)
 
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -248,7 +296,8 @@ class PriceCreateRequest(BaseModel):
     model: str = Field(min_length=1)
     kind: str = Field(pattern="^(input|output|cache_read|cache_write)$")
     price_per_1m: float = Field(ge=0)
-    effective_from: str = Field(description="生效日期 YYYY-MM-DD（时间归零，§3.2.1）")
+    # 兼容旧前端字段：单行制无版本概念，传了也忽略
+    effective_from: str = Field(default="", description="已废弃：单行制无生效日期，传了忽略")
     note: str = ""
 
 
@@ -269,7 +318,7 @@ async def list_pricing(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """当前价 + 历史版本（改价 = INSERT，所以列表即全部版本）。"""
+    """当前价（单行制：一个 (model, kind) 只有一条）。"""
     repo = UsageRepository(db)
     return {"rows": [_serialize_price(p) for p in await repo.list_pricing()]}
 
@@ -280,17 +329,12 @@ async def add_pricing(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """新增一条价格（不提供 UPDATE —— 改价就是新增一条更晚生效的，§2.2 铁律）。"""
-    try:
-        eff = datetime.fromisoformat(body.effective_from)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="生效日期格式必须为 YYYY-MM-DD")
+    """保存价格（单行制 upsert：同 (model, kind) 直接覆盖，无版本概念）。"""
     repo = UsageRepository(db)
     price = await repo.add_pricing(
         model=body.model,
         kind=body.kind,
         price_per_1m=body.price_per_1m,
-        effective_from=eff,
         note=body.note,
     )
     return _serialize_price(price)
@@ -318,7 +362,7 @@ async def me_usage(
         include_sub=include_sub,
         user_id=current_user.id,
     )
-    rows = await _annotate_cost(db, rows, granularity)
+    rows = await _annotate_cost(db, rows, granularity, dims)
     totals = await repo.totals(
         date_from=date_from, date_to=date_to,
         include_sub=include_sub, user_id=current_user.id,

@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 
 from sqlmodel import SQLModel, Field
-from sqlalchemy import Column, Index, String, text
+from sqlalchemy import Column, Index, String, UniqueConstraint as sa_UniqueConstraint, text
 
 from lc_agent.db.models import utcnow
 
@@ -58,6 +58,7 @@ class ModelPrice(SQLModel, table=True):
     __tablename__ = "model_pricing"
     __table_args__ = (
         Index("ix_model_pricing_model_kind_from", "model", "kind", "effective_from"),
+        sa_UniqueConstraint("model", "kind", name="uq_model_pricing_model_kind"),
     )
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)

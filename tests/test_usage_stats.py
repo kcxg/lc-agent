@@ -189,32 +189,31 @@ async def test_record_usage_run_seq_unique(db_env):
 
 # ---------- 定价 ----------
 
-def _price(model, kind, price, effective_from):
-    return ModelPrice(model=model, kind=kind, price_per_1m=price, effective_from=effective_from)
+def _price(model, kind, price, effective_from=None):
+    return ModelPrice(model=model, kind=kind, price_per_1m=price,
+                      effective_from=effective_from or datetime(2026, 1, 1))
 
 
-def test_pricing_two_level_and_latest_wins():
+def test_pricing_two_level_single_row():
+    """单行制：一个 (model, kind) 只有一条，model_id 精确优先、raw 兜底。"""
     at = datetime(2026, 9, 7, 12, 0, 0)
-    old = datetime(2026, 1, 1)
-    new = datetime(2026, 8, 1)
-    future = datetime(2027, 1, 1)
     prices = [
-        _price("gpt-5.4", "input", 1.0, old),
-        _price("gpt-5.4", "input", 2.0, new),       # 最新生效 → 命中
-        _price("gpt-5.4", "input", 9.9, future),    # 未生效 → 忽略
-        _price("zzz-gpt-5.4", "input", 5.0, old),   # model_id 精确永远优先
+        _price("gpt-5.4", "input", 2.0),
+        _price("zzz-gpt-5.4", "input", 5.0),   # model_id 精确永远优先
     ]
     got = resolve_prices_for(prices, "zzz-gpt-5.4", "gpt-5.4", at)
     assert got["input"] == 5.0      # 两级链第 1 级命中即停
     got2 = resolve_prices_for(prices, "other-model", "gpt-5.4", at)
-    assert got2["input"] == 2.0     # 兜底层取最新一条
+    assert got2["input"] == 2.0     # 兜底层命中
     assert got2["output"] is None   # 没配 output → None
 
 
-def test_pricing_future_effective_ignored():
-    at = datetime(2026, 9, 7, 12, 0, 0)
-    prices = [_price("m", "input", 1.0, datetime(2027, 1, 1))]
-    assert resolve_prices_for(prices, "m", "m", at)["input"] is None
+def test_pricing_zero_means_free():
+    """价格改成 0 = 明确免费（compute_cost 算出 0.0 而非 None）。"""
+    prices = [_price("m", "input", 0.0), _price("m", "output", 0.0)]
+    got = resolve_prices_for(prices, "m", "m")
+    assert got["input"] == 0.0
+    assert compute_cost({"input": 100, "output": 0, "cache_read": 0, "cache_write": 0}, got) == 0.0
 
 
 def test_compute_cost_cache_read_replaces_full_price():
@@ -296,6 +295,8 @@ async def _seed_usage(db_url: str):
         session.add(ModelPrice(model="base-a", kind="input", price_per_1m=1.0,
                                effective_from=datetime(2000, 1, 1)))
         session.add(ModelPrice(model="base-a", kind="output", price_per_1m=4.0,
+                               effective_from=datetime(2000, 1, 1)))
+        session.add(ModelPrice(model="base-a", kind="cache_read", price_per_1m=0.0,
                                effective_from=datetime(2000, 1, 1)))
         await session.commit()
     finally:
@@ -443,13 +444,55 @@ async def app_with_usage(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_summary_merges_models_when_not_grouped(db_env):
+    """回归：只按用户分组时，同天同用户的多模型行必须合并成一行
+    （SQL 永远按最细粒度返回，归并在 _annotate_cost 按勾选维度做）。"""
+    from lc_agent.db.engine import get_async_session
+    from lc_agent.server.routes.usage import _annotate_cost
+
+    session = get_async_session(db_env)
+    try:
+        session.add(LlmUsage(run_id="g1", seq=0, user_id="alice", session_id="s1", agent_id="chat",
+                             model_id="m-a", raw_model_id="base-a", provider="p", role="main",
+                             input_tokens=1000, output_tokens=100))
+        session.add(LlmUsage(run_id="g2", seq=0, user_id="alice", session_id="s1", agent_id="chat",
+                             model_id="m-b", raw_model_id="base-b", provider="p", role="main",
+                             input_tokens=2000, output_tokens=200))
+        session.add(ModelPrice(model="base-a", kind="input", price_per_1m=1.0,
+                               effective_from=datetime(2000, 1, 1)))
+        session.add(ModelPrice(model="base-a", kind="output", price_per_1m=4.0,
+                               effective_from=datetime(2000, 1, 1)))
+        session.add(ModelPrice(model="base-b", kind="input", price_per_1m=2.0,
+                               effective_from=datetime(2000, 1, 1)))
+        session.add(ModelPrice(model="base-b", kind="output", price_per_1m=1.0,
+                               effective_from=datetime(2000, 1, 1)))
+        await session.commit()
+
+        repo = UsageRepository(session)
+        rows = await repo.summary(date_from="2000-01-01", date_to="2099-12-31",
+                                  group_by=["user"], granularity="month")
+        # SQL 侧仍是两行（按模型拆开）
+        assert len(rows) == 2
+        merged = await _annotate_cost(session, rows, "month", ["user"])
+        # 归并后同月同用户只剩一行，token 求和、金额按各模型分别算后相加
+        assert len(merged) == 1
+        assert merged[0]["input_tokens"] == 3000
+        assert merged[0]["output_tokens"] == 300
+        assert merged[0]["cost"] == round(1000 / 1e6 * 1.0 + 100 / 1e6 * 4.0
+                                          + 2000 / 1e6 * 2.0 + 200 / 1e6 * 1.0, 4)
+        assert "model_id" not in merged[0]
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
 async def test_admin_summary_api(app_with_usage):
     app, headers = app_with_usage
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(
             "/api/admin/usage/summary",
-            params={"from": "2000-01-01", "to": "2099-12-31", "group_by": "user,bucket", "granularity": "month"},
+            params={"from": "2000-01-01", "to": "2099-12-31", "group_by": "user,bucket,model_id", "granularity": "month"},
             headers=headers,
         )
         assert resp.status_code == 200
@@ -493,14 +536,14 @@ async def test_admin_endpoints_require_admin(app_with_usage):
 
 @pytest.mark.asyncio
 async def test_pricing_post_then_summary_shows_cost(app_with_usage):
-    """录价后金额从 — 变为有值；有消耗的维度缺价则整体仍为 —。"""
+    """录价后金额从 — 变为有值；有消耗的维度缺价则整体仍为 —。单行制 upsert 可覆盖。"""
     app, headers = app_with_usage
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # 只配 input：m-b 的 output 有消耗但没价 → 金额仍是 —
         resp = await client.post(
             "/api/admin/usage/pricing",
-            json={"model": "base-b", "kind": "input", "price_per_1m": 2.0, "effective_from": "2020-01-01"},
+            json={"model": "base-b", "kind": "input", "price_per_1m": 2.0},
             headers=headers,
         )
         assert resp.status_code == 201
@@ -515,7 +558,14 @@ async def test_pricing_post_then_summary_shows_cost(app_with_usage):
         # 补上 output 价后金额算得出：2M×2.0 + 0.2M×1.0 = 4.2
         resp = await client.post(
             "/api/admin/usage/pricing",
-            json={"model": "base-b", "kind": "output", "price_per_1m": 1.0, "effective_from": "2020-01-01"},
+            json={"model": "base-b", "kind": "output", "price_per_1m": 1.0},
+            headers=headers,
+        )
+        assert resp.status_code == 201
+        # 同 key 再保存一次 = 覆盖而非新增（单行制 upsert）
+        resp = await client.post(
+            "/api/admin/usage/pricing",
+            json={"model": "base-b", "kind": "output", "price_per_1m": 1.0},
             headers=headers,
         )
         assert resp.status_code == 201

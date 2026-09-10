@@ -277,7 +277,7 @@ export const api = {
   getUsageSessionDetail: (sessionId: string) =>
     fetchApi<{ rows: UsageCallRow[] }>(`/admin/usage/session/${sessionId}`),
   getPricing: () => fetchApi<{ rows: PriceRow[] }>('/admin/usage/pricing'),
-  addPricing: (data: { model: string; kind: string; price_per_1m: number; effective_from: string; note?: string }) =>
+  addPricing: (data: { model: string; kind: string; price_per_1m: number; effective_from?: string; note?: string }) =>
     fetchApi<PriceRow>('/admin/usage/pricing', { method: 'POST', body: JSON.stringify(data) }),
   getMyUsage: (params: { from: string; to: string; group_by: string; granularity: string; include_sub: boolean }) =>
     fetchApi<{ rows: UsageSummaryRow[]; totals: UsageTotals; group_by: string[]; granularity: string }>(

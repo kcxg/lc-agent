@@ -1,9 +1,10 @@
 """单价匹配与金额换算（docs/tasks/token_stats.md §2.2 / §3.2）。
 
+- 单行制：一个 (model, kind) 只有一条价格，无版本/日期概念
 - 匹配键只有 model 一列：model_id 精确 → raw_model_id 兜底，命中即停
-- 同 key 取 effective_from <= 统计时刻的最新一条
-- 价格全量读进内存（几十行），对每个 (bucket, model_id) 找当时生效的那一版
+- 价格全量读进内存（几十行），对每个 (bucket, model_id) 直接取单行价
 - 未配价返回 None，调用方显示 `—`，绝不用 0 假装算出来了
+  （用户把价格改成 0 = 明确免费，compute_cost 会算出 0.0 而非 None）
 """
 
 from datetime import datetime, timedelta, timezone
@@ -47,22 +48,19 @@ def resolve_price(
     model_id: str,
     raw_model_id: str,
     kind: str,
-    at: datetime,
+    at: datetime | None = None,
 ) -> float | None:
-    """两级匹配（model_id 精确 → raw_model_id 兜底），同 key 取当时生效的最新一条。
+    """两级匹配（model_id 精确 → raw_model_id 兜底），单行制无版本概念。
 
+    at 参数保留仅为兼容旧调用方，已忽略。
     返回 None = 该维度没配价（或该 kind 没配价）。
     """
     for key in (model_id, raw_model_id):
         if not key:
             continue
-        candidates = [
-            p for p in prices
-            if p.model == key and p.kind == kind and _as_naive_local(p.effective_from) <= at
-        ]
-        if candidates:
-            best = max(candidates, key=lambda p: _as_naive_local(p.effective_from))
-            return best.price_per_1m
+        for p in prices:
+            if p.model == key and p.kind == kind:
+                return p.price_per_1m
     return None
 
 
@@ -70,7 +68,7 @@ def resolve_prices_for(
     prices: list[ModelPrice],
     model_id: str,
     raw_model_id: str,
-    at: datetime,
+    at: datetime | None = None,
 ) -> dict[str, float | None]:
     return {kind: resolve_price(prices, model_id, raw_model_id, kind, at) for kind in KINDS}
 

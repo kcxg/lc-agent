@@ -94,6 +94,9 @@
 **子 agent 效果，可委派给子 agent 执行，并流式打字机显示和保留独立执行过程**
 ![子 agent 效果，可委派给子 agent 执行，并流式打字机显示和保留独立执行过程](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/subagent.png)
 
+**Token 费用统计**
+![Token 费用统计](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/token_cost.png)
+
 ## 快速开始
 
 ### 安装

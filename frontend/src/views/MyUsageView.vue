@@ -20,10 +20,9 @@
         <el-option label="按天" value="day" />
         <el-option label="按月" value="month" />
       </el-select>
-      <el-select v-model="groupBy" class="f-group" @change="load">
-        <el-option label="按 Agent" value="agent" />
-        <el-option label="按模型" value="model_id" />
-        <el-option label="按时间" value="bucket" />
+      <el-select v-model="groupBy" multiple collapse-tags class="f-group" placeholder="分组维度" @change="load">
+        <el-option label="Agent" value="agent" />
+        <el-option label="模型" value="model_id" />
       </el-select>
       <el-checkbox v-model="includeSub" @change="load">含子 Agent</el-checkbox>
       <el-button type="primary" :loading="loading" @click="load">查询</el-button>
@@ -45,9 +44,13 @@
     </div>
 
     <el-table v-loading="loading" :data="rows" stripe border max-height="520">
-      <el-table-column prop="bucket" label="时间" min-width="110" />
-      <el-table-column v-if="groupBy === 'agent'" prop="agent" label="Agent" min-width="130" />
-      <el-table-column v-else prop="model_id" label="模型" min-width="160" />
+      <el-table-column
+        v-for="dim in displayDims"
+        :key="dim"
+        :prop="dim"
+        :label="dimLabel(dim)"
+        min-width="110"
+      />
       <el-table-column label="输入" min-width="100" align="right">
         <template #default="{ row }">{{ fmtNum(row.input_tokens) }}</template>
       </el-table-column>
@@ -80,8 +83,21 @@ const monthStart = today.slice(0, 8) + '01'
 
 const range = ref<[string, string]>([monthStart, today])
 const granularity = ref<'day' | 'month'>('day')
-const groupBy = ref<'agent' | 'model_id' | 'bucket'>('agent')
+// 时间列永远显示（粒度由 granularity 控制），分组：Agent / 模型（多选，可单选多选或都不选）
+const groupBy = ref<string[]>(['agent'])
 const includeSub = ref(true)
+
+const displayDims = computed(() => {
+  const dims = groupBy.value.filter((d) => d !== 'bucket')
+  return ['bucket', ...dims]
+})
+
+function dimLabel(dim: string): string {
+  const labels: Record<string, string> = {
+    agent: 'Agent', model_id: '模型', bucket: '时间',
+  }
+  return labels[dim] || dim
+}
 
 const loading = ref(false)
 const rows = ref<UsageSummaryRow[]>([])
@@ -107,7 +123,7 @@ async function load() {
   try {
     const [from, to] = range.value
     const result = await api.getMyUsage({
-      from, to, group_by: groupBy.value,
+      from, to, group_by: groupBy.value.join(',') || 'bucket',
       granularity: granularity.value,
       include_sub: includeSub.value,
     })
