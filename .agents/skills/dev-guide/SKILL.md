@@ -113,6 +113,11 @@ D:\codes\lc-agent-bfzs/
 └── bfzs_checkpoints.db    # LangGraph checkpoint (运行时生成)
 ```
 
+## config.jsonc 中 model_id 和 raw_model_id区别
+
+- `model_id` 是 给供应商+原始模型名字起的唯一别名名字，前端使用这个。
+- `raw_model_id` 是 实际请求模型供应商http接口的模型ID，实际请求服务时候用的raw_model_id。
+
 ## 4. 开发模式和常用操作
 
 ### 4.1 新增工具 (在 bfzs 项目)
