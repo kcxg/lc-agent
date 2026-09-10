@@ -17,6 +17,9 @@
       </span>
       <span class="tool-name">{{ toolCall.name }}</span>
       <el-tag size="small" :type="statusType">{{ statusLabel }}</el-tag>
+      <span v-if="toolCall.status === 'running'" class="live-timer" title="已执行时间">
+        <span class="live-dot"></span>⏱ {{ liveElapsed }}
+      </span>
       <span class="tool-meta" v-if="toolCall.status === 'done'">
         <span v-if="toolCall.duration" class="meta-item">⏱ {{ formatDuration(toolCall.duration) }}</span>
         <span v-if="toolCall.resultLength" class="meta-item">📦 {{ formatSize(toolCall.resultLength) }}<template v-if="tokenCount !== null"> | {{ formatTokenCount(tokenCount) }} tokens</template></span>
@@ -514,6 +517,48 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
+// --- Live stopwatch for running tools (ticks every 100ms, cleaned up on unmount) ---
+const liveNow = ref(Date.now())
+let liveTimer: ReturnType<typeof setInterval> | null = null
+
+function startLiveTimer() {
+  if (liveTimer) return
+  liveTimer = setInterval(() => { liveNow.value = Date.now() }, 100)
+}
+
+function stopLiveTimer() {
+  if (liveTimer) {
+    clearInterval(liveTimer)
+    liveTimer = null
+  }
+}
+
+const liveElapsed = computed(() => {
+  const start = props.toolCall.startTime
+  if (!start) return '--'
+  const ms = Math.max(0, liveNow.value - start)
+  if (ms < 1000) return `${ms}ms`
+  const totalSec = Math.floor(ms / 1000)
+  const tenths = Math.floor((ms % 1000) / 100)
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  if (min === 0) return `${sec}.${tenths}s`
+  return `${min}:${String(sec).padStart(2, '0')}.${tenths}`
+})
+
+watch(() => props.toolCall.status, (status) => {
+  if (status === 'running') {
+    liveNow.value = Date.now()
+    startLiveTimer()
+  } else {
+    stopLiveTimer()
+  }
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  stopLiveTimer()
+})
+
 function formatSize(len: number): string {
   if (len < 1024) return `${len} chars`
   return `${(len / 1024).toFixed(1)}K chars`
@@ -702,6 +747,44 @@ function formatTokenCount(count: number): string {
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.live-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-color-warning-dark, #b54708);
+  background: color-mix(in srgb, var(--el-color-warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--el-color-warning) 45%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--el-color-warning) 25%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--el-color-warning);
+  animation: live-pulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot {
+    animation: none;
+  }
 }
 
 .tool-meta {

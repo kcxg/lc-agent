@@ -26,8 +26,8 @@ function expectNotIncludes(name, content, unexpected) {
 }
 
 expectNotIncludes('ChatInput.vue', files.chatInput, ':disabled="!isConnected"')
-expectIncludes('ChatInput.vue', files.chatInput, ':disabled="isInputDisabled"')
-expectIncludes('ChatInput.vue', files.chatInput, 'isInputDisabled')
+expectIncludes('ChatInput.vue', files.chatInput, ':disabled="isStreamingState"')
+expectIncludes('ChatInput.vue', files.chatInput, 'canSend')
 
 expectIncludes('App.vue', files.app, 'const sameRouteSession = route.params.sessionId === session.id')
 expectIncludes('App.vue', files.app, 'if (sameRouteSession) {')

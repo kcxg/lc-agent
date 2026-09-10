@@ -62,7 +62,7 @@ class TestIntegration:
     def test_engine_has_models(self, lc_app):
         models = lc_app.engine.get_models()
         assert len(models) > 0
-        assert models[0].id == "test-model"
+        assert models[0].model_id == "test-model"
 
     def test_default_preset(self, lc_app):
         preset = lc_app.engine.get_default_preset()

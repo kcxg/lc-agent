@@ -87,10 +87,23 @@ class AgentPresetDB(SQLModel, table=True):
     __tablename__ = "agent_presets"
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
-    name: str
+    # name 是 MCP 调用与内部委派的定位键，必须唯一（迁移 20260909_unique_preset_name）
+    name: str = Field(sa_column=Column(String, nullable=False, unique=True))
     display_name: str | None = Field(default=None)
     system_prompt: str = ""
     default_model: str = ""
+    default_delegation_description: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=text("''")),
+    )
+    can_be_subagent: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=false()),
+    )
+    can_be_mcp: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=false()),
+    )
     allowed_tool_groups: list[str] | None = Field(default=None, sa_column=Column(JSON))
     allowed_mcp_servers: list[str] | None = Field(default=None, sa_column=Column(JSON))
     allowed_skills: list[str] | None = Field(default=None, sa_column=Column(JSON))
@@ -106,6 +119,7 @@ class AgentPresetDB(SQLModel, table=True):
     )
     project_root: str | None = Field(default=None)
     project_extra_dirs: list[str] | None = Field(default=None, sa_column=Column(JSON))
+    extra_skill_dirs: list[str] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -139,6 +153,10 @@ class FileChange(SQLModel, table=True):
     new_string: str | None = Field(default=None)
     tool_call_id: str | None = Field(default=None)
     move_destination: str | None = Field(default=None)
+    round_number: int | None = Field(default=None, index=True)  # 第几轮用户提问（1-based），旧数据为 None
+    line_start: int | None = Field(default=None)  # 变更起始行号（编辑时刻，1-based），旧数据为 None
+    context_before: str | None = Field(default=None)  # 变更点前 5 行（编辑时刻原文）
+    context_after: str | None = Field(default=None)  # 变更点后 5 行（编辑时刻原文）
     created_at: datetime = Field(default_factory=utcnow)
 
 

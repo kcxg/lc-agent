@@ -1,6 +1,7 @@
 """Internal Agent execution service shared by chat and automation."""
 
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,7 @@ from lc_agent.core.http_trace import (
 )
 from lc_agent.server import persistence, stream_utils
 from lc_agent.server.subagent_tracker import SubAgentRunTracker
+from lc_agent.server.usage_recorder import build_model_map, record_usage
 
 
 @dataclass
@@ -25,9 +27,8 @@ class AgentRunResult:
 class AgentRunService:
     """Consume one Agent stream and persist its complete UI execution record."""
 
-    def __init__(self, engine: AgentEngine, db_url: str):
+    def __init__(self, engine: AgentEngine):
         self.engine = engine
-        self.db_url = db_url
 
     async def run(
         self,
@@ -44,6 +45,8 @@ class AgentRunService:
 
         content = [{"type": "text", "text": prompt}]
         tool_calls: list[dict[str, Any]] = []
+        usage_run_id = str(uuid.uuid4())
+        usage_model_map = build_model_map(self.engine)
         usage_rounds: list[dict[str, Any]] = []
         content_parts: list[str] = []
         active_subagent_tool_call_ids: set[str] = set()
@@ -53,11 +56,11 @@ class AgentRunService:
 
         try:
             await persistence.save_ui_message(
-                self.db_url,
                 session_id,
                 "user",
                 content,
             )
+            round_number = await persistence.get_session_user_message_count(session_id)
             self.engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
             display_map = self.engine.get_subagent_display_name_map(
                 preset_id, model_id=model_id, llm_params=llm_params,
@@ -66,18 +69,20 @@ class AgentRunService:
                 preset_id, model_id=model_id, llm_params=llm_params,
             )
             tracker = SubAgentRunTracker(
-                db_url=self.db_url,
                 parent_thread_id=session_id,
                 user_id=user_id,
                 subagent_display_map=display_map,
                 tool_calls=tool_calls,
             )
             init_subagent_collector_registry()
-            trace_collector = HttpTraceCollector(provider=None, model=model_id or None)
+            trace_collector = HttpTraceCollector(
+                provider=None,
+                model=self.engine.resolve_request_model(model_id) if model_id else None,
+            )
             trace_token = bind_http_trace_collector(trace_collector)
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
 
-            file_token = bind_session_for_file_tracking(session_id)
+            file_token = bind_session_for_file_tracking(session_id, round_number=round_number)
             try:
                 async for event in self.engine.chat_stream(
                     content,
@@ -113,7 +118,6 @@ class AgentRunService:
                                 active_subagent_tool_call_ids.discard(tool_call_id)
                         elif event_type == "file_change":
                             await persistence.save_file_change(
-                                self.db_url,
                                 payload.get("session_id", session_id),
                                 payload.get("file_path", ""),
                                 payload.get("change_type", ""),
@@ -121,17 +125,24 @@ class AgentRunService:
                                 new_string=payload.get("new_string"),
                                 tool_call_id=payload.get("tool_call_id"),
                                 move_destination=payload.get("move_destination"),
+                                round_number=payload.get("round_number"),
+                                line_start=payload.get("line_start"),
+                                context_before=payload.get("context_before"),
+                                context_after=payload.get("context_after"),
                             )
                         elif event_type == "file_change_git_snapshot":
                             await persistence.save_git_base_hash(
-                                self.db_url,
                                 payload.get("session_id", session_id),
                                 payload.get("git_base_hash", ""),
                             )
                         tracker.handle_event(event_type, payload)
 
                     before = len(usage_rounds)
-                    stream_utils.accumulate_usage(event, usage_rounds)
+                    stream_utils.accumulate_usage(
+                        event, usage_rounds,
+                        default_model_id=model_id or "",
+                        model_map=usage_model_map,
+                    )
                     if len(usage_rounds) > before:
                         usage_rounds[-1]["duration_ms"] = int((time.time() - round_start_time) * 1000)
                         round_start_time = time.time()
@@ -144,11 +155,18 @@ class AgentRunService:
                 reset_http_trace_collector(trace_token)
 
             await tracker.drain()
+            await record_usage(
+                usage_rounds,
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=preset_id,
+                source="automation",
+                run_id=usage_run_id,
+            )
             traces = trace_collector.snapshot()
             if content_parts or tool_calls or usage_rounds or traces:
                 await persistence.save_ui_message(
-                    self.db_url,
-                    session_id,
+                session_id,
                     "assistant",
                     [{"type": "text", "text": "".join(content_parts)}],
                     tool_calls=tool_calls or None,
@@ -159,7 +177,7 @@ class AgentRunService:
                     },
                     http_traces=traces or None,
                 )
-            await persistence.increment_session_message_count(self.db_url, session_id)
+            await persistence.increment_session_message_count(session_id)
             try:
                 agent = self.engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
                 config = {"configurable": {"thread_id": session_id}, "recursion_limit": self.engine.recursion_limit}
@@ -176,4 +194,12 @@ class AgentRunService:
                 pass
             return AgentRunResult(final_output="".join(content_parts))
         except Exception as exc:
+            await record_usage(
+                usage_rounds,
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=preset_id,
+                source="automation",
+                run_id=usage_run_id,
+            )
             return AgentRunResult(error=str(exc), final_output="".join(content_parts))

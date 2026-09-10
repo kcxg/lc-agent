@@ -1,27 +1,17 @@
 # lc_agent/server/routes/prompts.py
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from lc_agent.config import get_database_url
 from lc_agent.core.engine import AgentEngine
-from lc_agent.db.engine import get_async_session as _get_db_session
 from lc_agent.db.models import AgentPresetDB
 from lc_agent.db.models_auth import User
 from lc_agent.db.repository import PromptRepository
 from lc_agent.server.auth_middleware import get_current_user, require_admin
+from lc_agent.server.dependencies import get_db_session as get_db
 from lc_agent.server.dependencies import get_engine
 from sqlalchemy import select
 
 router = APIRouter(tags=["prompts"])
-
-
-async def get_db(request: Request):
-    db_url = get_database_url()
-    session = _get_db_session(db_url)
-    try:
-        yield session
-    finally:
-        await session.close()
 
 
 class PromptCreateRequest(BaseModel):

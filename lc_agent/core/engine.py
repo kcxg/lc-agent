@@ -13,6 +13,7 @@ from langchain_core.tools import tool as lc_tool
 from pydantic import Field as _PydanticField
 
 from lc_agent.config import get_config_value
+from lc_agent.core.model_resolve import find_model, parse_models, resolve_request_model
 from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, _convert_text_file_blocks
 from lc_agent.core.engine_helpers.project_context import _build_project_context_text
 from lc_agent.skills.skill_middleware import _LcAgentSkillMiddleware
@@ -87,20 +88,8 @@ class AgentEngine:
         self._code_agent_factories[name] = factory
 
     def _parse_models(self, config: dict) -> list[ModelInfo]:
-        """Extract ModelInfo list from config."""
-        models = []
-        for provider_name, provider_conf in config.get("provider", {}).items():
-            if isinstance(provider_conf, dict):
-                for model_conf in provider_conf.get("models", []):
-                    models.append(ModelInfo(
-                        id=model_conf["id"],
-                        provider=provider_name,
-                        base_url=provider_conf.get("base_url", ""),
-                        context_limit=model_conf.get("context_limit", 8000),
-                        max_output_tokens=model_conf.get("max_output_tokens", 0),
-                        api_key=provider_conf.get("api_key", ""),
-                    ))
-        return models
+        """Extract ModelInfo list from config (校验逻辑见 model_resolve.parse_models)."""
+        return parse_models(config)
 
     def get_models(self) -> list[ModelInfo]:
         """Return available models."""
@@ -190,6 +179,9 @@ class AgentEngine:
                 logger.warning("Subagent preset not found: %s — skipping", subagent_id)
                 continue
             subagent_preset = self._resolve_preset(subagent_id)
+            if not getattr(subagent_preset, "can_be_subagent", False):
+                logger.warning("Subagent not eligible (can_be_subagent off): %s — skipping", subagent_id)
+                continue
             display_name = subagent_preset.display_name or subagent_preset.name
             subagent_type = subagent_preset.name
             suffix = 1
@@ -345,12 +337,16 @@ class AgentEngine:
         if _depth == 0 and hasattr(self, '_skills_toolkit') and self._skills_toolkit:
             loader = getattr(self._skills_toolkit, '_resolved_loader', None)
             if loader and hasattr(loader, 'set_project_overlay'):
+                # Overlay = project skills dir (project_mode) + per-preset extra skill dirs.
+                # extra_skill_dirs works independently of project_mode.
+                _overlay_dirs: list[str] = []
                 if _effective_project_root:
                     from pathlib import Path as _Path
-                    project_skills_dir = str(_Path(_effective_project_root) / ".agents" / "skills")
-                    loader.set_project_overlay(project_skills_dir)
-                else:
-                    loader.set_project_overlay(None)
+                    _overlay_dirs.append(str(_Path(_effective_project_root) / ".agents" / "skills"))
+                for _d in (preset.extra_skill_dirs or []):
+                    if isinstance(_d, str) and _d.strip():
+                        _overlay_dirs.append(_d.strip())
+                loader.set_project_overlay(_overlay_dirs or None)
 
         _memory_middleware: SystemPromptMiddleware | None = None
         _skills_middleware: _LcAgentSkillMiddleware | None = None
@@ -533,7 +529,8 @@ class AgentEngine:
 
     def _build_tracing_async_client(self, model_info: ModelInfo | None, model_id: str):
         provider = model_info.provider if model_info else None
-        resolved_model = model_info.id if model_info else model_id
+        # 请求一律发 raw_model_id，model_id 只是前端别名；trace 记真实请求名
+        resolved_model = (model_info.raw_model_id or model_id) if model_info else model_id
         base_url = model_info.base_url if model_info and model_info.base_url else None
         return TracingAsyncClient(
             collector_getter=get_http_trace_collector,
@@ -551,6 +548,8 @@ class AgentEngine:
     ):
         """Create a chat model instance.
 
+        请求一律发 raw_model_id（渠道期望的真实模型名）；model_id 只是前端用的
+        全局唯一别名，从不进请求体。
         Uses ChatOpenAIReasoning when base_url is set — extracts reasoning_content
         from any provider that returns it (DeepSeek, GLM, etc).
         Uses init_chat_model for standard providers (handles provider routing).
@@ -565,7 +564,7 @@ class AgentEngine:
         if model_info and model_info.base_url:
             from lc_agent.core.chat_model import ChatOpenAIReasoning
             kwargs: dict[str, Any] = dict(
-                model=model_info.id,
+                model=model_info.raw_model_id or model_id,
                 base_url=model_info.base_url,
                 api_key=model_info.api_key or "not-set",
                 temperature=temperature,
@@ -582,7 +581,8 @@ class AgentEngine:
         from langchain.chat_models import init_chat_model
 
         if model_info:
-            model_str = f"{model_info.provider}:{model_info.id}" if model_info.provider else model_info.id
+            _raw = model_info.raw_model_id or model_id
+            model_str = f"{model_info.provider}:{_raw}" if model_info.provider else _raw
             kwargs: dict[str, Any] = dict(
                 api_key=model_info.api_key or "not-set",
                 temperature=temperature,
@@ -599,11 +599,17 @@ class AgentEngine:
         return init_chat_model(model_id, **kwargs)
 
     def _find_model(self, model_id: str) -> ModelInfo | None:
-        """Find model info by ID."""
+        """Find model info by model_id (frontend alias)."""
+        if not model_id:
+            return None
         for m in self._models:
-            if m.id == model_id:
+            if m.model_id == model_id:
                 return m
         return None
+
+    def resolve_request_model(self, model_id: str) -> str:
+        """Alias → 渠道真实模型名（兼容旧调用；新代码直接用 model_resolve）。"""
+        return resolve_request_model(model_id, self.config)
 
     def _build_summarization_middleware(self, preset: AgentPreset) -> list:
         """Build SummarizationMiddleware based on config, returns empty list if disabled."""
@@ -612,7 +618,7 @@ class AgentEngine:
             return []
 
         summ_model_id = summ_conf.get("default_model", "") or preset.default_model
-        model_info = self._find_model(summ_model_id)
+        model_info = find_model(summ_model_id, self.config)
         llm = self._create_llm(model_info, summ_model_id)
 
         trigger = self._parse_context_size(summ_conf.get("trigger")) or ("fraction", 0.85)
@@ -902,20 +908,28 @@ class AgentEngine:
         if callable(sync_deleter):
             sync_deleter(thread_id)
 
-    async def generate_title(self, user_message: str, model_id: str = "") -> str:
-        """Generate a short conversation title from the user's first message."""
-        model_info = self._find_model(model_id) if model_id else None
+    async def generate_title(
+        self, user_message: str, model_id: str = "", usage_sink: list[dict] | None = None
+    ) -> str:
+        """Generate a short conversation title from the user's first message.
+
+        usage_sink：可选出参列表，调用后追加一条本次调用的 usage 摘要
+        （供 usage_recorder 落 source="title" 行，token_stats.md §4.4）。
+        """
+        model_info = find_model(model_id, self.config)
         if model_info is None and self._models:
             model_info = self._models[0]
         if model_info is None:
             return user_message[:20]
 
-        llm = self._create_llm(model_info, model_info.id)
+        llm = self._create_llm(model_info, model_info.model_id)
         try:
             resp = await llm.ainvoke([
                 {"role": "system", "content": "用10个字以内为这段对话生成一个简洁标题。只输出标题，不要标点符号和引号。"},
                 {"role": "user", "content": user_message[:200]},
             ])
+            if usage_sink is not None:
+                usage_sink.append(_usage_from_message(resp, model_info))
             title = resp.content.strip().strip('"\'""').strip()
             return title[:30] if title else user_message[:20]
         except Exception:
@@ -945,3 +959,27 @@ class AgentEngine:
         if preset_id in self.BUILTIN_IDS:
             return False
         return self._presets.pop(preset_id, None) is not None
+
+
+def _usage_from_message(resp: Any, model_info: Any) -> dict:
+    """从 LLM 响应提取 usage 摘要（generate_title 等图外调用用）。"""
+    meta = getattr(resp, "usage_metadata", None) or {}
+    def _g(key: str) -> int:
+        return int(meta.get(key) or 0) if isinstance(meta, dict) else int(getattr(meta, key, 0) or 0)
+    def _d(key: str) -> int:
+        details = meta.get("input_token_details") or {} if isinstance(meta, dict) else (getattr(meta, "input_token_details", None) or {})
+        if not details:
+            return 0
+        return int(details.get(key, 0) or 0) if isinstance(details, dict) else int(getattr(details, key, 0) or 0)
+    return {
+        "model_id": model_info.model_id,
+        "raw_model_id": model_info.raw_model_id,
+        "provider": model_info.provider,
+        "role": "main",
+        "sub_session_id": "",
+        "input_tokens": _g("input_tokens"),
+        "output_tokens": _g("output_tokens"),
+        "cache_read_tokens": _d("cache_read"),
+        "cache_write_tokens": _d("cache_creation"),
+        "reasoning_tokens": 0,
+    }

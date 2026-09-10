@@ -7,13 +7,13 @@ from lc_agent.server import persistence
 @pytest.mark.parametrize(
     ("func", "args"),
     [
-        (persistence.ensure_session, ("db", "thread1", "title", "agent", "model", "user")),
-        (persistence.increment_session_message_count, ("db", "thread1")),
-        (persistence.save_title, ("db", "thread1", "title")),
-        (persistence.save_ui_message, ("db", "thread1", "assistant", [{"type": "text", "text": "content"}])),
-        (persistence.truncate_from_message, ("db", "thread1", "message1")),
-        (persistence.append_to_last_assistant_message, ("db", "thread1", "content")),
-        (persistence.create_subsession, ("db", "sub1", "parent1", "tool1", "agent", "title", "user")),
+        (persistence.ensure_session, ("thread1", "title", "agent", "model", "user")),
+        (persistence.increment_session_message_count, ("thread1",)),
+        (persistence.save_title, ("thread1", "title")),
+        (persistence.save_ui_message, ("thread1", "assistant", [{"type": "text", "text": "content"}])),
+        (persistence.truncate_from_message, ("thread1", "message1")),
+        (persistence.append_to_last_assistant_message, ("thread1", "content")),
+        (persistence.create_subsession, ("sub1", "parent1", "tool1", "agent", "title", "user")),
     ],
 )
 async def test_core_persistence_write_errors_are_logged_and_reraised(monkeypatch, caplog, func, args):
@@ -21,10 +21,10 @@ async def test_core_persistence_write_errors_are_logged_and_reraised(monkeypatch
 
     error = RuntimeError("db unavailable")
 
-    def fail_get_async_session(db_url):
+    def fail_get_business_async_session():
         raise error
 
-    monkeypatch.setattr(db_engine, "get_async_session", fail_get_async_session)
+    monkeypatch.setattr(db_engine, "get_business_async_session", fail_get_business_async_session)
 
     with pytest.raises(RuntimeError, match="db unavailable"):
         await func(*args)
@@ -42,6 +42,6 @@ async def test_finalize_subsession_message_propagates_save_failure(monkeypatch, 
     monkeypatch.setattr(persistence, "save_ui_message", fail_save_ui_message)
 
     with pytest.raises(RuntimeError, match="save failed"):
-        await persistence.finalize_subsession_message("db", "sub1", "content")
+        await persistence.finalize_subsession_message("sub1", "content")
 
     assert not caplog.records

@@ -8,6 +8,7 @@
     :close-on-click-modal="true"
     :close-on-press-escape="true"
     class="file-changes-drawer"
+    @opened="handleDrawerOpened"
   >
     <template #header>
       <div class="drawer-header">
@@ -36,6 +37,21 @@
               Git Diff
             </el-button>
           </el-button-group>
+          <el-select
+            v-if="changeSource === 'agent' && store.rounds.length > 0"
+            v-model="store.selectedRound"
+            size="small"
+            class="round-select"
+            aria-label="对话轮次"
+          >
+            <el-option label="全部轮次" :value="null" />
+            <el-option
+              v-for="r in store.rounds"
+              :key="r.round_number"
+              :label="`第 ${r.round_number} 轮`"
+              :value="r.round_number"
+            />
+          </el-select>
           <el-select
             v-if="changeSource === 'git'"
             v-model="gitBaseline"
@@ -81,9 +97,13 @@
       <p>当前会话没有文件变更</p>
     </div>
 
-    <div v-if="changeSource === 'agent' && store.hasChanges" class="file-list">
+    <div v-if="changeSource === 'agent' && store.hasChanges && store.displayFiles.length === 0 && store.displaySubSessions.length === 0" class="empty-state">
+      <p>当前轮次没有文件变更</p>
+    </div>
+
+    <div v-if="changeSource === 'agent' && store.hasChanges && store.displayFiles.length > 0" class="file-list">
       <div
-        v-for="file in store.files"
+        v-for="file in store.displayFiles"
         :key="file.file_path"
         class="file-item"
       >
@@ -91,6 +111,7 @@
           class="file-header"
           role="button"
           tabindex="0"
+          :data-file-path="file.file_path"
           :aria-expanded="expandedFiles.has(file.file_path)"
           @click="toggleExpand(file.file_path)"
           @keydown.enter="toggleExpand(file.file_path)"
@@ -125,10 +146,10 @@
     </div>
 
     <!-- Sub-agent summaries -->
-    <div v-if="store.subSessions.length > 0" class="sub-agent-section">
+    <div v-if="changeSource === 'agent' && store.displaySubSessions.length > 0" class="sub-agent-section">
       <div class="sub-agent-section-title">子 Agent 变更</div>
       <div
-        v-for="sub in store.subSessions"
+        v-for="sub in store.displaySubSessions"
         :key="sub.sub_session_id"
         class="sub-agent-item"
       >
@@ -244,7 +265,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import { useFileChangesStore } from '@/stores/file-changes'
 import { useSessionsStore } from '@/stores/sessions'
@@ -354,12 +375,33 @@ async function toggleExpand(filePath: string) {
 
   loadingDiffs.add(filePath)
   try {
-    const data = await api.getFileDiff(sessionId, filePath)
+    const data = await api.getFileDiff(sessionId, filePath, store.selectedRound)
     fileDiffs[filePath] = renderDiff(data, filePath)
   } catch {
     fileDiffs[filePath] = '<div class="diff-error">加载失败</div>'
   } finally {
     loadingDiffs.delete(filePath)
+  }
+}
+
+// 卡片点击：打开 Drawer 后自动展开并滚动定位到该文件
+watch(() => store.pendingOpenFile, (path) => {
+  if (path) void handlePendingOpenFile(path)
+})
+
+async function handleDrawerOpened() {
+  if (store.pendingOpenFile) await handlePendingOpenFile(store.pendingOpenFile)
+}
+
+async function handlePendingOpenFile(path: string) {
+  store.pendingOpenFile = null
+  if (!expandedFiles.has(path)) await toggleExpand(path)
+  await nextTick()
+  try {
+    const el = document.querySelector(`[data-file-path="${CSS.escape(path)}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  } catch {
+    // 选择器转义失败则忽略滚动定位
   }
 }
 
@@ -387,15 +429,23 @@ function renderDiff(data: any, filePath: string): string {
   unifiedLines.push(`+++ b/${getFileName(filePath)}`)
 
   for (const hunk of hunks) {
+    const lineStart = hunk.line_start ?? 1
+    const ctxBefore = hunk.context_before || []
+    const ctxAfter = hunk.context_after || []
     if (hunk.type === 'edit') {
       const removed = hunk.removed || []
       const added = hunk.added || []
-      unifiedLines.push(`@@ -1,${removed.length} +1,${added.length} @@`)
+      const oldStart = Math.max(1, lineStart - ctxBefore.length)
+      unifiedLines.push(`@@ -${oldStart},${ctxBefore.length + removed.length} +${oldStart},${ctxBefore.length + added.length} @@`)
+      for (const line of ctxBefore) unifiedLines.push(` ${line}`)
       for (const line of removed) unifiedLines.push(`-${line}`)
       for (const line of added) unifiedLines.push(`+${line}`)
+      for (const line of ctxAfter) unifiedLines.push(` ${line}`)
     } else if (hunk.type === 'create' || hunk.type === 'append') {
       const added = hunk.added || []
-      unifiedLines.push(`@@ -0,0 +1,${added.length} @@`)
+      const oldStart = Math.max(1, lineStart - ctxBefore.length)
+      unifiedLines.push(`@@ -${oldStart},${ctxBefore.length} +${oldStart},${ctxBefore.length + added.length} @@`)
+      for (const line of ctxBefore) unifiedLines.push(` ${line}`)
       for (const line of added) unifiedLines.push(`+${line}`)
     } else if (hunk.type === 'delete') {
       unifiedLines.push(`@@ -1,1 +0,0 @@`)
@@ -417,6 +467,15 @@ function renderDiff(data: any, filePath: string): string {
   }
 }
 
+watch(() => store.selectedRound, () => {
+
+  // 轮次切换后缓存的 diff 内容不再适用，全部作废
+  expandedFiles.clear()
+  expandedSubSessions.clear()
+  loadingDiffs.clear()
+  Object.keys(fileDiffs).forEach(k => delete fileDiffs[k])
+})
+
 watch(diffMode, () => {
   for (const key of expandedFiles) {
     if (!fileDiffs[key]) continue
@@ -429,7 +488,7 @@ watch(diffMode, () => {
       : key
     if (!sessionId) continue
     loadingDiffs.add(key)
-    api.getFileDiff(sessionId, filePath).then(data => {
+    api.getFileDiff(sessionId, filePath, store.selectedRound).then(data => {
       fileDiffs[key] = renderDiff(data, filePath)
     }).catch(() => {}).finally(() => loadingDiffs.delete(key))
   }
@@ -559,7 +618,7 @@ async function toggleExpandSubFile(subSessionId: string, filePath: string) {
 
   loadingDiffs.add(key)
   try {
-    const data = await api.getFileDiff(subSessionId, filePath)
+    const data = await api.getFileDiff(subSessionId, filePath, store.selectedRound)
     fileDiffs[key] = renderDiff(data, filePath)
   } catch {
     fileDiffs[key] = '<div class="diff-error">加载失败</div>'
@@ -640,6 +699,10 @@ watch(() => store.isDrawerOpen, async (open) => {
 
 .git-baseline-select {
   width: 150px;
+}
+
+.round-select {
+  width: 120px;
 }
 
 .git-commit-select {
@@ -799,6 +862,11 @@ watch(() => store.isDrawerOpen, async (open) => {
   min-width: 40px !important;
   padding: 0 4px !important;
   box-sizing: border-box !important;
+}
+
+/* 上下文行的旧/新行号相同，只显示新文件一侧，避免重复。 */
+.diff-content :deep(.d2h-cntx .line-num1) {
+  display: none;
 }
 
 .diff-content :deep(.d2h-code-line) {

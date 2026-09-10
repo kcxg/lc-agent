@@ -43,7 +43,7 @@ expectIncludes('tools.ts', tools, 'resetLlmParams()')
 expectMatch(
   'tools.ts',
   tools,
-  /watch\(\(\) => agentsStore\.currentAgentId,[\s\S]*_clearOverrides\(\)[\s\S]*syncModelWithAgentDefault\(\)[\s\S]*resetLlmParams\(\)/,
+  /watch\(\s*\(\) => \[\s*agentsStore\.currentAgentId,[\s\S]*\] as const,[\s\S]*_clearOverrides\(\)[\s\S]*syncModelWithAgentDefault\(\)[\s\S]*resetLlmParams\(\)/,
   '右侧工具/skills/思考等级覆盖只应在切换 agent 时重置',
 )
 

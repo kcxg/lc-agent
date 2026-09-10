@@ -37,6 +37,7 @@
 | Hot-swappable Config | 前端运行时切换模型、LLM 参数、工具、MCP、Skills，无需重启代码 |
 | Tools | `@tool` 装饰器注册 Python 工具，支持分组展示与权限控制 |
 | MCP | 支持 `stdio`、`SSE`、Streamable HTTP，自动适配 MCP 工具 schema |
+| MCP Server | 自身可作为 MCP Server 对外暴露 Agent（`list_lca_agents` 目录 + `invoke_lca_agent` 委派），供 Claude Code / Cursor 等外部 Agent 调用 |
 | Skills | 扫描 `SKILL.md` 技能目录，支持渐进式发现与运行时开关 |
 | Sub-agents | 支持子 Agent / 通用子 Agent 委派，并保留独立执行过程 |
 | Human Control | 支持 Human-in-the-loop 审批与 Human-in-the-top 总控式调度 |
@@ -45,6 +46,7 @@
 | Memory | 支持会话持久化、历史消息、checkpoint 与长期上下文扩展 |
 | Knowledge Base | 不内置强绑定 RAG，可通过 MCP 接入 [nbrag](https://github.com/ydf0509/nbrag) 等 agentic search 知识库 |
 | Observability | HTTP trace、token 面板、工具调用卡片、子 Agent 过程可视化 |
+| Token 费用统计 | 独立用量页面（管理页 + 个人页），每次 LLM 调用落库，按用户/agent/模型/天聚合金额，单价可配，可导出 CSV |
 | Auth & Permission | 支持登录认证、用户隔离、管理员能力、审批白名单 |
 | 联网、rag知识库 | 同时通过接入对应的mcp来给llm提供能力，例如anysearch 和 nbrag |
 | ai coding | 内置工具组和第三方mcp例如serena mcp都能使lc-aegnt 实现ai coding |
@@ -91,6 +93,9 @@
 
 **子 agent 效果，可委派给子 agent 执行，并流式打字机显示和保留独立执行过程**
 ![子 agent 效果，可委派给子 agent 执行，并流式打字机显示和保留独立执行过程](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/subagent.png)
+
+**Token 费用统计**
+![Token 费用统计](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/token_cost.png)
 
 ## 快速开始
 
@@ -161,7 +166,10 @@ app.run()
 
 大多数用户只需要关心这几个配置块：
 
-- `provider`：模型提供商与模型列表
+- `provider`：模型提供商与模型列表。每个模型条目必填两个字段：
+  - `model_id`：自己命名的、**全局唯一**（跨 provider 也算）的前端别名，标识、统计、前端显示用，从不进请求体
+  - `raw_model_id`：渠道期望的真实模型名，请求一律发这个，兼定价兜底与统计归并用（两者相同是合法且正确的）
+  - 缺任一字段或唯一性冲突，服务启动时直接报错并列出全部问题项
 - `agent.default_model`：默认模型
 - `skills`：Skills 目录
 - `mcpServers`：MCP 服务器配置
@@ -186,6 +194,7 @@ app.run()
 - **MCP**：按标准协议（stdio / Streamable HTTP）接入的外部工具服务器，不写代码就能给 Agent 扩展联网搜索、文档检索、知识库等能力
 - **Skills**：写给 Agent 看的能力说明与工作流指令（SKILL.md），AI 按需加载，可带脚本执行
 - **[nbrag](https://github.com/ydf0509/nbrag) / RAG**：作为 MCP 工具接入，保持知识库与 Agent 框架低耦合
+- **反向开放**：`lc-agent` 自己也能当 MCP Server，在管理界面里挑好愿意对外服务的 Agent，Claude Code、Cursor 这类外部工具连上 `/mcp` 就能直接调用它们干活
 
 ## 项目文件夹模式
 
@@ -341,9 +350,7 @@ lc-agent 不是「注册就能上」的云端聊天站，而是能接本地工�
 
 另外记住一点：无论你给 Agent 接了什么——文件系统、命令执行、自定义 MCP——它能碰到的始终只是**部署机器**允许的范围，不会超出那台机器。
 
-### 多用户 + 文件操作隔离（沙箱）不行吗？
 
-技术上可行（比如每个用户一个虚拟容器），但成本极高，不在 lc-agent 当前的考虑范围内。
 
 ## 开发
 
@@ -441,6 +448,10 @@ launch_desktop(host='127.0.0.1', port=8001, title="心有灵犀") # host port ti
 
 默认用 `curl_cffi` 模拟 Chrome 指纹绕反爬，稳定性远超requests。和上面的 MCP 路线相比，它胜在**零部署、零花费**，适合不想折腾 MCP 服务、又想立刻让 Agent 联网的场景；缺点是依赖百度接口，搜索稳定性那肯定不如 anysearch大公司做的商业产品，anysearch的稳定性几乎100%了， baidu-search 的稳定性95%左右。
 
+### lc-agent 支持什么数据库？
+答：lc-agent分为langchain的checkpoint数据库和业务数据库。
+checkpoint数据库支持sqlite postgre
+业务数据库使用的sqlmodel，所以支持所有sqlachemy支持的数据库
 
 ### lc-agent 能不能作为aicoding 工具来使用？
 

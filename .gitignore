@@ -250,6 +250,7 @@ nul
 .zread/
 .serena/
 openspec/
+.workbuddy/
 
 # (kept from main) test artifact
 gitigonre_file1.txt

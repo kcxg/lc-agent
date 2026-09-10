@@ -56,7 +56,7 @@ async def client_and_headers(tmp_path):
 
     )
 
-    headers = await setup_test_auth(app, db_url)
+    headers = await setup_test_auth(app)
 
 
 

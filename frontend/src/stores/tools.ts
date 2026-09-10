@@ -41,11 +41,12 @@ export interface Skill {
   source?: string
   metadata?: Record<string, any>
   enabled: boolean
-  scope?: 'global' | 'project'
+  scope?: 'global' | 'project' | 'extra'
 }
 
 export interface ModelInfo {
-  id: string
+  model_id: string
+  raw_model_id: string
   provider: string
   base_url: string
   context_limit: number
@@ -119,7 +120,7 @@ export const useToolsStore = defineStore('tools', () => {
       return
     }
     if (models.value.length > 0 && !currentModel.value) {
-      currentModel.value = models.value[0].id
+      currentModel.value = models.value[0].model_id
     }
   }
 
@@ -178,7 +179,8 @@ export const useToolsStore = defineStore('tools', () => {
     const agentsStore = useAgentsStore()
     const agent = agentsStore.currentAgent
     const projectRoot = agent?.project_mode ? agent.project_root || undefined : undefined
-    return api.getSkills(projectRoot)
+    const extraDirs = agent?.extra_skill_dirs || []
+    return api.getSkills(projectRoot, extraDirs)
   }
 
   async function refreshRuntimeToggles() {
@@ -216,6 +218,7 @@ export const useToolsStore = defineStore('tools', () => {
           agentsStore.currentAgentId,
           agentsStore.currentAgent?.project_mode,
           agentsStore.currentAgent?.project_root,
+          agentsStore.currentAgent?.extra_skill_dirs,
         ] as const,
         () => {
           _clearOverrides()

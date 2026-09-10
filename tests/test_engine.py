@@ -61,12 +61,14 @@ class TestAgentPreset:
 class TestModelInfo:
     def test_creates_model_info(self):
         info = ModelInfo(
-            id="deepseek-chat",
+            model_id="deepseek-chat",
+            raw_model_id="deepseek-chat",
             provider="default",
             base_url="https://api.deepseek.com/v1",
             context_limit=64000,
         )
-        assert info.id == "deepseek-chat"
+        assert info.model_id == "deepseek-chat"
+        assert info.raw_model_id == "deepseek-chat"
         assert info.context_limit == 64000
 
 
@@ -78,6 +80,8 @@ class TestAgentEngine:
 
     def test_build_agent_configures_todo_middleware_final_answer_guard(self, sample_config, monkeypatch):
         from lc_agent.core.engine import AgentEngine
+
+        from langchain.agents.middleware import TodoListMiddleware
 
         captured = {}
         engine = AgentEngine(sample_config)
@@ -93,7 +97,13 @@ class TestAgentEngine:
 
         engine.build_agent()
 
-        todo_middleware = captured["middleware"][0]
+        # Look it up by type: PatchToolCallsMiddleware is registered first, so
+        # indexing by position breaks every time the middleware order changes.
+        todo_middleware = next(
+            (mw for mw in captured["middleware"] if isinstance(mw, TodoListMiddleware)),
+            None,
+        )
+        assert todo_middleware is not None, "TodoListMiddleware was not registered"
         assert "After you start writing the substantive final answer" in todo_middleware.system_prompt
         assert "do not call `write_todos` again" in todo_middleware.system_prompt
         assert "Do not create todo items whose only purpose" in todo_middleware.tool_description
@@ -182,7 +192,8 @@ class TestAgentEngine:
         engine = AgentEngine(sample_config)
         models = engine.get_models()
         assert len(models) == 1
-        assert models[0].id == "test-model"
+        assert models[0].model_id == "test-model"
+        assert models[0].raw_model_id == "test-model"
         assert models[0].context_limit == 8000
 
     def test_get_default_preset(self, sample_config):
@@ -203,8 +214,8 @@ class TestAgentEngine:
                     "api_key": "test-key",
                     "base_url": "https://api.example.com/v1",
                     "models": [
-                        {"id": "test-model", "context_limit": 8000},
-                        {"id": "ark-deepseek-v4-flash", "context_limit": 200000},
+                        {"model_id": "test-model", "raw_model_id": "test-model", "context_limit": 8000},
+                        {"model_id": "ark-deepseek-v4-flash", "raw_model_id": "deepseek-v4-flash", "context_limit": 200000},
                     ],
                 }
             },
@@ -390,7 +401,8 @@ class TestCreateLlm:
         engine = AgentEngine(sample_config)
         for model_id in ["ds-deepseek-v4-flash", "ark-deepseek-v4-flash", "ark-glm-5.1", "gpt-4o"]:
             model_info = ModelInfo(
-                id=model_id,
+                model_id=model_id,
+                raw_model_id=model_id,
                 provider="litellm",
                 base_url="http://localhost:4000/v1",
                 api_key="sk-no-key",
@@ -412,7 +424,8 @@ class TestCreateLlm:
 
         engine = AgentEngine(sample_config)
         model_info = ModelInfo(
-            id="deepseek-chat",
+            model_id="deepseek-chat",
+            raw_model_id="deepseek-chat",
             provider="deepseek",
             base_url="",
             api_key="test-key",
@@ -440,7 +453,8 @@ class TestCreateLlm:
 
         engine = AgentEngine(sample_config)
         model_info = ModelInfo(
-            id="gpt-4o",
+            model_id="gpt-4o",
+            raw_model_id="gpt-4o",
             provider="openai",
             base_url="https://api.openai.com/v1",
             api_key="test-key",
@@ -455,10 +469,41 @@ class TestCreateLlm:
 
         engine = AgentEngine(sample_config)
         model_info = ModelInfo(
-            id="gpt-4o",
+            model_id="gpt-4o",
+            raw_model_id="gpt-4o",
             provider="openai",
             base_url="https://api.openai.com/v1",
             api_key="test-key",
         )
         llm = engine._create_llm(model_info, "gpt-4o")
         assert llm.stream_usage is True
+
+    def test_request_uses_raw_model_id_not_alias(self, sample_config):
+        """请求一律发 raw_model_id（渠道真实模型名），model_id 只是前端别名。"""
+        from lc_agent.core.engine import AgentEngine
+        from lc_agent.core.models import ModelInfo
+
+        engine = AgentEngine({
+            **sample_config,
+            "provider": {
+                "opencodego": {
+                    "api_key": "test-key",
+                    "base_url": "https://api.commandcode.ai/provider/v1",
+                    "models": [{
+                        "model_id": "cm-meta/muse-spark-1.3-contributor",
+                        "raw_model_id": "meta/muse-spark-1.3-contributor",
+                    }],
+                },
+            },
+        })
+        model_info = ModelInfo(
+            model_id="cm-meta/muse-spark-1.3-contributor",
+            raw_model_id="meta/muse-spark-1.3-contributor",
+            provider="opencodego",
+            base_url="https://api.commandcode.ai/provider/v1",
+            api_key="test-key",
+        )
+        llm = engine._create_llm(model_info, "cm-meta/muse-spark-1.3-contributor")
+        assert llm.model_name == "meta/muse-spark-1.3-contributor"
+        assert engine.resolve_request_model("cm-meta/muse-spark-1.3-contributor") == "meta/muse-spark-1.3-contributor"
+        assert engine.resolve_request_model("unknown-alias") == "unknown-alias"

@@ -1,7 +1,7 @@
 """Database persistence operations for chat sessions and messages.
 
-All functions accept db_url as the first argument and are self-contained —
-no dependency on the WebSocket handler class.
+Business-database access goes through the global runtime config —
+use ``get_business_async_session()`` (no ``db_url`` plumbing).
 """
 import logging
 from typing import Any
@@ -10,13 +10,13 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-async def get_session_message_count(db_url: str, thread_id: str) -> int:
+async def get_session_message_count(thread_id: str) -> int:
     """Get the current message count for a session. Returns 0 if not found."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import SessionRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             repo = SessionRepository(session)
             existing = await repo.get_by_id(thread_id)
@@ -29,8 +29,26 @@ async def get_session_message_count(db_url: str, thread_id: str) -> int:
         return 0
 
 
+async def get_session_user_message_count(thread_id: str) -> int:
+    """Count user-role UI messages for a session.
+
+    Used as the conversation round number: the Nth user question = round N.
+    """
+    try:
+        from lc_agent.db.engine import get_business_async_session
+        from lc_agent.db.repository import ChatUiMessageRepository
+
+        session = get_business_async_session()
+        try:
+            repo = ChatUiMessageRepository(session)
+            return await repo.count_by_session_role(thread_id, "user")
+        finally:
+            await session.close()
+    except Exception:
+        return 0
+
+
 async def ensure_session(
-    db_url: str,
     thread_id: str,
     title: str,
     agent_id: str,
@@ -39,10 +57,10 @@ async def ensure_session(
 ) -> None:
     """Create session metadata if not exists, or update if exists."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import SessionRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             repo = SessionRepository(session)
             existing = await repo.get_by_id(thread_id)
@@ -69,13 +87,13 @@ async def ensure_session(
         raise
 
 
-async def increment_session_message_count(db_url: str, thread_id: str) -> None:
+async def increment_session_message_count(thread_id: str) -> None:
     """Increment persisted session message count after a completed round."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import SessionRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             await SessionRepository(session).increment_messages(thread_id)
         finally:
@@ -85,13 +103,13 @@ async def increment_session_message_count(db_url: str, thread_id: str) -> None:
         raise
 
 
-async def save_title(db_url: str, thread_id: str, title: str) -> None:
+async def save_title(thread_id: str, title: str) -> None:
     """Save title to DB."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import SessionRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             await SessionRepository(session).update(thread_id, title=title)
         finally:
@@ -107,9 +125,12 @@ async def generate_title(
     first_message: str,
     preset_id: str = "chat",
     selected_model_id: str = "",
+    usage_sink: list[dict] | None = None,
 ) -> str | None:
     """Generate title from first message using the agent's model.
 
+    usage_sink：可选出参列表，透传给 engine.generate_title 收集本次调用 usage
+    （供 usage_recorder 落 source="title" 行）。
     Returns the generated title string, or None on failure.
     """
     try:
@@ -123,14 +144,13 @@ async def generate_title(
             preset = engine._presets.get(preset_id) or engine._custom_presets.get(preset_id)
             if preset:
                 model_id = model_id or preset.default_model
-        return await engine.generate_title(first_message, model_id)
+        return await engine.generate_title(first_message, model_id, usage_sink=usage_sink)
     except Exception:
         logger.exception("Title generation failed for session %s", thread_id)
         return None
 
 
 async def save_ui_message(
-    db_url: str,
     thread_id: str,
     role: str,
     content: list[dict[str, Any]],
@@ -141,10 +161,10 @@ async def save_ui_message(
 ) -> None:
     """Persist replay data for the web chat history."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import ChatUiMessageRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             repo = ChatUiMessageRepository(session)
             await repo.create(
@@ -162,13 +182,13 @@ async def save_ui_message(
         raise
 
 
-async def truncate_from_message(db_url: str, thread_id: str, message_id: str) -> None:
+async def truncate_from_message(thread_id: str, message_id: str) -> None:
     """Delete persisted UI messages from the edited anchor onward."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import ChatUiMessageRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             repo = ChatUiMessageRepository(session)
             await repo.truncate_from_message(thread_id, message_id)
@@ -179,13 +199,13 @@ async def truncate_from_message(db_url: str, thread_id: str, message_id: str) ->
         raise
 
 
-async def load_resume_context(db_url: str, thread_id: str) -> tuple[list[dict[str, Any]], int]:
+async def load_resume_context(thread_id: str) -> tuple[list[dict[str, Any]], int]:
     """Load tool_calls and http_traces count from the last assistant message for interrupt continuation."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import ChatUiMessageRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             repo = ChatUiMessageRepository(session)
             last_msg = await repo.get_last_assistant(thread_id)
@@ -199,7 +219,6 @@ async def load_resume_context(db_url: str, thread_id: str) -> tuple[list[dict[st
 
 
 async def append_to_last_assistant_message(
-    db_url: str,
     thread_id: str,
     content: str,
     *,
@@ -214,10 +233,10 @@ async def append_to_last_assistant_message(
     contains both pre-interrupt tools with updated statuses and new tools).
     """
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import ChatUiMessageRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             repo = ChatUiMessageRepository(session)
             last_msg = await repo.get_last_assistant(thread_id)
@@ -253,7 +272,6 @@ async def append_to_last_assistant_message(
 
 
 async def create_subsession(
-    db_url: str,
     sub_session_id: str,
     parent_session_id: str,
     tool_call_id: str,
@@ -263,10 +281,10 @@ async def create_subsession(
 ) -> None:
     """Create a sub-session record linked to its parent session."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.models import SessionMeta
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             new_session = SessionMeta(
                 id=sub_session_id,
@@ -288,18 +306,16 @@ async def create_subsession(
 
 
 async def save_subsession_delegation_message(
-    db_url: str,
     sub_session_id: str,
     query: str,
 ) -> None:
     """Insert the synthetic delegation message as the first message in a sub-session."""
     await save_ui_message(
-        db_url, sub_session_id, "system", [{"type": "text", "text": f"委托任务: {query}"}],
+        sub_session_id, "system", [{"type": "text", "text": f"委托任务: {query}"}],
     )
 
 
 async def save_file_change(
-    db_url: str,
     session_id: str,
     file_path: str,
     change_type: str,
@@ -308,13 +324,17 @@ async def save_file_change(
     new_string: str | None = None,
     tool_call_id: str | None = None,
     move_destination: str | None = None,
+    round_number: int | None = None,
+    line_start: int | None = None,
+    context_before: str | None = None,
+    context_after: str | None = None,
 ) -> None:
     """Persist a file change record."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import FileChangeRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             repo = FileChangeRepository(session)
             await repo.create(
@@ -325,6 +345,10 @@ async def save_file_change(
                 new_string=new_string,
                 tool_call_id=tool_call_id,
                 move_destination=move_destination,
+                round_number=round_number,
+                line_start=line_start,
+                context_before=context_before,
+                context_after=context_after,
             )
         finally:
             await session.close()
@@ -332,13 +356,13 @@ async def save_file_change(
         logger.exception("Failed to save file change for session %s", session_id)
 
 
-async def save_git_base_hash(db_url: str, session_id: str, git_base_hash: str) -> None:
+async def save_git_base_hash(session_id: str, git_base_hash: str) -> None:
     """Save git base hash to session metadata."""
     try:
-        from lc_agent.db.engine import get_async_session
+        from lc_agent.db.engine import get_business_async_session
         from lc_agent.db.repository import SessionRepository
 
-        session = get_async_session(db_url)
+        session = get_business_async_session()
         try:
             repo = SessionRepository(session)
             sess = await repo.get_by_id(session_id)
@@ -351,7 +375,6 @@ async def save_git_base_hash(db_url: str, session_id: str, git_base_hash: str) -
 
 
 async def finalize_subsession_message(
-    db_url: str,
     sub_session_id: str,
     content: str,
     tool_calls: list[dict] | None = None,
@@ -360,9 +383,9 @@ async def finalize_subsession_message(
 ) -> None:
     """Save the sub-agent's assistant message and increment message count."""
     await save_ui_message(
-        db_url, sub_session_id, "assistant", [{"type": "text", "text": content}],
+        sub_session_id, "assistant", [{"type": "text", "text": content}],
         tool_calls=tool_calls,
         usage=usage,
         http_traces=http_traces,
     )
-    await increment_session_message_count(db_url, sub_session_id)
+    await increment_session_message_count(sub_session_id)

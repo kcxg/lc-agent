@@ -1,15 +1,22 @@
 <template>
-  <aside class="right-panel" :class="{ collapsed }" :style="panelWidth !== undefined && !collapsed ? { width: panelWidth + 'px' } : {}">
-    <div class="panel-header">
-      <transition name="fade">
-        <span v-if="!collapsed" class="panel-title">工具</span>
-      </transition>
-      <button class="toggle-btn" @click="emit('toggleCollapse')" :title="collapsed ? '展开工具面板' : '收起工具面板'">
-        <span class="toggle-icon" :class="{ flipped: collapsed }">»</span>
+  <aside
+    class="right-panel"
+    :class="{ collapsed }"
+    :style="!collapsed && panelWidth !== undefined ? { width: panelWidth + 'px' } : {}"
+  >
+    <div class="right-panel-header">
+      <span v-if="!collapsed" class="right-panel-title">设置</span>
+      <button
+        type="button"
+        class="toggle-btn"
+        :title="collapsed ? '展开右侧面板' : '收起右侧面板'"
+        @click="emit('toggle-collapse')"
+      >
+        <span class="toggle-icon">{{ collapsed ? '«' : '»' }}</span>
       </button>
     </div>
 
-    <div v-if="!collapsed" class="panel-body">
+    <div v-if="!collapsed" class="right-panel-body">
     <div class="right-panel-fixed">
       <div class="settings-collapsible" :class="{ collapsed: fixedCollapsed }">
         <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
@@ -125,9 +132,9 @@
           >
             <el-option
               v-for="model in toolsStore.models"
-              :key="model.id"
-              :label="model.id"
-              :value="model.id"
+              :key="model.model_id"
+              :label="model.model_id"
+              :value="model.model_id"
             />
           </el-select>
         </div>
@@ -449,7 +456,8 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
-
+defineProps<{ collapsed?: boolean; panelWidth?: number }>()
+const emit = defineEmits<{ 'toggle-collapse': []; 'open-automation': [] }>()
 
 import { useToolsStore } from '@/stores/tools'
 import { api, fetchApi } from '@/api/http'
@@ -467,8 +475,6 @@ import DetailModal from '@/components/panels/DetailModal.vue'
 import TodoList from '@/components/panels/TodoList.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 
-const props = defineProps<{ collapsed: boolean; panelWidth?: number }>()
-const emit = defineEmits<{ toggleCollapse: []; 'open-automation': [] }>()
 const ansiUp = new AnsiUp()
 
 const toolsStore = useToolsStore()
@@ -657,31 +663,38 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .right-panel.collapsed {
-  width: 48px;
-  overflow: hidden;
+  width: 44px;
 }
 
-.panel-header {
+.right-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 12px 0;
+  gap: 4px;
+  padding: 10px 12px;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--el-border-color);
 }
 
-.right-panel.collapsed .panel-header {
-  justify-content: center;
-  padding: 12px 0 0;
+.right-panel.collapsed .right-panel-header {
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 10px 8px;
+  border-bottom: none;
 }
 
-.panel-title {
+.right-panel-title {
   font-size: 14px;
   font-weight: 700;
   color: var(--el-text-color-primary);
   letter-spacing: 0.3px;
 }
 
-.toggle-btn {
+.right-panel.collapsed .right-panel-title {
+  display: none;
+}
+
+.right-panel-header .toggle-btn {
   width: 28px;
   height: 28px;
   display: flex;
@@ -694,10 +707,9 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   cursor: pointer;
   font-size: 14px;
   transition: all 0.15s ease;
-  flex-shrink: 0;
 }
 
-.toggle-btn:hover {
+.right-panel-header .toggle-btn:hover {
   background: var(--el-fill-color-light);
   color: var(--el-text-color-primary);
 }
@@ -707,15 +719,16 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.toggle-icon.flipped {
+.right-panel.collapsed .toggle-icon {
   transform: rotate(180deg);
 }
 
-.panel-body {
+.right-panel-body {
   flex: 1;
-  overflow: hidden;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .right-panel-fixed {
@@ -769,16 +782,6 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   flex: 1;
   overflow-y: auto;
   padding: 0 16px 16px;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 
 .panel-section {

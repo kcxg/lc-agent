@@ -115,11 +115,12 @@ def write_file(
 
     existed_before = file_path.exists()
     original_content: str | None = None
-    if existed_before and mode != "append":
+    if existed_before:
         try:
             original_content = file_path.read_text(encoding="utf-8")
         except Exception as e:
-            return f"Error reading existing file: {e}"
+            if mode != "append":
+                return f"Error reading existing file: {e}"
 
     try:
         if mode == "append":
@@ -137,16 +138,32 @@ def write_file(
     _emit_write_preview(resolved, content, mode)
 
     if mode == "append":
-        emit_file_change(resolved, "append", new_string=content)
+        if original_content:
+            append_line_start = original_content.count("\n") + (0 if original_content.endswith("\n") else 1) + 1
+            pre_lines = original_content.split("\n")
+            if original_content.endswith("\n"):
+                pre_lines = pre_lines[:-1]
+            append_ctx_before = "\n".join(pre_lines[-5:]) or None
+        else:
+            append_line_start = 1
+            append_ctx_before = None
+        emit_file_change(
+            resolved,
+            "append",
+            new_string=content,
+            line_start=append_line_start,
+            context_before=append_ctx_before,
+        )
     elif existed_before:
         emit_file_change(
             resolved,
             "edit",
             old_string=original_content,
             new_string=content,
+            line_start=1,
         )
     else:
-        emit_file_change(resolved, "create", new_string=content)
+        emit_file_change(resolved, "create", new_string=content, line_start=1)
 
     return f"{action} {line_count} lines to {resolved}"
 
@@ -289,9 +306,26 @@ def edit_block(
     old_lines = old_string.count("\n") + 1
     new_lines = new_string.count("\n") + 1
 
+    match_pos = content.find(old_string)
+    line_start = content[:match_pos].count("\n") + 1 if match_pos >= 0 else 1
+
     _emit_edit_diff(content, new_content, old_string, new_string, resolved, expected_replacements)
 
-    emit_file_change(resolved, "edit", old_string=old_string, new_string=new_string)
+    lines = content.split("\n")
+    start_index = line_start - 1
+    end_index = start_index + old_string.count("\n") + 1
+    context_before = lines[max(0, start_index - _CONTEXT_LINES):start_index]
+    context_after = lines[end_index:end_index + _CONTEXT_LINES]
+
+    emit_file_change(
+        resolved,
+        "edit",
+        old_string=old_string,
+        new_string=new_string,
+        line_start=line_start,
+        context_before="\n".join(context_before) or None,
+        context_after="\n".join(context_after) or None,
+    )
 
     return (
         f"Replaced {count} occurrence(s) in {resolved}\n"

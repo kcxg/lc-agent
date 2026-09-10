@@ -1,0 +1,128 @@
+"""单价匹配与金额换算（docs/tasks/token_stats.md §2.2 / §3.2）。
+
+- 单行制：一个 (model, kind) 只有一条价格，无版本/日期概念
+- 匹配键只有 model 一列：model_id 精确 → raw_model_id 兜底，命中即停
+- 价格全量读进内存（几十行），对每个 (bucket, model_id) 直接取单行价
+- 未配价返回 None，调用方显示 `—`，绝不用 0 假装算出来了
+  （用户把价格改成 0 = 明确免费，compute_cost 会算出 0.0 而非 None）
+"""
+
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from lc_agent.db.models_usage import ModelPrice
+
+KINDS = ("input", "output", "cache_read", "cache_write")
+
+
+def bucket_end(bucket: str, granularity: str) -> datetime:
+    """时间桶的结束时刻 —— 价格匹配时刻（§3.2.1：当天改价、当天生效）。
+
+    granularity=day → 当天 23:59:59；month → 当月最后一天 23:59:59。
+    bucket 由 localtime 切出，视为本地时间；与 effective_from（页面只选日期、
+    时间归零，存库时按本地语义解释）同口径比较。
+    """
+    if granularity == "month":
+        year, month = int(bucket[:4]), int(bucket[5:7])
+        if month == 12:
+            nxt = datetime(year + 1, 1, 1)
+        else:
+            nxt = datetime(year, month + 1, 1)
+        end = nxt - timedelta(seconds=1)
+    else:
+        d = datetime.strptime(bucket, "%Y-%m-%d")
+        end = d.replace(hour=23, minute=59, second=59)
+    return end
+
+
+async def load_price_table(session: AsyncSession) -> list[ModelPrice]:
+    """价格表总共几十行，全量载入。"""
+    result = await session.execute(select(ModelPrice))
+    return list(result.scalars().all())
+
+
+def resolve_price(
+    prices: list[ModelPrice],
+    model_id: str,
+    raw_model_id: str,
+    kind: str,
+    at: datetime | None = None,
+) -> float | None:
+    """两级匹配（model_id 精确 → raw_model_id 兜底），单行制无版本概念。
+
+    at 参数保留仅为兼容旧调用方，已忽略。
+    返回 None = 该维度没配价（或该 kind 没配价）。
+    """
+    for key in (model_id, raw_model_id):
+        if not key:
+            continue
+        for p in prices:
+            if p.model == key and p.kind == kind:
+                return p.price_per_1m
+    return None
+
+
+def resolve_prices_for(
+    prices: list[ModelPrice],
+    model_id: str,
+    raw_model_id: str,
+    at: datetime | None = None,
+) -> dict[str, float | None]:
+    return {kind: resolve_price(prices, model_id, raw_model_id, kind, at) for kind in KINDS}
+
+
+def compute_cost(token_sums: dict[str, int], prices: dict[str, float | None]) -> float | None:
+    """金额换算。返回 None = 无法算（有 token 消耗的维度没配价），显示 `—`。
+
+    采集口径（langchain UsageMetadata，官方注释）：input_tokens 是"Sum of all
+    input token types"，**已包含** cache_read / cache_creation。因此缓存命中和
+    写入部分都按各自价格**替代**输入全价，而不是在输入全价之外再加一份：
+
+        输入费 = (input − cache_read − cache_write) × p_input
+               + cache_read × p_cache_read
+               + cache_write × p_cache_write
+    """
+    inp = token_sums.get("input", 0) or 0
+    cache_read = token_sums.get("cache_read", 0) or 0
+    cache_write = token_sums.get("cache_write", 0) or 0
+    out = token_sums.get("output", 0) or 0
+
+    # 净输入（未走缓存的普通输入，按输入全价计）。
+    # cache_read / cache_creation 都算在 input_tokens 里，需一并扣除。
+    net_input = inp - cache_read - cache_write
+    if net_input < 0:
+        # 防御：上游口径异常（缓存明细 > input）时不计负数
+        net_input = 0
+
+    p_in = prices.get("input")
+    p_out = prices.get("output")
+    p_cr = prices.get("cache_read")
+    p_cw = prices.get("cache_write")
+
+    cost = 0.0
+    if net_input > 0:
+        if p_in is None:
+            return None
+        cost += (net_input / 1_000_000) * p_in
+    if cache_read > 0:
+        if p_cr is None:
+            return None
+        cost += (cache_read / 1_000_000) * p_cr
+    if out > 0:
+        if p_out is None:
+            return None
+        cost += (out / 1_000_000) * p_out
+    if cache_write > 0:
+        if p_cw is None:
+            return None
+        cost += (cache_write / 1_000_000) * p_cw
+    return round(cost, 4)
+
+
+def _as_naive_local(dt: datetime) -> datetime:
+    """剥离 tzinfo（页面录入的 effective_from 视为本地时间语义）。"""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt

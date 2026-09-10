@@ -5,8 +5,7 @@ description: >-
   编写、修改、运行这两个项目代码时必须遵循此 Skill。
 ---
 
-# 禁止行为
-不要在代码里面写 `from __future__ import annotations` 
+
 
 # lc-agent 开发指南
 
@@ -114,6 +113,11 @@ D:\codes\lc-agent-bfzs/
 └── bfzs_checkpoints.db    # LangGraph checkpoint (运行时生成)
 ```
 
+## config.jsonc 中 model_id 和 raw_model_id区别
+
+- `model_id` 是 给供应商+原始模型名字起的唯一别名名字，前端使用这个。
+- `raw_model_id` 是 实际请求模型供应商http接口的模型ID，实际请求服务时候用的raw_model_id。
+
 ## 4. 开发模式和常用操作
 
 ### 4.1 新增工具 (在 bfzs 项目)
@@ -150,7 +154,7 @@ import bfzs.tools.my_new_tools  # noqa: F401
 ```python
 # bfzs/agents/my_agent.py
 from typing import Annotated, TypedDict
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 
@@ -158,24 +162,14 @@ class MyState(TypedDict):
     messages: Annotated[list, add_messages]
     # ... 其他状态字段
 
-def build_my_agent(config: dict):
-    """构建自定义 Agent Graph"""
-    # 从 config 获取 LLM 配置
-    provider_conf = list(config.get("provider", {}).values())[0]
-    model_id = config.get("agent", {}).get("default_model", "")
-    
-    from lc_agent.core.chat_model import ChatOpenAIReasoning
-    llm = ChatOpenAIReasoning(
-        model=model_id,
-        base_url=provider_conf.get("base_url", ""),
-        api_key=provider_conf.get("api_key", ""),
-        temperature=0.3,
-        stream_usage=True,
-    )
+def build_my_agent():
+    """构建自定义 Agent Graph：直接写代码，不读配置。"""
+    from langchain_openai import ChatOpenAI  # 按需换自己的模型类
+    llm = ChatOpenAI(model="...", api_key="...")  # 写死或读环境变量
 
     async def node_a(state: MyState) -> dict:
-        # ...
-        return {"messages": [AIMessage(content="...")]}
+        resp = await llm.ainvoke(state["messages"])
+        return {"messages": [AIMessage(content=resp.content)]}
 
     graph = StateGraph(MyState)
     graph.add_node("node_a", node_a)
@@ -186,11 +180,18 @@ def build_my_agent(config: dict):
 
 在 `bfzs/main.py` 注册:
 ```python
-from lc_agent import get_config
 from bfzs.agents.my_agent import build_my_agent
-my_graph = build_my_agent(get_config())
-app.add_agent(name="my_agent", graph=my_graph, description="描述")
+app.add_agent(name="my_agent", graph=build_my_agent(), description="描述")
 ```
+
+想复用 `config.jsonc` 里配好的模型时，用 `resolve_model(model_id)` 一行拿连接参数
+（`raw_model_id` / `base_url` / `api_key` / `provider`），不用自己翻配置：
+```python
+from lc_agent import resolve_model
+info = resolve_model("my-model-id")  # config 省略时自动用全局配置
+llm = ChatOpenAI(model=info.raw_model_id, base_url=info.base_url, api_key=info.api_key)
+```
+（框架内部约定：`model_id` 只是前端别名，请求一律发 `raw_model_id`。）
 
 ### 4.3 修改框架核心 (在 lc-agent 项目)
 
@@ -258,6 +259,10 @@ cd D:\codes\lc-agent\frontend && npm run build
 cd D:\codes\lc-agent
 D:\ProgramData\Miniconda3\envs\py312\python.exe -m pytest tests/ -v
 ```
+
+- "测试通过"必须看到 `N passed` 汇总行才算数，exit 0 不算（曾有仓库根遗留 `pytest.py` 劫持 `python -m pytest`，只打印 5 行依赖检查就 exit 0）
+- 仓库根严禁放与常用工具同名的 .py（pytest.py / conftest.py 等，会因 cwd 优先被当模块加载）
+- 若 pytest 输出异常为空，先确认没有同名劫持文件；结果可 `--junitxml` 或落盘再读
 
 ## 6. 关键设计模式
 
@@ -397,6 +402,17 @@ from langchain_agentskills.loaders import DirectorySkillLoader, CompositeSkillLo
 - 项目处于早期开发阶段，可以破坏性修改 schema，无需兼容旧数据
 - 如 schema 改动大，可以删除 .db 文件重新启动。**但必须先询问用户确认！** 数据库中存有用户配置的 Agent preset，删库意味着丢失所有配置，重建很麻烦
 
+### 8.2 数据库旧表加字段时候的注意事项
+
+给已有表新增字段时，**必须写正式 Alembic revision**，同时改 SQLModel 表定义，两者缺一不可：
+
+1. `lc_agent/db/models.py` — 修改表模型加字段（Python 侧）
+2. `lc_agent/db/migrations/versions/` — 新建 revision 文件，`down_revision` 指向当前 head
+3. NOT NULL 新列必须带 `server_default`；模型侧空串默认值写 `server_default=text("''")`（纯 `""` 会被兜底补列逻辑拼出非法 DDL）
+4. 验证：跑覆盖该表的测试即可（fixture 在全新库上执行完整迁移链）
+
+`_add_missing_columns` 只是启动时的幂等兜底，不能替代正式 revision。
+
 ## 9. 常见陷阱
 
 1. **别在框架里写业务逻辑** — 工具、Agent、Skills 都应该在 bfzs 项目中
@@ -449,7 +465,7 @@ from lc_agent import get_app_name, get_database_url
 from lc_agent.config import get_config_value
 config = get_config()
 app_name = get_app_name()
-db_url = get_database_url()
+
 value = get_config_value(config, "agent.default_model", "")  # 点路径读取
 
 # 兼容写法：显式加载并传 dict（会同步注册为全局）
@@ -463,3 +479,12 @@ def func(arg: str) -> str:
     """docstring 是 LLM 看到的描述"""
     return "result"
 ```
+
+## lc-agent 要支持的数据库
+lc-agent分为langchain的checkpoint数据库和业务数据库。
+checkpoint数据库要能支持sqlite postgre
+业务数据库使用的sqlmodel，所以支持所有sqlachemy支持的数据库
+
+## 前端开发规则
+1. UI设计要美观华丽，各种UI设计的布局和颜色要符合业界通常的最佳实践设计。不能为了贪快，只实现功能不顾布局合理性和美感。
+2. 按钮必须有彩色背景，禁止灰底/透明底。

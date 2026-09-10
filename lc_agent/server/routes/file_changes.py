@@ -32,6 +32,21 @@ def _check_session_access(sess, user: User) -> None:
         raise HTTPException(status_code=403, detail="权限不足")
 
 
+def _change_line_counts(change) -> tuple[int, int]:
+    """Estimate added/removed line counts of one tool-level change."""
+    old_string = getattr(change, "old_string", None)
+    new_string = getattr(change, "new_string", None)
+    added = removed = 0
+    if change.change_type == "edit":
+        if old_string:
+            removed = old_string.count("\n") + 1
+        if new_string:
+            added = new_string.count("\n") + 1
+    elif change.change_type in ("create", "append") and new_string:
+        added = new_string.count("\n") + 1
+    return added, removed
+
+
 def _aggregate_file_changes(changes: list) -> list[dict]:
     """Aggregate per-file tool changes into summary entries."""
     file_map: dict[str, dict] = {}
@@ -43,10 +58,15 @@ def _aggregate_file_changes(changes: list) -> list[dict]:
                 "change_type": change.change_type,
                 "edit_count": 0,
                 "last_change_at": change.created_at.isoformat(),
+                "additions": 0,
+                "deletions": 0,
             }
         entry = file_map[file_path]
         entry["edit_count"] += 1
         entry["last_change_at"] = change.created_at.isoformat()
+        added, removed = _change_line_counts(change)
+        entry["additions"] += added
+        entry["deletions"] += removed
 
         if change.change_type == "delete":
             entry["change_type"] = "delete"
@@ -59,6 +79,41 @@ def _aggregate_file_changes(changes: list) -> list[dict]:
             elif entry["change_type"] != "create":
                 entry["change_type"] = "edit"
     return list(file_map.values())
+
+
+def _build_round_groups(
+    changes: list,
+    sub_sessions: list[tuple[str, str, list]],
+) -> list[dict]:
+    """Group main-session and sub-session changes by conversation round number.
+
+    sub_sessions: list of (sub_session_id, title, changes). Changes with a None
+    round_number (legacy rows) are excluded from rounds and only appear in the
+    aggregate views.
+    """
+    round_numbers = sorted(
+        {c.round_number for c in changes if c.round_number is not None}
+        | {c.round_number for _, _, sub_changes in sub_sessions for c in sub_changes if c.round_number is not None}
+    )
+    rounds: list[dict] = []
+    for number in round_numbers:
+        round_changes = [c for c in changes if c.round_number == number]
+        round_sub_sessions = []
+        for sub_session_id, title, sub_changes in sub_sessions:
+            sub_in_round = [c for c in sub_changes if c.round_number == number]
+            if sub_in_round:
+                round_sub_sessions.append({
+                    "sub_session_id": sub_session_id,
+                    "title": title,
+                    "file_count": len({c.file_path for c in sub_in_round}),
+                    "files": _aggregate_file_changes(sub_in_round),
+                })
+        rounds.append({
+            "round_number": number,
+            "files": _aggregate_file_changes(round_changes),
+            "sub_sessions": round_sub_sessions,
+        })
+    return rounds
 
 
 def _run_git(cwd: str, args: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
@@ -312,22 +367,33 @@ def _git_files_for_baseline(cwd: str, baseline: dict, changes: list) -> dict:
         return {"available": False, "reason": str(exc)}
 
 
+def _split_context(change, name: str) -> list[str]:
+    raw = getattr(change, name, None)
+    return raw.split("\n") if raw else []
+
+
 def _build_hunk_diff(file_changes: list, file_path: str) -> list[dict]:
     """Build diff hunks from recorded changes when Git is unavailable."""
     hunks = []
     has_edit = any(change.change_type == "edit" for change in file_changes)
     for change in file_changes:
+        line_start = change.line_start or 1
         if change.change_type == "edit" and change.old_string and change.new_string is not None:
             hunks.append({
                 "type": "edit",
+                "line_start": line_start,
+                "context_before": _split_context(change, "context_before"),
                 "removed": change.old_string.split("\n"),
                 "added": change.new_string.split("\n"),
+                "context_after": _split_context(change, "context_after"),
             })
         elif change.change_type == "create" and has_edit:
             continue
         elif change.change_type in ("create", "append") and change.new_string:
             hunks.append({
                 "type": change.change_type,
+                "line_start": line_start,
+                "context_before": _split_context(change, "context_before"),
                 "added": change.new_string.split("\n"),
             })
         elif change.change_type == "delete":
@@ -357,6 +423,7 @@ async def list_file_changes(
     fc_repo = FileChangeRepository(db)
     changes = await fc_repo.list_by_session(session_id)
     sub_sessions: list[dict] = []
+    sub_session_changes: list[tuple[str, str, list]] = []
     if include_subagents:
         child_sessions = await repo.list_children(session_id)
         for child in child_sessions:
@@ -368,12 +435,18 @@ async def list_file_changes(
                     "file_count": len(set(change.file_path for change in child_changes)),
                     "files": _aggregate_file_changes(child_changes),
                 })
+                sub_session_changes.append((
+                    child.id,
+                    child.title or child.id.split("--sa--")[-1][:8],
+                    child_changes,
+                ))
 
     return {
         "session_id": session_id,
         "git_base_hash": sess.git_base_hash,
         "files": _aggregate_file_changes(changes),
         "sub_sessions": sub_sessions,
+        "rounds": _build_round_groups(changes, sub_session_changes),
     }
 
 
@@ -381,6 +454,7 @@ async def list_file_changes(
 async def get_file_diff(
     session_id: str,
     file_path: str = Query(..., description="Absolute path of the file"),
+    round_number: int | None = Query(None, alias="round", description="按轮次过滤（仅返回 DB 记录的 hunks diff）"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -394,6 +468,8 @@ async def get_file_diff(
     fc_repo = FileChangeRepository(db)
     all_changes = await fc_repo.list_by_session(session_id)
     file_changes = [change for change in all_changes if change.file_path == file_path]
+    if round_number is not None:
+        file_changes = [change for change in file_changes if change.round_number == round_number]
     if not file_changes:
         raise HTTPException(status_code=404, detail="No changes found for this file")
 
@@ -402,7 +478,7 @@ async def get_file_diff(
         final_type = "delete"
 
     unified_diff = None
-    if sess.git_base_hash and await asyncio.to_thread(_is_git_tracked, file_path):
+    if round_number is None and sess.git_base_hash and await asyncio.to_thread(_is_git_tracked, file_path):
         unified_diff = await asyncio.to_thread(_try_git_file_diff, sess.git_base_hash, file_path)
 
     if unified_diff:

@@ -52,7 +52,7 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 - **消息操作**：支持编辑最后一条用户消息后重新生成
 - **Ask User 交互**：Agent 在任务中途可向用户发起多选/文字提问，等待回答后继续
 - **会话持久化与恢复**：LangGraph Checkpoint 完整快照，切换会话不丢上下文
-- **子会话钻取**：子代理运行产生独立子会话，用户可点击进入查看完整对话历史，面包屑导航返回
+- **查看子会话**：子代理运行会产生一个独立子会话，用户可点击进入查看它完整的对话历史，面包屑导航返回
 - **响应式布局**：支持 PC 与移动端
 - **主题切换**：暗色 / 亮色
 
@@ -84,7 +84,8 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 - **用户认证**：JWT + bcrypt，角色分 admin/user，支持多用户（需配置 `auth.secret` 启用，不配置则匿名 admin 模式）
 - **工具权限 + HITL 拦截**：管理员可配置工具白名单，非白名单工具调用需用户实时审批（管理员可在审批时永久加白名单）
 - **用户→Agent 访问控制**：管理员可控制每个用户能访问哪些 Agent 预设
-- **Token 使用统计**：每条消息记录 input/output token 用量
+- **Token 用量记录**：每条消息记录 input/output token 用量（对话界面内，当前轮次明细）
+- **Token 费用统计**：独立用量页面（管理页 + 个人页），每次 LLM 调用落库，按用户/agent/模型/天聚合金额，单价可配，可导出 CSV，可点开会话看每次调用明细
 - **HTTP 请求追踪**：完整展示 LLM HTTP 请求/响应，便于调试
 - **自动数据库迁移**：Alembic 启动时自动迁移，升级框架无需手动操作
 
@@ -222,6 +223,12 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 ### Agent 预设过滤
 - Agent 预设可按 MCP 服务器名称过滤可用工具（三值语义）
 
+### 作为 MCP Server 对外暴露（lcagent_as_mcp）
+- 固定 2 个工具，不随 agent 数增长：`list_lca_agents`（实时查库的 agent 目录）+ `invoke_lca_agent`（按名委派，prompt 必须自包含）
+- Agent 面板独立开关 `can_be_mcp`（与内部委派的 `can_be_subagent` 解耦，委派描述共用），勾选即显式授权其全部工具能力
+- 外部 Agent（Claude Code / Cursor 等）连 `/mcp` 即发现调用，新增 agent 重连可见；调不存在的名字时报错里自带最新目录
+- 调用量记到服务用户头上；本期无鉴权，需显式开启且只监听 127.0.0.1
+
 ---
 
 ## 5. Skills 系统
@@ -260,6 +267,7 @@ Skills 是 AI 可动态加载的指令工作流：每个 Skill 是一个目录�
 | 权限管理 | 工具白名单 CRUD（允许 / 移除 / 批量设置） |
 | 认证 | 登录、当前用户、修改密码 |
 | 管理员 | 用户 CRUD、密码重置、用户→Agent 访问控制 |
+| 用量统计 | 多维聚合（用户/agent/模型/时间）、单价管理、CSV 导出、个人用量 |
 | 提示词模板 | 模板 CRUD、Agent↔提示词绑定 |
 | 摘要配置 | 运行时读取 / 更新摘要配置 |
 
@@ -281,6 +289,7 @@ SQLite + SQLAlchemy 异步引擎，通过 Alembic 管理迁移。
 | 数据类型 | 说明 |
 |---------|------|
 | 会话与消息 | 会话元数据（标题 / pin / 子会话关联）+ 聊天消息（含 HTTP traces、token 用量） |
+| Token 用量 | `llm_usage`（每次调用明细，含模型/用户/agent/角色）+ `model_pricing`（单价，带生效时间） |
 | Agent 预设 | 完整预设配置（系统提示、工具权限、MCP、Skills、项目模式等） |
 | 用户与权限 | 用户账号（admin / user 角色）+ 用户→Agent 访问控制 |
 | 提示词模板 | 可复用提示词片段，支持绑定到 Agent 预设 |
@@ -339,11 +348,12 @@ SQLite + SQLAlchemy 异步引擎，通过 Alembic 管理迁移。
 ### 聊天界面
 - 流式聊天：EPX BubbleList 实时渲染，支持文本 + 图片 + 文件内容
 - 工具调用卡片：展示工具名 / 参数 / 结果
-- 子代理卡片：子代理执行进度和结果，可点击钻入子会话查看完整对话
+- 子代理卡片：子代理执行进度和结果，可点击进入该子代理的会话查看完整对话
 - Todo 进度卡片：AI 任务分解和完成进度
 - HITL 审批弹窗：工具调用审批（批准 / 拒绝；管理员可永久允许）
 - HTTP 追踪面板：完整 LLM 请求/响应展示（含脱敏）
-- Token 用量面板：每条消息的 input / output token 统计
+- Token 用量面板：每条消息的 input / output token 统计（对话界面内）
+- 用量统计页面：独立于对话界面，管理页（多维聚合 + 单价管理 + CSV 导出）与个人用量页
 
 ### 输入与操作
 - 图片上传、文件附件（图片自动压缩）

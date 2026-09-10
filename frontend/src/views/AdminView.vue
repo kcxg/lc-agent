@@ -13,11 +13,19 @@
 
       <el-table v-loading="loading" :data="users" stripe style="width: 100%">
         <el-table-column prop="username" label="用户名" min-width="140" />
-        <el-table-column prop="role" label="角色" width="100">
+        <el-table-column prop="role" label="角色" width="160">
           <template #default="{ row }">
-            <el-tag :type="row.role === 'admin' ? 'danger' : 'info'" size="small">
-              {{ row.role === 'admin' ? '管理员' : '用户' }}
-            </el-tag>
+            <el-select
+              v-if="!row.is_system"
+              :model-value="row.role"
+              size="small"
+              style="width: 120px"
+              @change="(val: string) => handleRoleChange(row, val)"
+            >
+              <el-option label="管理员" value="admin" />
+              <el-option label="用户" value="user" />
+            </el-select>
+            <el-tag v-else type="info" size="small">系统</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" min-width="180">
@@ -32,7 +40,7 @@
             <el-button
               size="small"
               type="danger"
-              :disabled="row.role === 'admin'"
+              :disabled="row.role === 'admin' || row.is_system"
               @click="handleDelete(row)"
             >
               删除
@@ -47,6 +55,12 @@
       <el-form @submit.prevent="handleCreate">
         <el-form-item label="用户名">
           <el-input v-model="newUsername" placeholder="输入用户名" autocomplete="off" />
+        </el-form-item>
+        <el-form-item label="角色">
+          <el-select v-model="newRole" style="width: 100%">
+            <el-option label="用户" value="user" />
+            <el-option label="管理员" value="admin" />
+          </el-select>
         </el-form-item>
       </el-form>
       <el-alert v-if="createError" :title="createError" type="error" show-icon :closable="false" style="margin-bottom: 12px" />
@@ -102,6 +116,7 @@ interface AdminUser {
   username: string
   role: string
   created_at: string
+  is_system?: boolean
 }
 
 interface AgentItem {
@@ -120,6 +135,7 @@ const createVisible = ref(false)
 const createLoading = ref(false)
 const createError = ref('')
 const newUsername = ref('')
+const newRole = ref('user')
 
 const passwordVisible = ref(false)
 const generatedPassword = ref('')
@@ -164,6 +180,7 @@ function formatDate(iso: string): string {
 
 function openCreateDialog() {
   newUsername.value = ''
+  newRole.value = 'user'
   createError.value = ''
   createVisible.value = true
 }
@@ -180,7 +197,7 @@ async function handleCreate() {
   try {
     const result = await fetchApi<{ password: string }>('/admin/users', {
       method: 'POST',
-      body: JSON.stringify({ username }),
+      body: JSON.stringify({ username, role: newRole.value }),
     })
     createVisible.value = false
     generatedPassword.value = result.password
@@ -191,6 +208,21 @@ async function handleCreate() {
     createError.value = e.message || '创建失败'
   } finally {
     createLoading.value = false
+  }
+}
+
+async function handleRoleChange(user: AdminUser, role: string) {
+  if (role === user.role) return
+  try {
+    await fetchApi<void>(`/admin/users/${user.id}/role`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    })
+    user.role = role
+    ElMessage.success(`「${user.username}」的角色已更新`)
+  } catch (e: any) {
+    ElMessage.error(e.message || '修改角色失败')
+    await loadUsers()
   }
 }
 

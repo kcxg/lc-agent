@@ -8,6 +8,8 @@ export interface FileChangeItem {
   edit_count: number
   last_change_at: string
   move_destination?: string
+  additions: number
+  deletions: number
 }
 
 export interface SubSessionChanges {
@@ -17,12 +19,35 @@ export interface SubSessionChanges {
   files: FileChangeItem[]
 }
 
+export interface RoundGroup {
+  round_number: number
+  files: FileChangeItem[]
+  sub_sessions: SubSessionChanges[]
+}
+
+function countLines(text?: string | null): number {
+  return text ? text.split('\n').length : 0
+}
+
 export const useFileChangesStore = defineStore('fileChanges', () => {
   const files = ref<FileChangeItem[]>([])
   const subSessions = ref<SubSessionChanges[]>([])
+  const rounds = ref<RoundGroup[]>([])
+  const selectedRound = ref<number | null>(null) // null = 全部轮次
   const gitBaseHash = ref<string | null>(null)
   const isDrawerOpen = ref(false)
   const loadedSessionId = ref<string | null>(null)
+  // 待定位展开的文件：卡片点击后由 Drawer 消费（展开 diff 并滚动定位）
+  const pendingOpenFile = ref<string | null>(null)
+
+  const displayFiles = computed(() => {
+    if (selectedRound.value == null) return files.value
+    return rounds.value.find(r => r.round_number === selectedRound.value)?.files || []
+  })
+  const displaySubSessions = computed(() => {
+    if (selectedRound.value == null) return subSessions.value
+    return rounds.value.find(r => r.round_number === selectedRound.value)?.sub_sessions || []
+  })
 
   const fileCount = computed(() => {
     const subFileCount = subSessions.value.reduce((sum, s) => sum + s.file_count, 0)
@@ -38,15 +63,23 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     isDrawerOpen.value = false
   }
 
-  function addFileChange(change: {
+  function mergeIntoFileList(list: FileChangeItem[], change: {
     file_path: string
     change_type: string
     move_destination?: string
+    old_string?: string | null
+    new_string?: string | null
   }) {
-    const existing = files.value.find(f => f.file_path === change.file_path)
+    const additions = change.change_type === 'edit'
+      ? countLines(change.new_string)
+      : (change.change_type === 'create' || change.change_type === 'append') ? countLines(change.new_string) : 0
+    const deletions = change.change_type === 'edit' ? countLines(change.old_string) : 0
+    const existing = list.find(f => f.file_path === change.file_path)
     if (existing) {
       existing.edit_count += 1
       existing.last_change_at = new Date().toISOString()
+      existing.additions += additions
+      existing.deletions += deletions
       if (change.change_type === 'delete') {
         existing.change_type = 'delete'
       } else if (change.change_type === 'move') {
@@ -56,13 +89,35 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
         existing.change_type = change.change_type as FileChangeItem['change_type']
       }
     } else {
-      files.value.push({
+      list.push({
         file_path: change.file_path,
         change_type: change.change_type as FileChangeItem['change_type'],
         edit_count: 1,
         last_change_at: new Date().toISOString(),
         move_destination: change.move_destination,
+        additions,
+        deletions,
       })
+    }
+  }
+
+  function addFileChange(change: {
+    file_path: string
+    change_type: string
+    move_destination?: string
+    round_number?: number | null
+    old_string?: string | null
+    new_string?: string | null
+  }) {
+    mergeIntoFileList(files.value, change)
+    if (change.round_number != null) {
+      let round = rounds.value.find(r => r.round_number === change.round_number)
+      if (!round) {
+        round = { round_number: change.round_number, files: [], sub_sessions: [] }
+        rounds.value.push(round)
+        rounds.value.sort((a, b) => a.round_number - b.round_number)
+      }
+      mergeIntoFileList(round.files, change)
     }
   }
 
@@ -71,6 +126,12 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
       const data = await api.getFileChanges(sessionId)
       files.value = data.files || []
       subSessions.value = (data as any).sub_sessions || []
+      rounds.value = ((data as any).rounds || []).map((r: any) => ({
+        round_number: r.round_number,
+        files: r.files || [],
+        sub_sessions: r.sub_sessions || [],
+      }))
+      selectedRound.value = null
       gitBaseHash.value = data.git_base_hash || null
       loadedSessionId.value = sessionId
     } catch {
@@ -81,17 +142,25 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
   function reset() {
     files.value = []
     subSessions.value = []
+    rounds.value = []
+    selectedRound.value = null
     gitBaseHash.value = null
     isDrawerOpen.value = false
     loadedSessionId.value = null
+    pendingOpenFile.value = null
   }
 
   return {
     files,
     subSessions,
+    rounds,
+    selectedRound,
     gitBaseHash,
     isDrawerOpen,
     loadedSessionId,
+    pendingOpenFile,
+    displayFiles,
+    displaySubSessions,
     fileCount,
     hasChanges,
     openDrawer,

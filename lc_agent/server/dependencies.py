@@ -1,9 +1,8 @@
 # lc_agent/server/dependencies.py
 from fastapi import Request
 
-from lc_agent.config import get_database_url
 from lc_agent.core.engine import AgentEngine
-from lc_agent.db.engine import get_async_session as _get_db_session
+from lc_agent.db.engine import get_business_async_session as _get_db_session
 from lc_agent.tools.registry import ToolRegistry
 
 
@@ -19,7 +18,7 @@ def get_registry(request: Request) -> ToolRegistry:
 
 async def get_db_session(request: Request):
     """Dependency to get an async DB session."""
-    session = _get_db_session(get_database_url())
+    session = _get_db_session()
     try:
         yield session
     finally:

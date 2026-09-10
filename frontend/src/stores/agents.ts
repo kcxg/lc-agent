@@ -13,6 +13,9 @@ export interface AgentPreset {
   display_name: string | null
   system_prompt: string
   default_model: string
+  default_delegation_description?: string | null
+  can_be_subagent?: boolean
+  can_be_mcp?: boolean
   allowed_tool_groups: string[] | null
   allowed_mcp_servers: string[] | null
   allowed_skills: string[] | null
@@ -24,6 +27,7 @@ export interface AgentPreset {
   project_mode?: boolean
   project_root?: string | null
   project_extra_dirs?: string[] | null
+  extra_skill_dirs?: string[] | null
 }
 
 const BUILTIN_IDS = new Set(['chat', 'empty', 'power'])

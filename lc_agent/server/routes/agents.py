@@ -7,26 +7,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 
-from lc_agent.config import get_database_url
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.models import AgentPreset, SubAgentLink
-from lc_agent.db.engine import get_async_session as _get_db_session
 from lc_agent.db.models import AgentPresetDB
 from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.db.repository import PromptRepository
 from lc_agent.server.auth_middleware import get_current_user, require_admin
+from lc_agent.server.dependencies import get_db_session as get_db
 from lc_agent.server.dependencies import get_engine
 
 router = APIRouter(tags=["agents"])
-
-
-async def get_db(request: Request):
-    db_url = get_database_url()
-    session = _get_db_session(db_url)
-    try:
-        yield session
-    finally:
-        await session.close()
 
 
 _AGENT_NAME_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]*$')
@@ -36,6 +26,22 @@ _AGENT_NAME_ERROR = (
 )
 
 
+def _clean_extra_skill_dirs(value: list[str] | None) -> list[str] | None:
+    """Trim/dedupe extra skill dirs; reject non-absolute paths."""
+    if value is None:
+        return None
+    cleaned: list[str] = []
+    for d in value:
+        d = d.strip()
+        if not d:
+            continue
+        if not Path(d).expanduser().is_absolute():
+            raise ValueError(f"此agent自定义额外 Skills 目录必须使用绝对路径: {d}")
+        if d not in cleaned:
+            cleaned.append(d)
+    return cleaned or None
+
+
 class AgentCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -43,6 +49,9 @@ class AgentCreateRequest(BaseModel):
     display_name: str | None = None
     system_prompt: str
     default_model: str
+    default_delegation_description: str = ""
+    can_be_subagent: bool = False
+    can_be_mcp: bool = False
     allowed_tool_groups: list[str] | None = None
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
@@ -52,6 +61,7 @@ class AgentCreateRequest(BaseModel):
     project_mode: bool = False
     project_root: str | None = None
     project_extra_dirs: list[str] | None = None
+    extra_skill_dirs: list[str] | None = None
 
     @field_validator("name")
     @classmethod
@@ -67,12 +77,15 @@ class AgentCreateRequest(BaseModel):
             return value
         seen_ids: set[str] = set()
         for item in value:
-            if not item.delegation_description.strip():
-                raise ValueError("delegation_description must not be blank")
             if item.agent_id in seen_ids:
                 raise ValueError(f"duplicate subagent agent_id: {item.agent_id}")
             seen_ids.add(item.agent_id)
         return value
+
+    @field_validator("extra_skill_dirs")
+    @classmethod
+    def validate_extra_skill_dirs(cls, value: list[str] | None) -> list[str] | None:
+        return _clean_extra_skill_dirs(value)
 
 
 class AgentUpdateRequest(BaseModel):
@@ -82,6 +95,9 @@ class AgentUpdateRequest(BaseModel):
     display_name: str | None = None
     system_prompt: str | None = None
     default_model: str | None = None
+    default_delegation_description: str | None = None
+    can_be_subagent: bool | None = None
+    can_be_mcp: bool | None = None
     allowed_tool_groups: list[str] | None = None
     allowed_mcp_servers: list[str] | None = None
     allowed_skills: list[str] | None = None
@@ -91,6 +107,7 @@ class AgentUpdateRequest(BaseModel):
     project_mode: bool | None = None
     project_root: str | None = None
     project_extra_dirs: list[str] | None = None
+    extra_skill_dirs: list[str] | None = None
 
     @field_validator("name")
     @classmethod
@@ -99,6 +116,11 @@ class AgentUpdateRequest(BaseModel):
             raise ValueError(_AGENT_NAME_ERROR)
         return v
 
+    @field_validator("extra_skill_dirs")
+    @classmethod
+    def validate_extra_skill_dirs(cls, value: list[str] | None) -> list[str] | None:
+        return _clean_extra_skill_dirs(value)
+
     @field_validator("subagents")
     @classmethod
     def validate_subagents(cls, value: list[SubAgentLink] | None) -> list[SubAgentLink] | None:
@@ -106,8 +128,6 @@ class AgentUpdateRequest(BaseModel):
             return value
         seen_ids: set[str] = set()
         for item in value:
-            if not item.delegation_description.strip():
-                raise ValueError("delegation_description must not be blank")
             if item.agent_id in seen_ids:
                 raise ValueError(f"duplicate subagent agent_id: {item.agent_id}")
             seen_ids.add(item.agent_id)
@@ -125,6 +145,9 @@ def _preset_to_dict(p: AgentPreset) -> dict:
             "display_name": p.display_name,
             "system_prompt": p.system_prompt,
             "default_model": "custom",
+            "default_delegation_description": p.default_delegation_description or "",
+            "can_be_subagent": p.can_be_subagent,
+            "can_be_mcp": getattr(p, "can_be_mcp", False),
             "allowed_tool_groups": [],
             "allowed_mcp_servers": [],
             "allowed_skills": [],
@@ -162,6 +185,9 @@ async def list_agents(
             "display_name": row.display_name,
             "system_prompt": row.system_prompt,
             "default_model": row.default_model,
+            "default_delegation_description": row.default_delegation_description or "",
+            "can_be_subagent": row.can_be_subagent,
+            "can_be_mcp": row.can_be_mcp,
             "allowed_tool_groups": row.allowed_tool_groups,
             "allowed_mcp_servers": row.allowed_mcp_servers,
             "allowed_skills": row.allowed_skills,
@@ -173,6 +199,7 @@ async def list_agents(
             "project_mode": row.project_mode,
             "project_root": row.project_root,
             "project_extra_dirs": row.project_extra_dirs,
+            "extra_skill_dirs": row.extra_skill_dirs,
         })
 
     if user.role != "admin":
@@ -194,6 +221,51 @@ def _validate_subagent_ids_exist(engine: AgentEngine, subagents: list[SubAgentLi
                 status_code=422,
                 detail=f"subagent agent_id not found: {link.agent_id}",
             )
+        preset = engine._resolve_preset(link.agent_id)
+        if not getattr(preset, "can_be_subagent", False):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Agent '{preset.display_name or preset.name}' 当前未允许作为子 Agent",
+            )
+
+
+def _validate_can_be_subagent_description(can_be_subagent: bool, description: str | None) -> None:
+    if can_be_subagent and not (description or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="已允许此 Agent 作为子 Agent，但未填写作为子 Agent 时候的触发描述",
+        )
+
+
+def _validate_can_be_mcp_description(can_be_mcp: bool, description: str | None) -> None:
+    if can_be_mcp and not (description or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="已允许此 Agent 对外暴露为 MCP，但未填写委派触发描述（与子 Agent 共用同一描述）",
+        )
+
+
+def _validate_subagent_descriptions(engine: AgentEngine, subagents: list[SubAgentLink] | None) -> None:
+    """Raise HTTP 422 when a selected subagent lacks both an override and a default delegation description."""
+    if not subagents:
+        return
+    missing: list[str] = []
+    for link in subagents:
+        if link.delegation_description.strip():
+            continue
+        preset = engine._resolve_preset(link.agent_id)
+        default_desc = (getattr(preset, "default_delegation_description", "") or "").strip()
+        if not default_desc:
+            display_name = preset.display_name or preset.name
+            missing.append(display_name)
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "以下子 Agent 既未填写覆盖描述，也未设置默认委托描述，"
+                f"主 Agent 将无从判断何时委派：{'、'.join(missing)}"
+            ),
+        )
 
 
 def _path_exists(p: str) -> bool:
@@ -219,6 +291,18 @@ def _validate_project_paths_or_raise(
         raise HTTPException(
             status_code=422,
             detail=f"以下路径不存在或不是目录: {' | '.join(missing)}",
+        )
+
+
+def _validate_extra_skill_dirs_or_raise(extra_skill_dirs: list[str] | None) -> None:
+    """Raise HTTPException(422) if extra skill dirs do not exist."""
+    if not extra_skill_dirs:
+        return
+    missing = [d for d in extra_skill_dirs if not _path_exists(d)]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"以下此agent自定义额外 Skills 目录不存在或不是目录: {' | '.join(missing)}",
         )
 
 
@@ -251,13 +335,20 @@ async def create_agent(
 ):
     """Create a new agent preset (persisted to DB)."""
     _validate_subagent_ids_exist(engine, body.subagents)
+    _validate_subagent_descriptions(engine, body.subagents)
+    _validate_can_be_subagent_description(body.can_be_subagent, body.default_delegation_description)
+    _validate_can_be_mcp_description(body.can_be_mcp, body.default_delegation_description)
     _validate_project_paths_or_raise(body.project_mode, body.project_root, body.project_extra_dirs)
+    _validate_extra_skill_dirs_or_raise(body.extra_skill_dirs)
     preset_db = AgentPresetDB(
         id=str(uuid.uuid4()),
         name=body.name,
         display_name=body.display_name,
         system_prompt=body.system_prompt,
         default_model=body.default_model,
+        default_delegation_description=(body.default_delegation_description or "").strip(),
+        can_be_subagent=body.can_be_subagent,
+        can_be_mcp=body.can_be_mcp,
         allowed_tool_groups=body.allowed_tool_groups,
         allowed_mcp_servers=body.allowed_mcp_servers,
         allowed_skills=body.allowed_skills,
@@ -267,6 +358,7 @@ async def create_agent(
         project_mode=body.project_mode,
         project_root=body.project_root,
         project_extra_dirs=body.project_extra_dirs,
+        extra_skill_dirs=body.extra_skill_dirs,
     )
     db.add(preset_db)
     await db.commit()
@@ -278,6 +370,9 @@ async def create_agent(
         display_name=preset_db.display_name,
         system_prompt=preset_db.system_prompt,
         default_model=preset_db.default_model,
+        default_delegation_description=preset_db.default_delegation_description or "",
+        can_be_subagent=preset_db.can_be_subagent,
+        can_be_mcp=preset_db.can_be_mcp,
         allowed_tool_groups=preset_db.allowed_tool_groups,
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,
@@ -287,6 +382,7 @@ async def create_agent(
         project_mode=preset_db.project_mode,
         project_root=preset_db.project_root,
         project_extra_dirs=preset_db.project_extra_dirs,
+        extra_skill_dirs=preset_db.extra_skill_dirs,
     )
     engine._presets[preset.id] = preset
 
@@ -307,6 +403,8 @@ async def list_available_subagents(
     result = []
 
     for p in engine._custom_presets.values():
+        if not p.can_be_subagent:
+            continue
         result.append({
             "id": p.id,
             "name": p.name,
@@ -316,7 +414,7 @@ async def list_available_subagents(
         })
 
     for bp in engine.get_builtin_presets():
-        if bp.id == "chat":
+        if bp.id == "chat" or not bp.can_be_subagent:
             continue
         result.append({
             "id": bp.id,
@@ -329,12 +427,14 @@ async def list_available_subagents(
     stmt = select(AgentPresetDB)
     rows = await db.execute(stmt)
     for row in rows.scalars().all():
+        if not row.can_be_subagent:
+            continue
         result.append({
             "id": row.id,
             "name": row.name,
             "display_name": row.display_name,
             "source": "user",
-            "description": "",
+            "description": row.default_delegation_description or "",
         })
 
     if user.role != "admin":
@@ -359,6 +459,7 @@ async def update_agent(
         raise HTTPException(status_code=400, detail="Cannot edit builtin agent")
 
     _validate_subagent_ids_exist(engine, body.subagents)
+    _validate_subagent_descriptions(engine, body.subagents)
     update_data = body.model_dump(exclude_unset=True)
 
     if agent_id in engine._custom_presets:
@@ -373,10 +474,22 @@ async def update_agent(
     if preset_db is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    old_default_delegation = preset_db.default_delegation_description or ""
+    if update_data.get("default_delegation_description") is not None:
+        update_data["default_delegation_description"] = update_data["default_delegation_description"].strip()
+
+    merged_can_be_subagent = update_data.get("can_be_subagent", preset_db.can_be_subagent)
+    merged_can_be_mcp = update_data.get("can_be_mcp", preset_db.can_be_mcp)
+    merged_delegation_description = update_data.get(
+        "default_delegation_description", preset_db.default_delegation_description
+    )
+    _validate_can_be_subagent_description(merged_can_be_subagent, merged_delegation_description)
+    _validate_can_be_mcp_description(merged_can_be_mcp, merged_delegation_description)
     merged_mode = update_data.get("project_mode", preset_db.project_mode)
     merged_root = update_data.get("project_root", preset_db.project_root)
     merged_extra = update_data.get("project_extra_dirs", preset_db.project_extra_dirs)
     _validate_project_paths_or_raise(merged_mode, merged_root, merged_extra)
+    _validate_extra_skill_dirs_or_raise(update_data.get("extra_skill_dirs", preset_db.extra_skill_dirs))
 
     for key, value in update_data.items():
         setattr(preset_db, key, value)
@@ -391,6 +504,9 @@ async def update_agent(
         display_name=preset_db.display_name,
         system_prompt=preset_db.system_prompt,
         default_model=preset_db.default_model,
+        default_delegation_description=preset_db.default_delegation_description or "",
+        can_be_subagent=preset_db.can_be_subagent,
+        can_be_mcp=preset_db.can_be_mcp,
         allowed_tool_groups=preset_db.allowed_tool_groups,
         allowed_mcp_servers=preset_db.allowed_mcp_servers,
         allowed_skills=preset_db.allowed_skills,
@@ -400,10 +516,16 @@ async def update_agent(
         project_mode=preset_db.project_mode,
         project_root=preset_db.project_root,
         project_extra_dirs=preset_db.project_extra_dirs,
+        extra_skill_dirs=preset_db.extra_skill_dirs,
         extra_system_prompts=extra,
     )
     engine._presets[preset.id] = preset
-    engine.invalidate_agent_cache(agent_id)
+    if (preset_db.default_delegation_description or "") != old_default_delegation:
+        # The default delegation description is baked into the task tool of any
+        # parent agent referencing this one; drop all cached agents to rebuild.
+        engine.invalidate_all_agents()
+    else:
+        engine.invalidate_agent_cache(agent_id)
 
     return _preset_to_dict(preset)
 

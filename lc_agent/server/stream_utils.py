@@ -320,11 +320,15 @@ def convert_stream_event(
         elif custom_name == "file_change_record":
             results.append(("file_change", {
                 "session_id": data.get("session_id", ""),
+                "round_number": data.get("round_number"),
                 "file_path": data.get("file_path", ""),
                 "change_type": data.get("change_type", ""),
                 "old_string": data.get("old_string"),
                 "new_string": data.get("new_string"),
                 "move_destination": data.get("move_destination"),
+                "line_start": data.get("line_start"),
+                "context_before": data.get("context_before"),
+                "context_after": data.get("context_after"),
                 "tool_call_id": tool_call_id,
             }))
         elif custom_name == "file_change_git_snapshot":
@@ -514,30 +518,79 @@ def accumulate_display_state(
     return in_thinking
 
 
-def accumulate_usage(event: dict, usage_rounds: list[dict]) -> None:
+def resolve_model_identity(
+    event: dict,
+    default_model_id: str = "",
+    model_map: dict | None = None,
+) -> str:
+    """Resolve the configured model_id for an on_chat_model_end event.
+
+    Priority (token_stats.md §4.1):
+    1. reported name (response_metadata.model_name / metadata.ls_model_name)
+       matched against the config map — by model_id first, then raw_model_id
+       (a proxy may report the upstream name instead of our alias);
+    2. the current request's model_id (default_model_id);
+    3. "unknown" — a row with a token count is worth more than no row.
+    """
+    output = event.get("data", {}).get("output")
+    resp_meta = getattr(output, "response_metadata", None) or {}
+    reported = resp_meta.get("model_name") or resp_meta.get("model") or ""
+    if not reported:
+        reported = (event.get("metadata") or {}).get("ls_model_name") or ""
+
+    if model_map:
+        info = model_map.get(reported) or model_map.get(default_model_id)
+        if info is not None:
+            return getattr(info, "model_id", "") or default_model_id
+
+    if default_model_id:
+        return default_model_id
+    if model_map and reported in model_map:
+        return reported
+    return reported or "unknown"
+
+
+def accumulate_usage(
+    event: dict,
+    usage_rounds: list[dict],
+    *,
+    default_model_id: str = "",
+    model_map: dict | None = None,
+) -> None:
     """Extract token usage from on_chat_model_end events.
 
     Appends a usage dict to usage_rounds if the event is on_chat_model_end.
-    Sub-agent LLM calls are skipped — they belong to the sub-session.
+    Sub-agent LLM calls are NOT skipped anymore — they are tagged
+    role="sub" with sub_session_id so usage_recorder can attribute them
+    (token_stats.md §4.1).
     """
     kind = event.get("event", "")
     if kind != "on_chat_model_end":
         return
 
-    # Skip sub-agent LLM calls (they run inside a nested checkpoint_ns)
     checkpoint_ns = _get_checkpoint_ns(event)
-    if _extract_subagent_tool_call_id(checkpoint_ns) is not None:
-        return
+    sub_id = _extract_subagent_tool_call_id(checkpoint_ns)
 
     output = event.get("data", {}).get("output")
     if not output:
-        usage_rounds.append({"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_read_tokens": 0})
+        usage_rounds.append({
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+            "cache_read_tokens": 0, "cache_write_tokens": 0,
+            "role": "sub" if sub_id else "main",
+            "sub_session_id": sub_id or "",
+            "model_id": "unknown",
+            "raw_model_id": "",
+            "provider": "",
+        })
         return
 
     meta = getattr(output, "usage_metadata", None)
     if meta is None and hasattr(output, "response_metadata"):
         resp_meta = output.response_metadata or {}
         meta = resp_meta.get("token_usage") or resp_meta.get("usage")
+
+    model_id = resolve_model_identity(event, default_model_id, model_map)
+    info = (model_map or {}).get(model_id) if model_map else None
 
     if meta:
         def _get(obj: Any, key: str, default: int = 0) -> int:
@@ -549,33 +602,51 @@ def accumulate_usage(event: dict, usage_rounds: list[dict]) -> None:
         output_t = _get(meta, "output_tokens", 0) or _get(meta, "completion_tokens", 0)
         total_t = _get(meta, "total_tokens", 0) or (input_t + output_t)
 
-        cache_read = 0
         if isinstance(meta, dict):
             details = meta.get("input_token_details") or {}
-            cache_read = details.get("cache_read", 0) if isinstance(details, dict) else getattr(details, "cache_read", 0)
         else:
-            details = getattr(meta, "input_token_details", None)
-            if details:
-                cache_read = getattr(details, "cache_read", 0) if not isinstance(details, dict) else details.get("cache_read", 0)
+            details = getattr(meta, "input_token_details", None) or {}
 
-        reasoning = 0
+        def _d(key: str) -> int:
+            if not details:
+                return 0
+            return details.get(key, 0) if isinstance(details, dict) else getattr(details, key, 0)
+
+        cache_read = _d("cache_read")
+        cache_write = _d("cache_creation")
+
         if isinstance(meta, dict):
             out_details = meta.get("output_token_details") or {}
+        else:
+            out_details = getattr(meta, "output_token_details", None) or {}
+        if out_details:
             reasoning = out_details.get("reasoning", 0) if isinstance(out_details, dict) else getattr(out_details, "reasoning", 0)
         else:
-            out_details = getattr(meta, "output_token_details", None)
-            if out_details:
-                reasoning = getattr(out_details, "reasoning", 0) if not isinstance(out_details, dict) else out_details.get("reasoning", 0)
+            reasoning = 0
 
         usage_rounds.append({
             "input_tokens": input_t or 0,
             "output_tokens": output_t or 0,
             "total_tokens": total_t or 0,
             "cache_read_tokens": cache_read or 0,
+            "cache_write_tokens": cache_write or 0,
             "reasoning_tokens": reasoning or 0,
+            "role": "sub" if sub_id else "main",
+            "sub_session_id": sub_id or "",
+            "model_id": model_id,
+            "raw_model_id": getattr(info, "raw_model_id", "") if info else "",
+            "provider": getattr(info, "provider", "") if info else "",
         })
     else:
-        usage_rounds.append({"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_read_tokens": 0})
+        usage_rounds.append({
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+            "cache_read_tokens": 0, "cache_write_tokens": 0,
+            "role": "sub" if sub_id else "main",
+            "sub_session_id": sub_id or "",
+            "model_id": model_id,
+            "raw_model_id": getattr(info, "raw_model_id", "") if info else "",
+            "provider": getattr(info, "provider", "") if info else "",
+        })
 
 
 def categorize_error(error: Exception) -> dict:

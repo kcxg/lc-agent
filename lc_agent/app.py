@@ -13,12 +13,14 @@ from langchain_agentskills.loaders import CompositeSkillLoader, DirectorySkillLo
 from lc_agent.config import (
     DEFAULT_CHECKPOINT_PATH,
     DEFAULT_DATABASE_URL,
+    DEFAULT_MCP_TOOL_TIMEOUT,
     get_config,
     get_config_value,
     set_config,
 )
 from lc_agent.config.schema import MemoryConfig
 from lc_agent.core.auth import AuthService
+from lc_agent.core.checkpointer import build_checkpointer, is_postgres_url
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.memory import aclose_memory_store, create_sqlite_memory_store
 from lc_agent.core.permissions import PermissionsService
@@ -80,6 +82,14 @@ class LcAgentApp:
         self.port = port
         self._db_url = database_config["url"]
         self._checkpoint_path = database_config["checkpoint_path"]
+        # A PostgreSQL URL wins over checkpoint_path; both are kept so existing
+        # SQLite configs keep working without edits. A relative SQLite path in
+        # checkpoint_url is resolved like checkpoint_path, not against the CWD.
+        checkpoint_url_raw = database_config.get("checkpoint_url", "").strip()
+        if checkpoint_url_raw and not is_postgres_url(checkpoint_url_raw):
+            checkpoint_url_raw = _resolve_file_path(checkpoint_url_raw, project_root)
+        self._checkpoint_url = checkpoint_url_raw or self._checkpoint_path
+        self._checkpointer_bundle = None
         permissions_path = get_config_value(config, "permissions.path", "./permissions.jsonc")
         self._permissions_service = PermissionsService(permissions_path=Path(permissions_path))
         self.engine = AgentEngine(config)
@@ -102,7 +112,12 @@ class LcAgentApp:
             self.filtered_loader = None
             self.skills_toolkit = None
         mcp_config = config.get("mcpServers", {})
-        self.mcp_manager = McpManager(mcp_config, on_state_change=self._on_mcp_state_change)
+        mcp_tool_timeout = get_config_value(config, "mcp.tool_timeout", DEFAULT_MCP_TOOL_TIMEOUT)
+        self.mcp_manager = McpManager(
+            mcp_config,
+            on_state_change=self._on_mcp_state_change,
+            tool_timeout=mcp_tool_timeout,
+        )
         self.fastapi_app = create_app(config, lifespan=self._lifespan)
         self.fastapi_app.state.mcp_manager = self.mcp_manager
         self.fastapi_app.state.skills_toolkit = self.skills_toolkit
@@ -114,9 +129,16 @@ class LcAgentApp:
         self.engine._permissions_service = self._permissions_service
         self.fastapi_app.state.db_url = self._db_url
         self.fastapi_app.state.checkpoint_path = self._checkpoint_path
-        sse_module.configure(self.engine, self._db_url)
-        self.automation_scheduler = AutomationScheduler(self.engine, self._db_url, self.fastapi_app)
+        sse_module.configure(self.engine)
+        self.automation_scheduler = AutomationScheduler(self.engine, self.fastapi_app)
         self.fastapi_app.state.automation_scheduler = self.automation_scheduler
+
+        # lc-agent 自身作为 MCP server 对外暴露（与 mcp 客户端无关，见包内说明）
+        # 必须在 mount_static_files 之前调用，否则 /mcp 被静态文件兜底吃掉
+        from lc_agent.lcagent_as_mcp import mount_lcagent_as_mcp
+
+        mount_lcagent_as_mcp(self.fastapi_app, self.engine)
+
         mount_static_files(self.fastapi_app)
 
     def _on_mcp_state_change(self):
@@ -132,12 +154,8 @@ class LcAgentApp:
             await init_db(self._db_url)
             await self._init_auth(app)
             try:
-                from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-                import aiosqlite
-                conn = await aiosqlite.connect(self._checkpoint_path)
-                saver = AsyncSqliteSaver(conn)
-                await saver.setup()
-                self.engine._checkpointer = saver
+                self._checkpointer_bundle = await build_checkpointer(self._checkpoint_url)
+                self.engine._checkpointer = self._checkpointer_bundle.saver
             except Exception:
                 app_logger.exception("Checkpoint saver setup failed, using None")
 
@@ -171,6 +189,10 @@ class LcAgentApp:
             yield
         finally:
             await self.automation_scheduler.stop()
+            if self._checkpointer_bundle is not None:
+                await self._checkpointer_bundle.aclose()
+                self._checkpointer_bundle = None
+                self.engine._checkpointer = None
             if memory_store is not None:
                 await aclose_memory_store(memory_store)
                 self.engine._store = None
@@ -235,8 +257,12 @@ class LcAgentApp:
                 preset = AgentPreset(
                     id=row.id,
                     name=row.name,
+                    display_name=row.display_name,
                     system_prompt=row.system_prompt,
                     default_model=row.default_model,
+                    default_delegation_description=row.default_delegation_description or "",
+                    can_be_subagent=row.can_be_subagent,
+                    can_be_mcp=getattr(row, "can_be_mcp", False) or False,
                     allowed_tool_groups=row.allowed_tool_groups,
                     allowed_mcp_servers=row.allowed_mcp_servers,
                     allowed_skills=row.allowed_skills,
@@ -246,6 +272,7 @@ class LcAgentApp:
                     project_mode=row.project_mode,
                     project_root=row.project_root,
                     project_extra_dirs=row.project_extra_dirs,
+                    extra_skill_dirs=row.extra_skill_dirs,
                     extra_system_prompts=extra,
                 )
                 self.engine._presets[preset.id] = preset
@@ -296,6 +323,7 @@ class LcAgentApp:
             system_prompt=description or f"Custom agent: {name}",
             default_model="custom",
             default_delegation_description=delegation_description,
+            can_be_subagent=bool(delegation_description.strip()),
             allowed_tool_groups=[],
             allowed_mcp_servers=[],
             allowed_skills=[],

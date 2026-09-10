@@ -79,11 +79,11 @@
       >
         <el-option
           v-for="model in toolsStore.models"
-          :key="model.id"
-          :label="model.id"
-          :value="model.id"
+          :key="model.model_id"
+          :label="model.model_id"
+          :value="model.model_id"
         >
-          <span>{{ model.id }}</span>
+          <span>{{ model.model_id }}</span>
           <span class="header-model-option-provider">{{ model.provider }}</span>
         </el-option>
       </el-select>
@@ -126,9 +126,7 @@ const hasMessages = computed(() => chatStore.messages.length > 0)
 const sessionModel = computed(() => {
   if (agentsStore.isCodeAgent) return '代码内定义'
   const model = toolsStore.currentModel || agentsStore.currentAgent?.default_model || ''
-  if (!model) return ''
-  const parts = model.split('/')
-  return parts[parts.length - 1] || model
+  return model
 })
 
 defineProps<{

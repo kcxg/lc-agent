@@ -8,13 +8,14 @@ import asyncio
 import logging
 import time
 import traceback
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from lc_agent.config import DEFAULT_DATABASE_URL, get_database_url
+from lc_agent.db.engine import get_business_async_session
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
@@ -24,6 +25,7 @@ from lc_agent.core.http_trace import (
 )
 from lc_agent.server import persistence, stream_utils
 from lc_agent.server.subagent_tracker import SubAgentRunTracker
+from lc_agent.server.usage_recorder import build_model_map, record_usage
 from lc_agent.utils.loggers import server_logger
 
 router = APIRouter(prefix="/api/threads", tags=["chat-sse"])
@@ -34,14 +36,12 @@ _cancel_flags: dict[str, bool] = {}
 _run_locks: dict[str, asyncio.Lock] = {}
 
 _engine: AgentEngine | None = None
-_db_url: str = DEFAULT_DATABASE_URL
 
 
-def configure(engine: AgentEngine, db_url: str) -> None:
-    """Initialize the SSE module with engine and DB URL. Called once at app startup."""
-    global _engine, _db_url
+def configure(engine: AgentEngine) -> None:
+    """Initialize the SSE module with engine. Called once at app startup."""
+    global _engine
     _engine = engine
-    _db_url = db_url
 
 
 def _get_engine() -> AgentEngine:
@@ -123,9 +123,7 @@ async def _authenticate_sse(request: Request):
 
     from lc_agent.db.models_auth import User
     from sqlalchemy import select
-    from lc_agent.db.engine import get_async_session
-    db_url = get_database_url()
-    db = get_async_session(db_url)
+    db = get_business_async_session()
     try:
         result = await db.execute(select(User).where(User.id == payload["sub"]))
         return result.scalar_one_or_none()
@@ -141,11 +139,9 @@ async def _check_sse_auth(request: Request, thread_id: str) -> JSONResponse | No
         return JSONResponse(status_code=401, content={"detail": "认证失败"})
 
     if user is not None:
-        from lc_agent.db.engine import get_async_session as _get_session
         from lc_agent.db.models import SessionMeta
         from sqlalchemy import select as sa_select
-        db_url = get_database_url()
-        _db = _get_session(db_url)
+        _db = get_business_async_session()
         try:
             result = await _db.execute(sa_select(SessionMeta).where(SessionMeta.id == thread_id))
             session_meta = result.scalar_one_or_none()
@@ -167,12 +163,10 @@ async def _check_sse_agent_access(request: Request, preset_id: str) -> JSONRespo
     if user is None or user.role == "admin" or preset_id == "chat":
         return None
 
-    from lc_agent.db.engine import get_async_session
     from lc_agent.db.models_auth import UserAgentAccess
     from sqlalchemy import select
 
-    db_url = get_database_url()
-    db = get_async_session(db_url)
+    db = get_business_async_session()
     try:
         result = await db.execute(
             select(UserAgentAccess).where(
@@ -322,20 +316,21 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
     user = await _authenticate_sse(request)
 
     try:
-        msg_count = await persistence.get_session_message_count(_db_url, thread_id)
+        msg_count = await persistence.get_session_message_count(thread_id)
         is_first = msg_count == 0
         if is_first:
             preliminary_title = _extract_text_from_blocks(content)[:30].strip()
             await persistence.ensure_session(
-                _db_url, thread_id, preliminary_title, preset_id, model_id,
+                thread_id, preliminary_title, preset_id, model_id,
                 user_id=user.id if user else "",
             )
 
         if req.replace_from_message_id:
-            await persistence.truncate_from_message(_db_url, thread_id, req.replace_from_message_id)
+            await persistence.truncate_from_message(thread_id, req.replace_from_message_id)
             await engine.reset_thread(thread_id)
 
-        await persistence.save_ui_message(_db_url, thread_id, "user", content)
+        await persistence.save_ui_message(thread_id, "user", content)
+        round_number = await persistence.get_session_user_message_count(thread_id)
     except Exception as e:
         traceback.print_exc()
         error = e
@@ -357,6 +352,8 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
         await lock.acquire()
         try:
             usage_rounds: list[dict] = []
+            usage_run_id = str(uuid.uuid4())
+            usage_model_map = build_model_map(engine)
             round_start_time = time.time()
             stream_start_time = time.time()
             content_parts: list[str] = []
@@ -391,7 +388,6 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 preset_id, model_id=model_id or "", llm_params=llm_params,
             )
             subagent_tracker = SubAgentRunTracker(
-                db_url=_db_url,
                 parent_thread_id=thread_id,
                 user_id=user.id if user else "",
                 subagent_display_map=subagent_display_map,
@@ -417,11 +413,12 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 stream_kwargs["history"] = req.history or []
 
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
-            bind_session_for_file_tracking(thread_id)
+            bind_session_for_file_tracking(thread_id, round_number=round_number)
 
-            model_info = engine._find_model(model_id) if model_id else None
+            from lc_agent.core.model_resolve import find_model
+            model_info = find_model(model_id, engine.config) if model_id else None
             provider = model_info.provider if model_info else None
-            resolved_model = model_info.id if model_info else model_id
+            resolved_model = (model_info.raw_model_id or model_id) if model_info else model_id
             trace_collector = HttpTraceCollector(provider=provider, model=resolved_model)
             trace_token = bind_http_trace_collector(trace_collector)
 
@@ -438,6 +435,15 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                         for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                         await subagent_tracker.drain()
+                        # 已产生的 token 消耗照常入账（取消≠免费）
+                        await record_usage(
+                            usage_rounds,
+                            session_id=thread_id,
+                            user_id=user.id if user else "",
+                            agent_id=preset_id,
+                            source="chat",
+                            run_id=usage_run_id,
+                        )
                         yield stream_utils.format_sse_event("cancelled", {})
                         return
 
@@ -446,6 +452,14 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                         for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                         await subagent_tracker.drain()
+                        await record_usage(
+                            usage_rounds,
+                            session_id=thread_id,
+                            user_id=user.id if user else "",
+                            agent_id=preset_id,
+                            source="chat",
+                            run_id=usage_run_id,
+                        )
                         return
 
                     in_thinking = stream_utils.accumulate_display_state(
@@ -472,7 +486,6 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                                 active_subagent_tool_call_ids.discard(tool_call_id)
                         elif evt_type == "file_change":
                             asyncio.create_task(persistence.save_file_change(
-                                _db_url,
                                 evt_data.get("session_id", thread_id),
                                 evt_data.get("file_path", ""),
                                 evt_data.get("change_type", ""),
@@ -480,13 +493,16 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                                 new_string=evt_data.get("new_string"),
                                 tool_call_id=evt_data.get("tool_call_id"),
                                 move_destination=evt_data.get("move_destination"),
+                                round_number=evt_data.get("round_number"),
+                                line_start=evt_data.get("line_start"),
+                                context_before=evt_data.get("context_before"),
+                                context_after=evt_data.get("context_after"),
                             ))
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                             last_event_time = time.time()
                             continue
                         elif evt_type == "file_change_git_snapshot":
                             asyncio.create_task(persistence.save_git_base_hash(
-                                _db_url,
                                 evt_data.get("session_id", thread_id),
                                 evt_data.get("git_base_hash", ""),
                             ))
@@ -498,7 +514,11 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                         last_event_time = time.time()
 
                     prev_len = len(usage_rounds)
-                    stream_utils.accumulate_usage(event, usage_rounds)
+                    stream_utils.accumulate_usage(
+                        event, usage_rounds,
+                        default_model_id=model_id or "",
+                        model_map=usage_model_map,
+                    )
                     if len(usage_rounds) > prev_len:
                         usage_rounds[-1]["duration_ms"] = int((time.time() - round_start_time) * 1000)
                         round_start_time = time.time()
@@ -559,10 +579,18 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 done_payload["http_traces"] = http_traces
 
             await subagent_tracker.drain()
+            await record_usage(
+                usage_rounds,
+                session_id=thread_id,
+                user_id=user.id if user else "",
+                agent_id=preset_id,
+                source="chat",
+                run_id=usage_run_id,
+            )
 
             if content_parts or tool_calls or usage_rounds or http_traces:
                 await persistence.save_ui_message(
-                    _db_url, thread_id, "assistant",
+                    thread_id, "assistant",
                     [{"type": "text", "text": "".join(content_parts)}],
                     tool_calls=tool_calls or None,
                     usage={
@@ -575,11 +603,12 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
             yield stream_utils.format_sse_event("done", done_payload)
 
-            asyncio.create_task(persistence.increment_session_message_count(_db_url, thread_id))
+            asyncio.create_task(persistence.increment_session_message_count(thread_id))
 
             if is_first:
                 asyncio.create_task(
-                    _generate_and_yield_title(thread_id, _extract_text_from_blocks(content), preset_id, model_id)
+                    _generate_and_yield_title(thread_id, _extract_text_from_blocks(content), preset_id, model_id,
+                                              user_id=user.id if user else "")
                 )
 
         except Exception as e:
@@ -588,6 +617,14 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="error"):
                     yield stream_utils.format_sse_event(evt_type, evt_data)
                 await subagent_tracker.drain()
+            await record_usage(
+                usage_rounds,
+                session_id=thread_id,
+                user_id=user.id if user else "",
+                agent_id=preset_id,
+                source="chat",
+                run_id=usage_run_id,
+            )
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
             error_info["message"] = str(e)
@@ -634,10 +671,14 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     async def event_stream():
         await lock.acquire()
         try:
+            # Resume continues the existing round: round = current user message count.
+            round_number = await persistence.get_session_user_message_count(thread_id)
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
-            bind_session_for_file_tracking(thread_id)
+            bind_session_for_file_tracking(thread_id, round_number=round_number)
 
             usage_rounds: list[dict] = []
+            usage_run_id = str(uuid.uuid4())
+            usage_model_map = build_model_map(engine)
             round_start_time = time.time()
             stream_start_time = time.time()
             content_parts: list[str] = []
@@ -645,7 +686,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             last_event_time = time.time()
             active_subagent_tool_call_ids: set[str] = set()
 
-            existing_tool_calls, existing_trace_count = await persistence.load_resume_context(_db_url, thread_id)
+            existing_tool_calls, existing_trace_count = await persistence.load_resume_context(thread_id)
             tool_calls: list[dict[str, Any]] = list(existing_tool_calls)
             # Pre-warm project context cache before pre-build
             try:
@@ -673,7 +714,6 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 preset_id, model_id=model_id or "", llm_params=llm_params,
             )
             subagent_tracker = SubAgentRunTracker(
-                db_url=_db_url,
                 parent_thread_id=thread_id,
                 user_id=user.id if user else "",
                 subagent_display_map=subagent_display_map,
@@ -695,9 +735,10 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
 
             config = {"configurable": {"thread_id": thread_id}, "recursion_limit": engine.recursion_limit}
 
-            model_info = engine._find_model(model_id) if model_id else None
+            from lc_agent.core.model_resolve import find_model
+            model_info = find_model(model_id, engine.config) if model_id else None
             provider = model_info.provider if model_info else None
-            resolved_model = model_info.id if model_info else model_id
+            resolved_model = (model_info.raw_model_id or model_id) if model_info else model_id
             trace_collector = HttpTraceCollector(
                 provider=provider, model=resolved_model, seq_offset=existing_trace_count,
             )
@@ -719,6 +760,15 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                         for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                         await subagent_tracker.drain()
+                        # 已产生的 token 消耗照常入账（取消≠免费）
+                        await record_usage(
+                            usage_rounds,
+                            session_id=thread_id,
+                            user_id=user.id if user else "",
+                            agent_id=preset_id,
+                            source="chat",
+                            run_id=usage_run_id,
+                        )
                         yield stream_utils.format_sse_event("cancelled", {})
                         return
 
@@ -727,6 +777,14 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                         for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                         await subagent_tracker.drain()
+                        await record_usage(
+                            usage_rounds,
+                            session_id=thread_id,
+                            user_id=user.id if user else "",
+                            agent_id=preset_id,
+                            source="chat",
+                            run_id=usage_run_id,
+                        )
                         return
 
                     in_thinking = stream_utils.accumulate_display_state(
@@ -753,7 +811,6 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                                 active_subagent_tool_call_ids.discard(tool_call_id)
                         elif evt_type == "file_change":
                             asyncio.create_task(persistence.save_file_change(
-                                _db_url,
                                 evt_data.get("session_id", thread_id),
                                 evt_data.get("file_path", ""),
                                 evt_data.get("change_type", ""),
@@ -761,13 +818,16 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                                 new_string=evt_data.get("new_string"),
                                 tool_call_id=evt_data.get("tool_call_id"),
                                 move_destination=evt_data.get("move_destination"),
+                                round_number=evt_data.get("round_number"),
+                                line_start=evt_data.get("line_start"),
+                                context_before=evt_data.get("context_before"),
+                                context_after=evt_data.get("context_after"),
                             ))
                             yield stream_utils.format_sse_event(evt_type, evt_data)
                             last_event_time = time.time()
                             continue
                         elif evt_type == "file_change_git_snapshot":
                             asyncio.create_task(persistence.save_git_base_hash(
-                                _db_url,
                                 evt_data.get("session_id", thread_id),
                                 evt_data.get("git_base_hash", ""),
                             ))
@@ -779,7 +839,11 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                         last_event_time = time.time()
 
                     prev_len = len(usage_rounds)
-                    stream_utils.accumulate_usage(event, usage_rounds)
+                    stream_utils.accumulate_usage(
+                        event, usage_rounds,
+                        default_model_id=model_id or "",
+                        model_map=usage_model_map,
+                    )
                     if len(usage_rounds) > prev_len:
                         usage_rounds[-1]["duration_ms"] = int((time.time() - round_start_time) * 1000)
                         round_start_time = time.time()
@@ -848,11 +912,19 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 done_payload["http_traces"] = http_traces
 
             await subagent_tracker.drain()
+            await record_usage(
+                usage_rounds,
+                session_id=thread_id,
+                user_id=user.id if user else "",
+                agent_id=preset_id,
+                source="chat",
+                run_id=usage_run_id,
+            )
 
             new_content = "".join(content_parts)
             if new_content or tool_calls or usage_rounds or http_traces:
                 await persistence.append_to_last_assistant_message(
-                    _db_url, thread_id, new_content,
+                    thread_id, new_content,
                     all_tool_calls=tool_calls or None,
                     usage_rounds=usage_rounds or None,
                     http_traces=http_traces or None,
@@ -867,6 +939,14 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="error"):
                     yield stream_utils.format_sse_event(evt_type, evt_data)
                 await subagent_tracker.drain()
+            await record_usage(
+                usage_rounds,
+                session_id=thread_id,
+                user_id=user.id if user else "",
+                agent_id=preset_id,
+                source="chat",
+                run_id=usage_run_id,
+            )
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
             error_info["message"] = str(e)
@@ -891,6 +971,7 @@ async def _generate_and_yield_title(
     first_message: str,
     preset_id: str,
     model_id: str,
+    user_id: str = "",
 ) -> None:
     """Background task: generate title and save to DB.
 
@@ -898,6 +979,21 @@ async def _generate_and_yield_title(
     the title update will be delivered on the next state query or page refresh.
     """
     engine = _get_engine()
-    title = await persistence.generate_title(engine, thread_id, first_message, preset_id, model_id)
+    title_usage: list[dict] = []
+    title = await persistence.generate_title(
+        engine, thread_id, first_message, preset_id, model_id, usage_sink=title_usage,
+    )
+    if title_usage:
+        try:
+            await record_usage(
+                title_usage,
+                session_id=thread_id,
+                user_id=user_id,
+                agent_id=preset_id,
+                source="title",
+                run_id=str(uuid.uuid4()),
+            )
+        except Exception:
+            server_logger.exception("Failed to record title usage")
     if title:
-        await persistence.save_title(_db_url, thread_id, title)
+        await persistence.save_title(thread_id, title)

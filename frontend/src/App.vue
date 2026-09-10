@@ -51,6 +51,7 @@
       </main>
 
       <div
+        v-if="!rightCollapsed"
         class="resizer resizer-right"
         @mousedown="startResize('right', $event)"
       />
@@ -58,9 +59,9 @@
       <RightPanel
         class="mobile-right-panel"
         :class="{ 'is-mobile-open': mobileRightOpen }"
-        :collapsed="mobileRightOpen ? false : rightPanelCollapsed"
+        :collapsed="mobileRightOpen ? false : rightCollapsed"
         :panel-width="rightWidth"
-        @toggle-collapse="rightPanelCollapsed = !rightPanelCollapsed"
+        @toggle-collapse="rightCollapsed = !rightCollapsed"
         @open-automation="openAutomationDrawer"
       />
     </div>
@@ -112,13 +113,26 @@ const cleanupDialogRef = ref<InstanceType<typeof CleanupDialog>>()
 const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
 const automationDrawerRef = ref<InstanceType<typeof AutomationDrawer>>()
 const sidebarCollapsed = ref(false)
+const rightCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
 const mobileRightOpen = ref(false)
-const rightPanelCollapsed = ref(false)
 const appName = ref('lc_agent')
 
 const isPublicRoute = computed(() => !!route.meta.public)
 const appInitialized = ref(false)
+
+const RIGHT_COLLAPSED_KEY = 'lc-agent:layout:rightCollapsed'
+function loadRightCollapsed(): boolean {
+  try {
+    return localStorage.getItem(RIGHT_COLLAPSED_KEY) === '1'
+  } catch { return false }
+}
+rightCollapsed.value = loadRightCollapsed()
+watch(rightCollapsed, (v) => {
+  try {
+    localStorage.setItem(RIGHT_COLLAPSED_KEY, v ? '1' : '0')
+  } catch { /* ignore */ }
+})
 
 async function initApp() {
   if (appInitialized.value || isPublicRoute.value) return

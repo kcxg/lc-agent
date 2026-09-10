@@ -36,10 +36,25 @@ def get_async_session(url: str = "sqlite+aiosqlite:///./lc_agent_data.db") -> As
     return _async_session_factory()
 
 
+def get_business_async_session() -> AsyncSession:
+    """获取业务数据库连接，数据库地址由全局运行时配置提供。"""
+    from lc_agent.config.runtime import get_database_url
+
+    return get_async_session(get_database_url())
+
+
+_ASYNC_TO_SYNC_SCHEME = {
+    "sqlite+aiosqlite": "sqlite",
+    "postgresql+asyncpg": "postgresql+psycopg2",
+    "mysql+aiomysql": "mysql+pymysql",
+}
+
+
 def _to_sync_url(url: str) -> str:
     """Convert async DB URL to sync for Alembic."""
-    if "+aiosqlite" in url:
-        return url.replace("+aiosqlite", "")
+    for async_scheme, sync_scheme in _ASYNC_TO_SYNC_SCHEME.items():
+        if url.startswith(async_scheme + "://"):
+            return sync_scheme + url[len(async_scheme):]
     return url
 
 
@@ -80,6 +95,7 @@ async def init_db(url: str = "sqlite+aiosqlite:///./lc_agent_data.db"):
     (handles the case where migrations failed but tables already exist).
     """
     import lc_agent.db.models  # noqa: F401 — ensure models are registered
+    import lc_agent.db.models_usage  # noqa: F401 — llm_usage / model_pricing
 
     sync_url = _to_sync_url(url)
 

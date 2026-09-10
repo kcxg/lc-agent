@@ -10,7 +10,7 @@ def engine_with_provider():
                 "api_key": "test-key-123",
                 "base_url": "https://api.deepseek.com",
                 "models": [
-                    {"id": "deepseek-chat", "context_limit": 64000}
+                    {"model_id": "deepseek-chat", "raw_model_id": "deepseek-chat", "context_limit": 64000}
                 ]
             }
         },

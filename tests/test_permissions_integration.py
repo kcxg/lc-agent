@@ -10,7 +10,7 @@ from lc_agent.core.permissions import PermissionsService
 @pytest.fixture
 def full_engine(tmp_path):
     config = {
-        "provider": {"test": {"base_url": "http://fake", "api_key": "k", "models": [{"id": "m1"}]}},
+        "provider": {"test": {"base_url": "http://fake", "api_key": "k", "models": [{"model_id": "m1", "raw_model_id": "m1"}]}},
         "agent": {"default_model": "m1", "system_prompt": "Test"},
     }
     engine = AgentEngine(config)
