@@ -72,7 +72,6 @@ declare module 'vue' {
     TodoList: typeof import('./src/components/panels/TodoList.vue')['default']
     TodoProgressCard: typeof import('./src/components/chat/TodoProgressCard.vue')['default']
     TokenUsagePanel: typeof import('./src/components/chat/TokenUsagePanel.vue')['default']
-    ToolCallCard: typeof import('./src/components/chat/ToolCallCard.vue')['default']
     ToolCardRouter: typeof import('./src/components/chat/tools/ToolCardRouter.vue')['default']
     ToolField: typeof import('./src/components/chat/tools/ToolField.vue')['default']
     ToolFileCard: typeof import('./src/components/chat/tools/ToolFileCard.vue')['default']

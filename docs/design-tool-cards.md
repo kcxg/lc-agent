@@ -162,7 +162,7 @@
 - `useToolCard.ts` — 公共逻辑（折叠、运行计时、复制）
 - `ToolFileCard.vue` + `ToolFileEditCard.vue` / `ToolFileWriteCard.vue` — 编辑（绿“改”+红绿 diff）/ 写入（蓝“新”+只贴新增行），复用 `fileDiff`/`filePreview`，点文件名看全文 + “在抽屉里看”跳 `FileChangesDrawer`
 - `ToolTerminalCard.vue` — 黑底终端，`$ 命令` 置顶+复制，尾部 `[退出码 N · 耗时]`（正则解析 `run_command` 返回串），stderr 暗红块，PID+停止按钮+后台轮询从旧卡原样搬过来
-- `ToolGenericCard.vue` — 兜底：人话标题（读/看/搜/删等中文动词+对象摘要）+ 参数 + 结果预览，旧 `ToolCallCard.vue` 不再被引用（文件保留未删）
+- `ToolGenericCard.vue` — 兜底：人话标题（读/看/搜/删等中文动词+对象摘要）+ 参数 + 结果预览。拆卡后 `ToolCallCard.vue` 已无任何引用，2026-09-14 删除
 - `ToolCardRouter.vue` — ChatView/ChatBubble 统一入口，`write_todos`/subagent 分支不动
 - 契约测试 `frontend/scripts/check-tool-cards-contract.mjs`（`npm run test:tool-cards`），宽度/历史/编辑三份旧契约同步通过
 - 预览页：`/test-segments` 改成 7 组 P0 样例（编辑/新建/追加/短命令/流式中/失败命令/通用兜底）
@@ -185,3 +185,32 @@
 - `restart.ps1` 三处环境坑：`netstat.exe` 在沙箱里起不来却被 `$ErrorActionPreference="Stop"` 当致命错误（改 try/catch 容错，`Get-NetTCPConnection` 是主路径）；`npx vite build` 走 cmd.exe 包装脚本起不来（改成直接用 node 跑 `node_modules/vite/bin/vite.js`）；`Get-Command node` 在非交互会话里取不到 node（改成候选列表探测，含 WorkBuddy 托管版本目录）。
 
 **明确不做**：卡内直接改文件/重跑命令（只读展示，改文件走抽屉+对话）；卡片主题自定义；后端新增结构化字段（一期只靠解析现有字符串）。
+
+## 14. 入参里的占位参数 placeholder（2026-09-14）
+
+**现象**：没有参数的工具（如 `mcp__nbrag__nbrag_stats`）展开后，入参区显示一条 `placeholder {}`，折叠态标题尾部也拖着 `{}`。
+
+**根因**：`lc_agent/mcp/tool_adapter.py` 里，MCP 工具没有参数时被塞了一个假字段
+`fields["placeholder"] = (str | None, Field(default=None, description="no params"))`。
+它会跟着 schema 一起发给模型，模型只能照着编值，数据库里存下来的是字面字符串（实测见过
+`"{}"` 和 `"no params"`——后者是模型把参数说明抄成了值）。
+
+**为什么这个假字段本来就多余**（实测）：
+
+- pydantic 允许零字段模型，schema 是合法的 `{"properties": {}, "type": "object"}`
+- 转成 OpenAI 工具格式后同样合法，能正常发工具调用
+- 直接对 `api.commandcode.ai`（`meta/muse-spark-1.3-contributor`）发请求，空 `properties` 返回 HTTP 200
+- 删掉后模型多传的 `placeholder` 会被 pydantic 忽略（`extra=ignore`），老会话不会崩
+
+**改法**：
+
+- 后端：`tool_adapter.py` 不再注入假字段，无参数就生成零字段模型
+- 前端：新增 `frontend/src/utils/tool-args.ts`（`HIDDEN_ARG_KEYS` / `isHiddenArg` / `visibleArgEntries`），
+  入参区、折叠态标题摘要、复制成 Markdown 三处共用，把数据库里已有的历史记录也挡掉
+- 没有入参时「入参」整行不渲染（`argRows.length > 0` 的老行为，过滤干净后自然如此）
+
+**回归保护**：`tests/test_mcp_adapter.py` 加 5 条（无参不产生参数 / 缺 `properties` 键同样不产生 / 有参不受影响 / 无参可直接调用且不透传多余字段）；
+`check-tool-cards-contract.mjs` 加 11 条（过滤函数存在、四处都接入、后端不许再塞回假字段、旧卡文件不许复活）。
+
+**四处接入**（用户先定的三处，加一处走查时发现的）：入参区、折叠态标题摘要、复制成 Markdown、工具审批弹层
+`InterruptDialog.vue`（它会把入参整段打印出来，同样会被假参数污染；没有参数时显示「（无参数）」而不是一个空花括号）。

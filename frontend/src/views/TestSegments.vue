@@ -2,7 +2,7 @@
   <div style="padding:20px; background:var(--el-bg-color-page); min-height:100vh; color:var(--el-text-color-regular);">
     <h2>Tool Cards P0 Preview</h2>
     <div style="margin:10px 0; font-size:12px; color:var(--el-text-color-secondary);">
-      编辑 / 新建 / 追加 / 短命令 / 长流式 / 失败命令 / 通用兜底 / 技能加载 / 长入参 / 折叠态出错，共 10 组
+      编辑 / 新建 / 追加 / 短命令 / 长流式 / 失败命令 / 通用兜底 / 技能加载 / 长入参 / 折叠态出错 / 无参 MCP 工具新旧数据，共 12 组
     </div>
     <div style="display:flex; flex-direction:column; gap:16px; max-width:860px;">
       <section v-for="sample in samples" :key="sample.label">
@@ -136,6 +136,22 @@ const samples: { label: string; toolCall: ToolCall; collapsed?: boolean }[] = [
       startTime: Date.now() - 120,
       result: 'FileNotFoundError: src/not_exists.py',
     },
+  },
+  {
+    label: '11. 无参数 MCP 工具（修复后新数据：本来就没有入参）',
+    toolCall: done({
+      name: 'mcp__nbrag__nbrag_stats',
+      args: {},
+      result: '<nbrag_stats status="success" returned_collection_count="22" />\n<execution>outcome = results</execution>',
+    }),
+  },
+  {
+    label: '12. 无参数 MCP 工具（历史数据：库里还存着占位参数 placeholder，必须和上一张长得一样）',
+    toolCall: done({
+      name: 'mcp__nbrag__nbrag_help',
+      args: { placeholder: '{}' },
+      result: '<nbrag_help status="success" />\n<execution>outcome = results</execution>',
+    }),
   },
 ]
 </script>

@@ -5,6 +5,9 @@ description: >-
   编写、修改、运行这两个项目代码时必须遵循此 Skill。
 ---
 
+# 注意：
+严格禁止ai自动修改此文件添加临时不重要的一次性细节。
+未获用户明确要求，AI 不得修改本文件及 .agents/skills/ 下的任何 skill。
 
 
 # lc-agent 开发指南
@@ -205,24 +208,7 @@ llm = ChatOpenAI(model=info.raw_model_id, base_url=info.base_url, api_key=info.a
 | 修改配置解析 | `lc_agent/config/loader.py` + `runtime.py` + `schema.py` |
 | 修改 MCP 集成 | `lc_agent/mcp/manager.py` |
 
-### 4.4 修改前端
 
-```powershell
-# 开发模式 (热更新)
-# 注意: vite.config.ts 默认代理到 :8000，开发 bfzs 时需改为 :8001 或让 bfzs 监听 8000
-cd D:\codes\lc-agent\frontend
-npm run dev
-
-# 构建 (输出到 lc_agent/web/dist/)
-npm run build
-```
-
-前端要点:
-- 路由: `src/router/index.ts` — hash 模式
-- 状态: Pinia stores (`src/stores/`)
-- API 调用: `src/api/http.ts` (REST), `src/api/websocket.ts` (WS)
-- UI 库: Element Plus + vue-element-plus-x (AI chat 组件)
-- 聊天气泡: `BubbleList` 来自 vue-element-plus-x
 
 ### 4.5 新增前端组件
 
@@ -264,81 +250,7 @@ D:\ProgramData\Miniconda3\envs\py312\python.exe -m pytest tests/ -v
 - 仓库根严禁放与常用工具同名的 .py（pytest.py / conftest.py 等，会因 cwd 优先被当模块加载）
 - 若 pytest 输出异常为空，先确认没有同名劫持文件；结果可 `--junitxml` 或落盘再读
 
-### 前端契约测试
 
-```bash
-cd D:/codes/lc-agent/frontend
-for f in scripts/check-*.mjs; do node "$f" >/dev/null 2>&1 && echo "PASS $f" || echo "FAIL $f"; done
-```
-
-**改了代码后契约变红，先分清是不是自己改坏的** —— 用临时 worktree 在 HEAD 上跑同一批契约做对照：
-
-```bash
-cd D:/codes/lc-agent
-git worktree add --detach .tmp/head-check HEAD
-cd .tmp/head-check/frontend && node scripts/check-tool-cards-contract.mjs   # 同样的脚本，读的是 HEAD 的代码
-cd D:/codes/lc-agent && git worktree remove --force .tmp/head-check
-```
-
-HEAD 上也失败 = 既有问题，别顺手大改；HEAD 上通过 = 自己改出来的，必须修。
-
-注意：契约脚本大多用 `process.cwd()` 当根目录，**必须在 `frontend/` 下运行**，否则读不到文件。
-
-### 页面 UI 验证（无头浏览器截图 + DOM 断言）
-
-改完前端要确认页面真实效果（提示出现没有、按钮能不能点）时，用 Python Playwright + 本机 Chromium 直连：
-
-```powershell
-# 骨架脚本见 skill 目录 scripts/page_check_template.py，复制改断言即可
-D:\ProgramData\Miniconda3\envs\py312\python.exe scripts/page_check_template.py
-```
-
-三个实测坑：
-
-1. **别用 agent-browser**（2026-09-10 实测 0.34.0）：在工具会话里 `open` 会卡死（超 4 分钟无响应），
-   换 `--session` 名也无效。残留守护进程用 `taskkill /F /T /PID <pid>` 清（pid 见 `~/.agent-browser/default.pid`）。
-2. **Python playwright 的默认浏览器版本与已装的 chromium-1223 不匹配**（会提示 `playwright install`），
-   必须显式指定：
-   ```python
-   EXE = r'C:\Users\<user>\AppData\Local\ms-playwright\chromium-1223\chrome-win64\chrome.exe'
-   browser = p.chromium.launch(headless=True, executable_path=EXE)
-   ```
-3. **登录态靠 JWT 注入 localStorage**：secret 在 bfzs `config.jsonc` 的 `auth.secret`，
-   user id 从 `bfzs_data.db` 的 `users` 表查；`ctx.add_init_script` 里 `localStorage.setItem('token', ...)`
-   后直接访问 `#/admin/usage` 这类需要登录的路由。（dev 环境的 secret 才可这样用，不要外传）
-
-**写跨行断言要归一化行尾**：`assertNotContains(file, "foo\n      return")` 这种带 `\n` 的 needle 是行尾敏感的——
-CRLF 检出下永远匹配不上，于是**假通过**（`check-code-agent-contract.mjs` 就这么骗过一次）。
-需要跨行匹配时先 `content.replace(/\r\n/g, '\n')`。
-
-
-## 6. 关键设计模式
-
-### 6.1 工具注册 — 导入即注册
-
-```python
-# ToolRegistry 是单例，@tool 装饰器在模块导入时自动注册
-# bfzs 只需 import 模块，工具就进入全局注册表
-import bfzs.tools.file_tools  # 导入 = 注册
-```
-
-### 6.2 配置驱动
-
-所有 LLM、MCP、Skills 配置都在 `config.jsonc`，支持:
-- JSONC 注释
-- `{env:VAR}` 环境变量替换
-- `.env` 文件加载
-
-**全局配置单例：** 应用入口调用一次 `set_config_path()` 注册配置路径（写入 `LC_AGENT_CONFIG_PATH` 环境变量并失效缓存），之后框架内任何地方用 `get_config()` 无参获取同一份配置（同一 dict 引用，运行时修改立即生效）；`get_app_name()` / `get_database_url()` 是高频字段的快捷 getter。找不到任何配置文件时 `load_config` 直接 raise RuntimeError（CLI 入口会打印错误并退出），不再回退到内置默认空壳配置。
-
-**重要：** 修改或新增配置项时，必须同时更新以下两个文件：
-1. `D:\codes\lc-agent\config.example.jsonc` — 框架示例配置，用户复制的唯一参考
-2. `D:\codes\lc-agent-bfzs\config.jsonc` — 演示项目的实际配置
-
-改了一个漏了另一个会导致不一致。字段重命名、删除、新增都要两边同步。
-
-**模型字段命名规范：** 如果该模型可以在网页 UI 中动态切换/覆盖，配置中应命名为 `default_model`（表示"默认值，可被用户在运行时覆盖"）。
-例如 `agent.default_model`、`agent.summarization.default_model` 都可以在右侧面板修改，所以叫 `default_model`。
 
 ### 6.3 三值权限过滤
 
@@ -378,38 +290,6 @@ app.add_agent(name="my_agent", graph=my_compiled_graph, description="描述")
 - 框架**不会**往用户 graph 里添加任何 middleware
 - 用户需要自行管理上下文裁剪、工具、权限等
 
-### 6.5 Middleware 作用范围
-
-框架的 `build_agent()` 会自动为内置/网页创建的 preset 添加 middleware（TodoListMiddleware、SummarizationMiddleware 等）。
-**但 `app.add_agent(name, graph)` 注册的用户自定义 graph 不受影响** — 框架不会往用户的 graph 里插入任何 middleware。
-
-用户如果想给自己的 agent 加上下文裁剪，需要自行在构建 graph 时配置 middleware（如 deepagents 的 SummarizationMiddleware 或 langchain 的 SummarizationMiddleware）。
-
-### 6.6 流式输出 WebSocket 协议
-
-客户端发送:
-```json
-{"type": "message", "content": "用户消息", "preset_id": "power", "model": "ds-deepseek-v4-flash"}
-{"type": "cancel"}
-{"type": "interrupt_response", "approved": true, "preset_id": "power"}
-```
-
-服务端流式返回:
-```json
-{"type": "connected", "thread_id": "..."}
-{"type": "token", "content": "..."}
-{"type": "thinking", "content": "..."}
-{"type": "tool_call", "name": "...", "run_id": "...", "args": {...}}
-{"type": "tool_result", "name": "...", "result": "..."}
-{"type": "content", "content": "\n<!--HTTP:0-->\n"}
-{"type": "llm_usage", "input_tokens": 0, "output_tokens": 0, ...}
-{"type": "interrupt", "message": "Tool requires approval", "data": {...}}
-{"type": "title_update", "thread_id": "...", "title": "..."}
-{"type": "done", "usage": [...], "http_traces": [...]}
-{"type": "cancelled"}
-{"type": "error", "message": "..."}
-```
-
 ## 7. LangChain/LangGraph 代码规范
 
 **重要：** 写 LangChain 相关代码时：
@@ -447,7 +327,7 @@ from langchain_agentskills.loaders import DirectorySkillLoader, CompositeSkillLo
 | LangGraph checkpoint | `D:\codes\lc-agent-bfzs\bfzs_checkpoints.db` | AsyncSqliteSaver |
 
 - 无需手动迁移，启动时 Alembic 自动处理
-- 项目处于早期开发阶段，可以破坏性修改 schema，无需兼容旧数据
+- 项目可以破坏性修改 schema，无需兼容旧数据
 - 如 schema 改动大，可以删除 .db 文件重新启动。**但必须先询问用户确认！** 数据库中存有用户配置的 Agent preset，删库意味着丢失所有配置，重建很麻烦
 
 ### 8.2 数据库旧表加字段时候的注意事项

@@ -83,6 +83,7 @@ import {
   QuestionFilled, Search, Tools,
 } from '@element-plus/icons-vue'
 import type { ToolCall } from '@/stores/chat'
+import { visibleArgEntries } from '@/utils/tool-args'
 import CodeBlockModal from '../CodeBlockModal.vue'
 import ToolField from './ToolField.vue'
 import {
@@ -151,7 +152,9 @@ function clipSummary(s: string, max = 48): string {
   return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine
 }
 
-function summarizeArgs(name: string, args: Record<string, unknown>): string {
+function summarizeArgs(name: string, rawArgs: Record<string, unknown>): string {
+  // 先把占位参数挡掉，否则它的值会被下面兜底逻辑当成"摘要"显示在标题上
+  const args: Record<string, unknown> = Object.fromEntries(visibleArgEntries(rawArgs))
   const get = (k: string): string => {
     const v = args[k]
     return typeof v === 'string' ? v : ''
@@ -275,9 +278,7 @@ function formatArgValue(name: string, key: string, value: unknown): string {
 }
 
 const argRows = computed(() => {
-  const args = props.toolCall.args
-  if (!args || Object.keys(args).length === 0) return []
-  return Object.entries(args).map(([key, value]) => {
+  return visibleArgEntries(props.toolCall.args).map(([key, value]) => {
     const full = formatArgValue(props.toolCall.name, key, value)
     const inline = !/[\r\n]/.test(full) && full.length <= ARG_INLINE_MAX
     return {

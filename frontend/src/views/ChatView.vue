@@ -76,33 +76,15 @@
             <span class="chat-time-line" />
           </div>
         </template>
-        <template #avatar="{ item }">
-          <div
-            v-if="item.isSystem"
-            class="role-avatar is-system"
-            title="委托任务"
-            aria-label="委托任务"
-          >
-            <span class="system-avatar-icon">📋</span>
-          </div>
-          <div
-            v-else
-            class="role-avatar"
-            :class="item.role === 'user' ? 'is-user' : 'is-ai'"
-            :title="item.role === 'user' ? '你' : getAssistantLabel()"
-            :aria-label="item.role === 'user' ? '你' : getAssistantLabel()"
-          >
-            <el-icon>
-              <User v-if="item.role === 'user'" />
-              <Cpu v-else />
-            </el-icon>
-          </div>
-        </template>
         <template #header="{ item }">
           <div v-if="item.isSystem" class="role-header is-system">
             <span class="role-name">委托任务</span>
           </div>
           <div v-else-if="item.role === 'user'" class="role-header is-user">
+            <span class="role-name">你</span>
+            <span class="role-avatar is-user" title="你" aria-label="你">
+              <el-icon><User /></el-icon>
+            </span>
             <button
               v-if="canEditMessage(item)"
               class="message-edit-btn"
@@ -114,7 +96,7 @@
             </button>
           </div>
           <div v-else class="role-header is-ai">
-            <span class="role-header-icon" aria-hidden="true">
+            <span class="role-avatar is-ai" :title="getAssistantLabel()" :aria-label="getAssistantLabel()">
               <el-icon><Cpu /></el-icon>
             </span>
             <span class="role-name">{{ getAssistantLabel() }}</span>
@@ -471,8 +453,8 @@ const subLiveBubbleList = computed((): ChatBubbleItem[] => {
       hasAnswer: true,
       isStreamingMessage: false,
       loading: false,
-      avatarSize: '28px',
-      avatarGap: '8px',
+      avatarSize: '0px',
+      avatarGap: '0px',
       maxWidth: '100%',
     })
   }
@@ -520,8 +502,8 @@ const subLiveBubbleList = computed((): ChatBubbleItem[] => {
     hasThinking: !!entry.thinking?.trim(),
     hasToolCalls: toolCalls.length > 0,
     hasAnswer: !!entry.tokens?.trim(),
-    avatarSize: '28px',
-    avatarGap: '8px',
+    avatarSize: '0px',
+    avatarGap: '0px',
     maxWidth: '100%',
     httpTraces: entry.httpTraces?.length ? entry.httpTraces : undefined,
     httpTracesCount: entry.httpTraces?.length || 0,
@@ -631,8 +613,8 @@ const bubbleList = computed((): ChatBubbleItem[] => {
       hasAnswer: segs?.some(s => s.type === 'text' && s.text?.trim()) ?? false,
       isStreamingMessage,
       loading: isStreamingMessage && !msgContent,
-      avatarSize: '28px',
-      avatarGap: '8px',
+      avatarSize: '0px',
+      avatarGap: '0px',
       maxWidth: '100%',
       timestamp: ts,
       enterClass,
@@ -1412,8 +1394,6 @@ onBeforeUnmount(() => {
 }
 
 .messages-container {
-  --chat-assistant-bubble-width: min(85%, 920px);
-  --chat-user-bubble-max-width: min(68%, 640px);
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1474,12 +1454,23 @@ onBeforeUnmount(() => {
 
 .messages-container :deep(.elx-bubble) {
   max-width: 100% !important;
+  gap: 0 !important;
+}
+
+.messages-container :deep(.elx-bubble__avatar),
+.messages-container :deep(.elx-bubble__avatar-size),
+.messages-container :deep(.elx-bubble__avatar-placeholder) {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .messages-container :deep(.elx-bubble--start) {
-  width: var(--chat-assistant-bubble-width) !important;
-  max-width: var(--chat-assistant-bubble-width) !important;
-  align-self: flex-start;
+  width: 100% !important;
+  max-width: 100% !important;
+  align-self: stretch;
 }
 
 .messages-container :deep(.elx-bubble--end) {
@@ -1508,7 +1499,7 @@ onBeforeUnmount(() => {
 .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
   flex: 0 1 auto;
   width: fit-content;
-  max-width: var(--chat-user-bubble-max-width) !important;
+  max-width: min(88%, 760px) !important;
   padding: 10px 14px;
   border-radius: 16px 16px 6px 16px;
   background: var(--el-bg-color-overlay);
@@ -1624,19 +1615,27 @@ onBeforeUnmount(() => {
 }
 
 .role-avatar {
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--el-border-color);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.role-avatar :deep(.el-icon),
+.role-avatar .el-icon {
+  font-size: 12px;
 }
 
 .role-header.is-user {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 6px;
   width: 100%;
 }
 
@@ -1678,6 +1677,8 @@ onBeforeUnmount(() => {
 }
 
 .role-avatar.is-system {
+  width: 20px;
+  height: 20px;
   background: color-mix(in srgb, var(--el-color-info) 14%, var(--el-bg-color));
   border-color: color-mix(in srgb, var(--el-color-info) 35%, var(--el-border-color));
 }
@@ -1716,18 +1717,8 @@ onBeforeUnmount(() => {
 
 .role-header.is-ai {
   min-height: 24px;
-}
-
-.role-header-icon {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  color: #d8f3dc;
-  background: linear-gradient(135deg, #15382a, #0b2119);
-  border: 1px solid rgba(74, 222, 128, 0.32);
+  display: inline-flex;
+  width: 100%;
 }
 
 .role-name {
@@ -2285,10 +2276,6 @@ onBeforeUnmount(() => {
     margin-bottom: 5px;
   }
 
-  .role-header-icon {
-    display: inline-flex;
-  }
-
   .role-model {
     max-width: 42vw;
   }
@@ -2322,10 +2309,6 @@ onBeforeUnmount(() => {
 
   .messages-container :deep(.elx-bubble) {
     gap: 0 !important;
-  }
-
-  .messages-container :deep(.elx-bubble--start .elx-bubble__avatar) {
-    display: none !important;
   }
 
   .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper),

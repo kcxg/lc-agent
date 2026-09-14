@@ -1,9 +1,10 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (p) => readFileSync(join(root, p), 'utf8')
+const exists = (p) => existsSync(join(root, p))
 
 const chatView = read('src/views/ChatView.vue')
 const router = read('src/components/chat/tools/ToolCardRouter.vue')
@@ -15,6 +16,8 @@ const genericCard = read('src/components/chat/tools/ToolGenericCard.vue')
 const fileCard = read('src/components/chat/tools/ToolFileCard.vue')
 const useToolCard = read('src/components/chat/tools/useToolCard.ts')
 const chatStore = read('src/stores/chat.ts')
+const toolArgs = read('src/utils/tool-args.ts')
+const copyMarkdown = read('src/utils/copy-markdown.ts')
 
 const failures = []
 
@@ -111,6 +114,33 @@ expect(testSegments.includes('sample.collapsed'), 'TestSegments.vue 未按样例
 expect(terminalCard.includes('!isCollapsed || (errorText && !hasOutput)'), 'ToolTerminalCard.vue 折叠后藏了错误')
 expect(fileCard.includes('!isCollapsed || errorText'), 'ToolFileCard.vue 折叠后藏了错误')
 expect(genericCard.includes('!isCollapsed || errorText'), 'ToolGenericCard.vue 折叠后藏了错误')
+
+// 占位参数 placeholder（MCP 无参数工具的历史遗留）在界面上不能露出来
+expect(toolArgs.includes("'placeholder'"), 'tool-args.ts 缺少占位参数名单')
+expect(toolArgs.includes('isHiddenArg'), 'tool-args.ts 缺少 isHiddenArg')
+expect(genericCard.includes('visibleArgEntries'), 'ToolGenericCard.vue 入参区没走占位参数过滤')
+expect(genericCard.includes('Object.fromEntries(visibleArgEntries(rawArgs))'), 'ToolGenericCard.vue 折叠态标题摘要没过滤占位参数')
+expect(copyMarkdown.includes('visibleArgEntries'), 'copy-markdown.ts 复制成 Markdown 时没过滤占位参数')
+expect(!/\bfor \(const \[k, v\] of Object\.entries\(tc\.args\)/.test(copyMarkdown), 'copy-markdown.ts 仍在直接遍历原始入参')
+
+const interruptDialog = read('src/components/chat/InterruptDialog.vue')
+expect(interruptDialog.includes('visibleArgEntries'), 'InterruptDialog.vue 审批弹层没过滤占位参数')
+expect(interruptDialog.includes('（无参数）'), 'InterruptDialog.vue 审批弹层没处理“本来就没有参数”的情况')
+expect(
+  !interruptDialog.includes('JSON.stringify(action.args ?? action.arguments'),
+  'InterruptDialog.vue 审批弹层仍在直接打印原始入参',
+)
+
+// 后端不能再往无参数工具里塞占位参数（塞了会被前端过滤悄悄兜住，问题就看不见了）
+const mcpAdapterPath = '../lc_agent/mcp/tool_adapter.py'
+expect(exists(mcpAdapterPath), '找不到后端 MCP 适配器 tool_adapter.py')
+if (exists(mcpAdapterPath)) {
+  const mcpAdapter = read(mcpAdapterPath)
+  expect(!mcpAdapter.includes('fields["placeholder"]'), 'tool_adapter.py 又把 placeholder 假参数塞回来了')
+}
+
+// 拆卡前的旧卡片已经没有任何地方引用，不应再留在仓库里
+expect(!exists('src/components/chat/ToolCallCard.vue'), '旧卡 ToolCallCard.vue 还在仓库里（已无任何引用）')
 
 if (failures.length > 0) {
   console.error('工具卡片契约测试失败:')
