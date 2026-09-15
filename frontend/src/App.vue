@@ -222,7 +222,12 @@ async function restoreSession(sessionId: string) {
   const session = sessionsStore.sessions.find(s => s.id === sessionId)
   if (session) {
     sessionsStore.selectSession(sessionId)
-    if (session.agent_id && session.agent_id !== agentsStore.currentAgentId) {
+    // agent_id 可能指向已被隐藏的内置 chat，不存在时保持当前选择
+    if (
+      session.agent_id &&
+      session.agent_id !== agentsStore.currentAgentId &&
+      agentsStore.agents.some(a => a.id === session.agent_id)
+    ) {
       await agentsStore.selectAgent(session.agent_id)
     }
     const sessionAgent = agentsStore.agents.find(a => a.id === session.agent_id)

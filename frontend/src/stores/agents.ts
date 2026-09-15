@@ -49,6 +49,10 @@ export const useAgentsStore = defineStore('agents', () => {
   async function init() {
     try {
       agents.value = await api.getAgents()
+      // 内置 chat 可能被后端整体隐藏；当前 id 不在列表时回落到第一个 agent
+      if (agents.value.length && !agents.value.some(a => a.id === currentAgentId.value)) {
+        currentAgentId.value = agents.value[0].id
+      }
     } catch (e) {
       console.error('[AgentsStore] Failed to fetch:', e)
     }
@@ -71,7 +75,9 @@ export const useAgentsStore = defineStore('agents', () => {
     if (BUILTIN_IDS.has(id)) return
     await api.deleteAgent(id)
     agents.value = agents.value.filter(a => a.id !== id)
-    if (currentAgentId.value === id) currentAgentId.value = 'chat'
+    if (currentAgentId.value === id) {
+      currentAgentId.value = agents.value[0]?.id ?? 'chat'
+    }
   }
 
   async function selectAgent(id: string) {
