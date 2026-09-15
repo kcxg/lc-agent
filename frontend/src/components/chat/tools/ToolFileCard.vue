@@ -323,7 +323,7 @@ function openInChangesPanel(): void {
   position: relative;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 10px 10px;
   margin: 6px 0;
   background: var(--el-fill-color-light);
   border-left: 3px solid var(--el-text-color-secondary);
@@ -350,7 +350,7 @@ function openInChangesPanel(): void {
   flex-shrink: 0;
 }
 
-.is-collapsed { padding: 6px 14px; }
+.is-collapsed { padding: 6px 10px; }
 
 .tf-badge {
   width: 22px;
@@ -502,10 +502,10 @@ function openInChangesPanel(): void {
 }
 
 .diff-linenum {
-  width: 36px;
+  width: 30px;
   flex-shrink: 0;
   text-align: right;
-  padding-right: 8px;
+  padding-right: 6px;
   color: #484f58;
   user-select: none;
 }

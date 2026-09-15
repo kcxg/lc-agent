@@ -3,12 +3,51 @@
     <div class="sidebar-header">
       <transition name="fade">
         <div v-if="!collapsed" class="sidebar-brand-wrap">
-          <span class="sidebar-brand mobile-only-brand">心有灵犀</span>
-          <span class="sidebar-brand desktop-only-brand">Chats</span>
+          <div v-if="isProjectMode" class="view-switch" role="tablist" aria-label="侧栏视图切换">
+            <button
+              type="button"
+              role="tab"
+              class="view-switch-btn"
+              :class="{ active: sidebarView === 'chats' }"
+              :aria-selected="sidebarView === 'chats'"
+              @click="sidebarView = 'chats'"
+            >
+              <svg class="view-switch-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2H7.5L4.5 13.5V11h0a2 2 0 0 1-2-2z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span>Chats</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="view-switch-btn"
+              :class="{ active: sidebarView === 'files' }"
+              :aria-selected="sidebarView === 'files'"
+              @click="sidebarView = 'files'"
+            >
+              <svg class="view-switch-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M1.8 4.2c0-.5.4-.9.9-.9h3.1l1.3 1.5h6.2c.5 0 .9.4.9.9v6.1c0 .5-.4.9-.9.9H2.7a.9.9 0 0 1-.9-.9z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span>文件</span>
+            </button>
+          </div>
+          <span v-else class="sidebar-brand">Chats</span>
         </div>
       </transition>
       <div v-if="!collapsed" class="header-actions">
-        <button class="action-btn" @click="toggleAllGroups" :title="allCollapsed ? '全部展开' : '全部折叠'">
+        <button v-if="sidebarView === 'chats'" class="action-btn" @click="toggleAllGroups" :title="allCollapsed ? '全部展开' : '全部折叠'">
           <span v-if="allCollapsed">⊞</span>
           <span v-else>⊟</span>
         </button>
@@ -21,7 +60,11 @@
       </button>
     </div>
 
-    <div v-if="!collapsed" ref="sessionListRef" class="session-list">
+    <div v-if="!collapsed && sidebarView === 'files'" class="sidebar-files">
+      <FileTreePanel />
+    </div>
+
+    <div v-else-if="!collapsed" ref="sessionListRef" class="session-list">
       <div class="sidebar-search">
         <input
           v-model="searchQuery"
@@ -46,15 +89,17 @@
             <span class="agent-group-arrow" :class="{ collapsed: collapsedGroups.has(group.agentName) }">▶</span>
             <span class="agent-group-icon">{{ group.agentIcon }}</span>
             <span class="agent-group-name">{{ group.agentName }}</span>
-            <span class="agent-card-count">{{ group.badgeText }}</span>
-            <button
-              type="button"
-              class="agent-new-chat-btn"
-              title="新建会话"
-              @click.stop="emit('newChatForAgent', group.agentId)"
-            >
-              +
-            </button>
+            <span class="agent-section-actions">
+              <span class="agent-card-count">{{ group.badgeText }}</span>
+              <button
+                type="button"
+                class="agent-new-chat-btn"
+                title="新建会话"
+                @click.stop="emit('newChatForAgent', group.agentId)"
+              >
+                +
+              </button>
+            </span>
           </button>
 
           <div v-if="!collapsedGroups.has(group.agentName)" class="session-children">
@@ -62,15 +107,17 @@
               v-for="session in group.visibleSessions"
               :key="session.id"
               class="session-item"
-              :class="{ 'is-active': session.id === sessionsStore.currentSessionId }"
+              :class="{
+                'is-active': session.id === sessionsStore.currentSessionId,
+                'is-menu-open': openMenuSessionId === session.id,
+              }"
               :data-session-id="session.id"
               @click="handleSessionSelect(session.id)"
             >
-              <span class="session-rail" aria-hidden="true"></span>
               <span v-if="session.is_pinned" class="session-pin-indicator">📌</span>
               <span
                 v-if="chatStore.isSessionStreaming(session.id)"
-                class="session-streaming-dot"
+                class="session-streaming-spinner"
                 title="正在生成中"
               />
               <span
@@ -148,6 +195,7 @@ import { useAgentsStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
+import FileTreePanel from '@/components/panels/FileTreePanel.vue'
 
 const props = defineProps<{ collapsed: boolean; panelWidth?: number }>()
 
@@ -159,6 +207,7 @@ const emit = defineEmits<{
   newChat: []
   newChatForAgent: [agentId: string]
   switchSession: [id: string]
+  closeSessionTab: [id: string]
   toggleCollapse: []
   openSettings: []
   changePassword: []
@@ -167,6 +216,15 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+
+// 侧栏视图：会话列表 / 项目文件树
+const sidebarView = ref<'chats' | 'files'>('chats')
+const isProjectMode = computed(() => agentsStore.currentAgent?.project_mode ?? false)
+
+// 切到非项目模式 agent 时文件视图没有意义，自动回到会话列表
+watch(isProjectMode, (projectMode) => {
+  if (!projectMode && sidebarView.value === 'files') sidebarView.value = 'chats'
+})
 
 function handleSettingsCommand(command: string) {
   if (command === 'change-password') {
@@ -436,6 +494,8 @@ async function handleDelete(id: string) {
 
   if (!confirmed) return
   await sessionsStore.deleteSession(id)
+  // 会话已删：若它正是主区打开的标签，交由 App 切到相邻标签或回首页
+  emit('closeSessionTab', id)
 }
 
 async function handleTogglePinned(session: Session) {
@@ -507,6 +567,8 @@ onBeforeUnmount(() => {
 .sidebar-brand-wrap {
   display: flex;
   align-items: center;
+  flex: 1;
+  min-width: 0;
 }
 
 .sidebar-brand {
@@ -514,6 +576,94 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: var(--el-text-color-primary);
   letter-spacing: 0.3px;
+}
+
+/* Chats / 文件 视图切换：与右侧面板 tab 同一套渐变胶囊设计语言 */
+.view-switch {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--el-fill-color) 90%, var(--el-bg-color) 10%);
+}
+
+.view-switch-btn {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.view-switch-btn:hover:not(.active) {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+  transform: translateY(-1px);
+}
+
+/* 视图切换区域色相：天蓝，与面板 tab 紫色、文件标签翠绿区分 */
+.view-switch-btn.active {
+  background: linear-gradient(135deg, #0ea5e9, #06b6d4);
+  color: #fff;
+  border-color: rgba(14, 165, 233, 0.6);
+  box-shadow: 0 2px 10px rgba(14, 165, 233, 0.35);
+}
+
+.view-switch-icon {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+}
+
+.sidebar-files {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 8px 12px;
+}
+
+/* 嵌入侧栏的文件树：去掉卡片外壳，与 Chats 视图的搜索框风格对齐 */
+.sidebar-files :deep(.file-tree-panel .panel-section) {
+  margin-bottom: 10px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.sidebar-files :deep(.file-tree-panel .tree-toolbar-row) {
+  padding: 0 2px;
+  margin-bottom: 2px;
+}
+
+.sidebar-files :deep(.file-tree-panel .tree-search-input) {
+  height: 34px;
+  border-radius: 8px;
+}
+
+.sidebar-files :deep(.file-tree-panel .tree-search-input:focus) {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
+}
+
+.sidebar-files :deep(.file-tree-panel .tree-scroll) {
+  padding: 0;
 }
 
 .mobile-only-brand {
@@ -564,7 +714,7 @@ onBeforeUnmount(() => {
 .session-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 8px 12px;
+  padding: 8px 6px 12px;
 }
 
 .sidebar-search {
@@ -619,8 +769,8 @@ onBeforeUnmount(() => {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
+  gap: 5px;
+  padding: 8px 10px;
   border: none;
   border-radius: 8px 8px 0 0;
   background: transparent;
@@ -662,7 +812,7 @@ onBeforeUnmount(() => {
 }
 
 .agent-group-name {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--el-text-color-primary);
   flex: 1;
@@ -676,14 +826,28 @@ onBeforeUnmount(() => {
 .agent-card-count {
   font-size: 10px;
   font-weight: 600;
+  line-height: 15px;
   color: var(--sidebar-agent-card-count-color);
   background: var(--sidebar-agent-card-count-bg);
-  padding: 1px 6px;
+  padding: 0 5px;
   border-radius: 8px;
   flex-shrink: 0;
 }
 
+/* 数量徽标与「+」紧贴在一起，避免名字被右侧动作区挤掉 */
+.agent-section-actions {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* 「+」只在悬停时出现，因此不该常驻占位：绝对定位贴到数量徽标左侧 */
 .agent-new-chat-btn {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 3px);
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -698,13 +862,21 @@ onBeforeUnmount(() => {
   line-height: 1;
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.13s ease, background 0.13s ease, color 0.13s ease;
-  flex-shrink: 0;
 }
 
 .agent-section-header:hover .agent-new-chat-btn,
-.agent-new-chat-btn:hover {
+.agent-section-header:focus-within .agent-new-chat-btn {
   opacity: 1;
+  pointer-events: auto;
+}
+
+/* 「+」浮在名字末尾，把滑到它下方的文字渐隐，避免压字 */
+.agent-section-header:hover .agent-group-name,
+.agent-section-header:focus-within .agent-group-name {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
 }
 
 .agent-new-chat-btn:hover {
@@ -716,26 +888,46 @@ onBeforeUnmount(() => {
   color: var(--el-color-primary);
 }
 
+/* 触摸屏没有 hover：「+」回到文档流常驻，否则新建会话点不出来 */
+@media (hover: none) {
+  .agent-section-actions {
+    gap: 4px;
+  }
+
+  .agent-new-chat-btn {
+    position: static;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .agent-section-header .agent-group-name {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
 .session-children {
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding-top: 2px;
-  padding-right: 8px;
+  padding-right: 6px;
   padding-bottom: 10px;
-  padding-left: 22px;
+  padding-left: 12px;
 }
 
 .session-item {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 7px 8px;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 6px 6px 8px;
   border-radius: 8px;
   cursor: pointer;
   color: var(--el-text-color-regular);
+  font-size: 12px;
 }
 
 .session-item:hover {
@@ -760,36 +952,47 @@ onBeforeUnmount(() => {
   background: var(--el-color-primary);
 }
 
-.session-rail {
-  width: 8px;
-  height: 1px;
-  background: color-mix(in srgb, var(--el-border-color) 78%, transparent);
-  flex-shrink: 0;
-}
-
 .session-pin-indicator {
   flex-shrink: 0;
   font-size: 12px;
 }
 
-.session-streaming-dot {
+/* 运行中指示器：带彗尾的旋转弧，比原来的小圆点更醒目 */
+.session-streaming-spinner {
   position: relative;
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--el-color-primary, #409eff);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--el-color-primary) 75%, transparent);
   flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  /* 外发光放在父层：弧线那层会被 mask 裁掉发光，不能放一起 */
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--el-color-primary) 38%, transparent) 0%,
+    transparent 70%
+  );
 }
 
-.session-streaming-dot::after {
+.session-streaming-spinner::after {
   position: absolute;
-  inset: -5px;
-  border: 1px solid var(--el-color-primary);
+  inset: 0;
   border-radius: 50%;
+  /* 缺口留在右上方，旋转起来像高速甩动的彗尾 */
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    color-mix(in srgb, var(--el-color-primary) 40%, transparent) 110deg,
+    var(--el-color-primary) 300deg,
+    var(--el-color-primary) 360deg
+  );
+  /* 挖空中心，只留约 2.5px 宽的弧线 */
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2.5px));
   content: '';
-  animation: streaming-status-ring 1.25s ease-out infinite;
+  animation: streaming-spinner-rotate 0.6s linear infinite;
+}
+
+@keyframes streaming-spinner-rotate {
+  to { transform: rotate(360deg); }
 }
 
 .session-completed-badge {
@@ -820,7 +1023,7 @@ onBeforeUnmount(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-streaming-dot::after,
+  .session-streaming-spinner::after,
   .session-completed-badge {
     animation: none;
   }
@@ -829,14 +1032,51 @@ onBeforeUnmount(() => {
 .session-item-title {
   flex: 1;
   min-width: 0;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .session-item-meta {
-  position: relative;
-  flex-shrink: 0;
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.13s ease;
+}
+
+.session-item:hover .session-item-meta,
+.session-item.is-menu-open .session-item-meta,
+.session-item:focus-within .session-item-meta {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 按钮浮在行尾，把滑到它下方的标题文字渐隐，避免压字 */
+.session-item:hover .session-item-title,
+.session-item.is-menu-open .session-item-title,
+.session-item:focus-within .session-item-title {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
+}
+
+/* 触摸屏没有 hover，按钮需常驻，否则会话操作无法触发 */
+@media (hover: none) {
+  .session-item-meta {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .session-item-title {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
+  }
 }
 
 .session-action-btn {

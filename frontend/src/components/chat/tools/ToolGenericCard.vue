@@ -343,7 +343,7 @@ const renderedPreview = computed(() =>
 .tool-generic-card {
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 10px 10px;
   margin: 6px 0;
   background: var(--el-fill-color-light);
   border-left: 3px solid var(--el-text-color-secondary);
@@ -363,7 +363,7 @@ const renderedPreview = computed(() =>
   user-select: none;
 }
 
-.is-collapsed { padding: 6px 14px; }
+.is-collapsed { padding: 6px 10px; }
 
 .collapse-icon {
   font-size: 10px;

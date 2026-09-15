@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { api } from '@/api/http'
 
 export interface FileChangeItem {
@@ -25,35 +25,91 @@ export interface RoundGroup {
   sub_sessions: SubSessionChanges[]
 }
 
+/** 单个会话的文件变更数据 */
+interface SessionChangesState {
+  files: FileChangeItem[]
+  subSessions: SubSessionChanges[]
+  rounds: RoundGroup[]
+  selectedRound: number | null
+  gitBaseHash: string | null
+  gitAvailable: boolean
+  loaded: boolean
+}
+
+function createSessionChangesState(): SessionChangesState {
+  return {
+    files: [],
+    subSessions: [],
+    rounds: [],
+    selectedRound: null,
+    gitBaseHash: null,
+    gitAvailable: false,
+    loaded: false,
+  }
+}
+
 function countLines(text?: string | null): number {
   return text ? text.split('\n').length : 0
 }
 
 export const useFileChangesStore = defineStore('fileChanges', () => {
-  const files = ref<FileChangeItem[]>([])
-  const subSessions = ref<SubSessionChanges[]>([])
-  const rounds = ref<RoundGroup[]>([])
-  const selectedRound = ref<number | null>(null) // null = 全部轮次
-  const gitBaseHash = ref<string | null>(null)
-  const gitAvailable = ref(false)
-  const loadedSessionId = ref<string | null>(null)
+  // 按 sessionId 分桶：切标签时保留各会话的变更数据与轮次选择，切回不重拉
+  const bySession = reactive(new Map<string, SessionChangesState>())
+  const activeSessionId = ref<string | null>(null)
   // 待定位展开的文件：卡片点击后由变更面板消费（展开 diff 并滚动定位）
   const pendingOpenFile = ref<string | null>(null)
 
+  function _bucket(sessionId: string): SessionChangesState {
+    let state = bySession.get(sessionId)
+    if (!state) {
+      state = createSessionChangesState()
+      bySession.set(sessionId, state)
+    }
+    return state
+  }
+
+  const _active = computed<SessionChangesState | null>(() =>
+    activeSessionId.value ? (bySession.get(activeSessionId.value) ?? null) : null,
+  )
+
+  const files = computed(() => _active.value?.files ?? [])
+  const subSessions = computed(() => _active.value?.subSessions ?? [])
+  const rounds = computed(() => _active.value?.rounds ?? [])
+  const gitBaseHash = computed(() => _active.value?.gitBaseHash ?? null)
+  const gitAvailable = computed(() => _active.value?.gitAvailable ?? false)
+  const loadedSessionId = computed(() => (_active.value?.loaded ? activeSessionId.value : null))
+
+  const selectedRound = computed({
+    get: () => _active.value?.selectedRound ?? null,
+    set: (value: number | null) => {
+      if (_active.value) _active.value.selectedRound = value
+    },
+  })
+
   const displayFiles = computed(() => {
-    if (selectedRound.value == null) return files.value
-    return rounds.value.find(r => r.round_number === selectedRound.value)?.files || []
+    const state = _active.value
+    if (!state) return []
+    if (state.selectedRound == null) return state.files
+    return state.rounds.find(r => r.round_number === state.selectedRound)?.files || []
   })
   const displaySubSessions = computed(() => {
-    if (selectedRound.value == null) return subSessions.value
-    return rounds.value.find(r => r.round_number === selectedRound.value)?.sub_sessions || []
+    const state = _active.value
+    if (!state) return []
+    if (state.selectedRound == null) return state.subSessions
+    return state.rounds.find(r => r.round_number === state.selectedRound)?.sub_sessions || []
   })
 
   const fileCount = computed(() => {
-    const subFileCount = subSessions.value.reduce((sum, s) => sum + s.file_count, 0)
-    return files.value.length + subFileCount
+    const state = _active.value
+    if (!state) return 0
+    const subFileCount = state.subSessions.reduce((sum, s) => sum + s.file_count, 0)
+    return state.files.length + subFileCount
   })
-  const hasChanges = computed(() => files.value.length > 0 || subSessions.value.length > 0)
+  const hasChanges = computed(() => {
+    const state = _active.value
+    if (!state) return false
+    return state.files.length > 0 || state.subSessions.length > 0
+  })
 
   function mergeIntoFileList(list: FileChangeItem[], change: {
     file_path: string
@@ -93,6 +149,7 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     }
   }
 
+  /** 实时 SSE 事件：写入事件所属会话的桶（不一定是当前激活会话） */
   function addFileChange(change: {
     file_path: string
     change_type: string
@@ -100,45 +157,73 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     round_number?: number | null
     old_string?: string | null
     new_string?: string | null
-  }) {
-    mergeIntoFileList(files.value, change)
+  }, sessionId?: string) {
+    const targetId = sessionId || activeSessionId.value
+    if (!targetId) return
+    const state = _bucket(targetId)
+    mergeIntoFileList(state.files, change)
     if (change.round_number != null) {
-      let round = rounds.value.find(r => r.round_number === change.round_number)
+      let round = state.rounds.find(r => r.round_number === change.round_number)
       if (!round) {
         round = { round_number: change.round_number, files: [], sub_sessions: [] }
-        rounds.value.push(round)
-        rounds.value.sort((a, b) => a.round_number - b.round_number)
+        state.rounds.push(round)
+        state.rounds.sort((a, b) => a.round_number - b.round_number)
       }
       mergeIntoFileList(round.files, change)
     }
   }
 
+  /** 切换激活会话：命中缓存则直接复用，不再请求 */
+  function switchToSession(sessionId: string): void {
+    activeSessionId.value = sessionId
+    const state = bySession.get(sessionId)
+    if (!state?.loaded) void fetchFileChanges(sessionId)
+  }
+
   async function fetchFileChanges(sessionId: string) {
     try {
       const data = await api.getFileChanges(sessionId)
-      files.value = data.files || []
-      subSessions.value = (data as any).sub_sessions || []
-      rounds.value = ((data as any).rounds || []).map((r: any) => ({
+      const state = _bucket(sessionId)
+      state.files = data.files || []
+      state.subSessions = (data as any).sub_sessions || []
+      state.rounds = ((data as any).rounds || []).map((r: any) => ({
         round_number: r.round_number,
         files: r.files || [],
         sub_sessions: r.sub_sessions || [],
       }))
-      selectedRound.value = null
-      gitBaseHash.value = data.git_base_hash || null
-      gitAvailable.value = Boolean((data as any).git_available)
-      loadedSessionId.value = sessionId
+      state.selectedRound = null
+      state.gitBaseHash = data.git_base_hash || null
+      state.gitAvailable = Boolean((data as any).git_available)
+      state.loaded = true
     } catch {
       // Silently fail — may be old session without file changes
     }
   }
 
+  /** 关闭标签时丢弃该会话的变更缓存 */
+  function dropSession(sessionId: string): void {
+    bySession.delete(sessionId)
+    if (activeSessionId.value === sessionId) activeSessionId.value = null
+  }
+
+  /** SSE 快照事件写入指定会话的基准哈希 */
+  function setGitBaseHash(sessionId: string, hash: string): void {
+    _bucket(sessionId).gitBaseHash = hash
+  }
+
+  /** 会话 id 改写（本地 id → 真实 id）时搬迁缓存 */
+  function renameSession(oldId: string, newId: string): void {
+    if (oldId === newId) return
+    const state = bySession.get(oldId)
+    if (state) {
+      bySession.set(newId, state)
+      bySession.delete(oldId)
+    }
+    if (activeSessionId.value === oldId) activeSessionId.value = newId
+  }
+
   function reset() {
-    files.value = []
-    subSessions.value = []
-    rounds.value = []
-    selectedRound.value = null
-    gitBaseHash.value = null
-    loadedSessionId.value = null
+    activeSessionId.value = null
     pendingOpenFile.value = null
   }
 
@@ -156,7 +241,11 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     fileCount,
     hasChanges,
     addFileChange,
+    switchToSession,
     fetchFileChanges,
+    setGitBaseHash,
+    dropSession,
+    renameSession,
     reset,
   }
 })

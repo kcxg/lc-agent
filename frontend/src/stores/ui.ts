@@ -3,9 +3,9 @@ import { ref, watch } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
 import { useFileChangesStore } from '@/stores/file-changes'
 
-export type RightPanelTab = 'model' | 'abilities' | 'changes' | 'files' | 'tasks'
+export type RightPanelTab = 'model' | 'abilities' | 'changes' | 'editor' | 'tasks'
 
-export const RIGHT_PANEL_TABS: RightPanelTab[] = ['model', 'abilities', 'changes', 'files', 'tasks']
+export const RIGHT_PANEL_TABS: RightPanelTab[] = ['model', 'abilities', 'changes', 'editor', 'tasks']
 
 const ACTIVE_TAB_KEY = 'lc-agent:right-panel:activeTab'
 

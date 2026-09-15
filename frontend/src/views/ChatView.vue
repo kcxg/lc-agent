@@ -286,16 +286,6 @@
       @close="codeModalVisible = false"
     />
 
-    <CodeBlockModal
-      :visible="filePreviewVisible"
-      :code="filePreviewContent"
-      language="markdown"
-      :title="filePreviewPath"
-      kicker="文件预览"
-      render-as-markdown
-      @close="filePreviewVisible = false"
-    />
-
     <el-image-viewer
       v-if="imageViewerVisible"
       :url-list="[imageViewerUrl]"
@@ -318,9 +308,11 @@ import { BubbleList, Thinking, Welcome } from 'vue-element-plus-x'
 import type { BubbleListItemProps } from 'vue-element-plus-x/types/BubbleList'
 import { Cpu, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
+import { useChatUiStateStore } from '@/stores/chat-ui-state'
+import { useSessionTabsStore } from '@/stores/session-tabs'
+import { useOpenedFilesStore } from '@/stores/opened-files'
 import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
 import type { ContentBlock, Attachment } from '@/utils/fileUpload'
 import { useAgentsStore } from '@/stores/agents'
@@ -401,8 +393,11 @@ type ChatBubbleItem = MessageBubbleItem | LoadOlderBubbleItem | TimeSeparatorIte
 
 const chatStore = useChatStore()
 const sessionsStore = useSessionsStore()
+const chatUiState = useChatUiStateStore()
+const sessionTabsStore = useSessionTabsStore()
 const agentsStore = useAgentsStore()
 const toolsStore = useToolsStore()
+const openedFilesStore = useOpenedFilesStore()
 const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder, isHistoryLoading } = storeToRefs(chatStore)
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
@@ -412,9 +407,6 @@ const showLoadOlderMessages = ref(false)
 const codeModalVisible = ref(false)
 const codeModalSource = ref('')
 const codeModalLanguage = ref('')
-const filePreviewVisible = ref(false)
-const filePreviewContent = ref('')
-const filePreviewPath = ref('')
 const imageViewerVisible = ref(false)
 const imageViewerUrl = ref('')
 
@@ -1025,10 +1017,16 @@ watch(errorMessage, (newError) => {
   }
 })
 
+// 子会话导航栈按标签隔离后，切换标签也会改变栈长度，因此这里只响应「用户显式
+// 钻入/钻出」（navStackRevision 自增），不响应栈长度变化，否则切标签会误触发重载。
+const lastNavStackDepth = ref(0)
 watch(
-  () => sessionsStore.sessionNavStack.length,
-  async (newLen, oldLen) => {
-    if (newLen === 0 && oldLen === 0) return
+  () => sessionTabsStore.navStackRevision,
+  async () => {
+    const newLen = sessionsStore.sessionNavStack.length
+    const oldLen = lastNavStackDepth.value
+    lastNavStackDepth.value = newLen
+    if (newLen === oldLen) return
     const newId = sessionsStore.effectiveThreadId
     if (!newId) return
 
@@ -1072,9 +1070,27 @@ watch(isStreaming, async (newVal, oldVal) => {
   }
 })
 
-watch(() => messages.value[messages.value.length - 1]?.id, () => {
+watch(() => messages.value[messages.value.length - 1]?.id, (newId, oldId) => {
+  if (!newId) return
+  // 切换会话时整份消息数组被替换：旧末尾消息已不存在，此时不能滚到底，
+  // 否则切回标签总是从头看到底。滚动位置由 switchCompletionRevision 恢复。
+  if (oldId && !messages.value.some(m => m.id === oldId)) return
   scrollMessagesToBottom()
 }, { flush: 'post' })
+
+// 会话切换完成（消息已加载）后：恢复该标签的视图状态。
+// 用显式完成信号而非 currentSessionId，避免在消息还没加载完时就去设置滚动位置。
+watch(() => sessionTabsStore.switchCompletionRevision, async () => {
+  const sessionId = sessionsStore.currentSessionId
+  if (!sessionId) return
+  if (sessionsStore.sessionNavStack.length > 0) {
+    // 该标签此前钻进了子会话：恢复子会话内容
+    subLiveToolCallId.value = null
+    await chatStore.loadMessages(sessionsStore.effectiveThreadId || sessionId)
+    return
+  }
+  await restoreScrollPosition(sessionId)
+})
 
 function handleAllowPermanently(toolName: string) {
   chatStore.respondToInterrupt(true, agentsStore.currentAgentId, toolName, toolsStore.llmParams)
@@ -1141,8 +1157,23 @@ function handleMessagesScroll() {
     showLoadOlderMessages.value = false
     return
   }
+  // 记下当前会话的滚动位置，切走再切回时恢复，而不是从头滚到底
+  const sessionId = sessionsStore.currentSessionId
+  if (sessionId && !sessionsStore.sessionNavStack.length) {
+    chatUiState.rememberScrollTop(sessionId, scroller.scrollTop)
+  }
   const canRevealLoadOlderMessages = scroller.scrollHeight > scroller.clientHeight + LOAD_OLDER_REVEAL_THRESHOLD
   showLoadOlderMessages.value = canRevealLoadOlderMessages && scroller.scrollTop <= LOAD_OLDER_REVEAL_THRESHOLD
+}
+
+/** 切回标签时恢复该会话上次的滚动位置；没有记录则滚到底 */
+async function restoreScrollPosition(sessionId: string) {
+  await nextTick()
+  const scroller = getMessagesScroller()
+  if (!scroller) return
+  const saved = chatUiState.getScrollTop(sessionId)
+  scroller.scrollTop = saved ?? scroller.scrollHeight
+  handleMessagesScroll()
 }
 
 async function scrollMessagesToBottom() {
@@ -1202,24 +1233,6 @@ function handleMarkdownClick(event: MouseEvent) {
   })
 }
 
-function resolveProjectFilePath(relativePath: string): string | null {
-  const projectRoot = agentsStore.currentAgent?.project_mode
-    ? agentsStore.currentAgent.project_root?.trim()
-    : undefined
-  const normalizedPath = relativePath.replace(/\//g, '\\')
-
-  if (
-    !projectRoot
-    || !normalizedPath
-    || /^(?:[a-z]:)?\\/i.test(normalizedPath)
-    || normalizedPath.split('\\').some(part => part === '..')
-  ) {
-    return null
-  }
-
-  return `${projectRoot.replace(/[\\/]+$/, '')}\\${normalizedPath}`
-}
-
 function decodeProjectFilePath(relativePath: string): string {
   try {
     return decodeURIComponent(relativePath)
@@ -1228,32 +1241,10 @@ function decodeProjectFilePath(relativePath: string): string {
   }
 }
 
-async function openProjectMarkdownFile(relativePath: string) {
+function openProjectMarkdownFile(relativePath: string) {
   const decodedPath = decodeProjectFilePath(relativePath)
-  const filePath = resolveProjectFilePath(decodedPath)
-  if (!filePath) {
-    ElMessage.warning('当前 Agent 未配置项目目录，无法预览此文件')
-    return
-  }
-
-  try {
-    const data = await fetchApi<{ lines: string[]; truncated?: boolean; error?: string }>(
-      `/tools/file/read?path=${encodeURIComponent(filePath)}&max_lines=2000&agent_id=${encodeURIComponent(agentsStore.currentAgentId)}`,
-    )
-    if (data.error) {
-      ElMessage.error(`无法读取 ${decodedPath}: ${data.error}`)
-      return
-    }
-
-    filePreviewPath.value = decodedPath
-    filePreviewContent.value = data.lines.join('\n')
-    if (data.truncated) {
-      filePreviewContent.value += '\n\n> 文件过大，仅显示前 2000 行。'
-    }
-    filePreviewVisible.value = true
-  } catch (error) {
-    ElMessage.error(`无法读取 ${decodedPath}: ${String(error)}`)
-  }
+  if (!decodedPath) return
+  openedFilesStore.open(decodedPath)
 }
 
 function applyAlwaysScrollbar() {
@@ -1300,17 +1291,34 @@ onMounted(() => {
   nextTick(() => {
     applyAlwaysScrollbar()
     updateThinkingOverflowFlags()
+    // 滚动容器是 BubbleList 内部元素，挂原生监听以记录每会话滚动位置
+    bindScrollerListener()
+    const sessionId = sessionsStore.currentSessionId
+    if (sessionId) void restoreScrollPosition(sessionId)
   })
 })
+
+/** 绑定滚动监听；BubbleList 内部元素会随消息渲染而创建/重建，故需幂等重绑 */
+let boundScrollerEl: HTMLElement | null = null
+function bindScrollerListener() {
+  const scroller = getMessagesScroller()
+  if (!scroller || scroller === boundScrollerEl) return
+  boundScrollerEl?.removeEventListener('scroll', handleMessagesScroll)
+  scroller.addEventListener('scroll', handleMessagesScroll, { passive: true })
+  boundScrollerEl = scroller
+}
 
 watch([messages, bubbleList], async () => {
   await nextTick()
   applyAlwaysScrollbar()
   updateThinkingOverflowFlags()
+  bindScrollerListener()
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleMarkdownClick)
+  boundScrollerEl?.removeEventListener('scroll', handleMessagesScroll)
+  boundScrollerEl = null
 })
 </script>
 
@@ -1398,10 +1406,19 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 16px;
+  /* 默认给对称 padding；支持 scrollbar-gutter 时改由滚动容器两侧预留槽位（见下方 @supports） */
+  padding: 10px 8px;
   background: var(--el-bg-color-page);
   min-width: 0;
   min-height: 0;
+}
+
+/* 支持 scrollbar-gutter 时，左右留白交给滚动容器的 both-edges 槽位，
+   这样无论滚动条多宽、是否出现，两侧都恒定等宽，不会右宽左窄 */
+@supports (scrollbar-gutter: stable) {
+  .messages-container {
+    padding: 10px 0;
+  }
 }
 
 .messages-container :deep(.elx-bubble-list) {
@@ -1413,6 +1430,9 @@ onBeforeUnmount(() => {
 .messages-container :deep(.elx-bubble-list__list) {
   height: 100%;
   overflow-y: auto;
+  /* both-edges：两侧各预留一个滚动条宽度，左右留白因此恒定且对称；
+     stable：会话短、无滚动条时也保留槽位，避免留白忽有忽无 */
+  scrollbar-gutter: stable both-edges;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
   pointer-events: auto !important;
@@ -1500,7 +1520,7 @@ onBeforeUnmount(() => {
   flex: 0 1 auto;
   width: fit-content;
   max-width: min(88%, 760px) !important;
-  padding: 10px 14px;
+  padding: 10px 4px;
   border-radius: 16px 16px 6px 16px;
   background: var(--el-bg-color-overlay);
   color: var(--el-text-color-primary);
@@ -1516,6 +1536,9 @@ onBeforeUnmount(() => {
 .messages-container :deep(.elx-bubble__content) {
   max-width: none !important;
   min-width: 0;
+  /* 库默认 padding 为 12px 16px，左右收到 5px 与外层 4px 叠加共 9px */
+  padding-left: 5px !important;
+  padding-right: 5px !important;
 }
 
 .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper),
@@ -1526,7 +1549,7 @@ onBeforeUnmount(() => {
 
 .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper) {
   position: relative;
-  padding: 10px 16px;
+  padding: 10px 4px;
   border-radius: 6px 16px 16px 16px;
   background: var(--el-bg-color-overlay);
   border: none;
@@ -1949,7 +1972,7 @@ onBeforeUnmount(() => {
   width: 100%;
   align-items: center;
   gap: 7px;
-  padding: 8px 11px;
+  padding: 8px 10px;
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -1981,7 +2004,7 @@ onBeforeUnmount(() => {
 }
 
 .thinking-body {
-  padding: 0 12px 10px;
+  padding: 0 10px 10px;
   color: #c58f22;
   font-size: 13px;
   opacity: 0.92;
@@ -2199,6 +2222,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 960px) {
   .messages-container {
+    /* 窄屏多为触摸设备，滚动条是浮层式、不占宽，gutter 预留不到空间，故显式给对称 padding */
     padding: 6px 10px;
     overscroll-behavior-y: contain;
   }
@@ -2226,16 +2250,6 @@ onBeforeUnmount(() => {
   .messages-container :deep(.elx-bubble--end .elx-bubble__content) {
     width: auto;
     max-width: 100% !important;
-  }
-
-  .messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper) {
-    padding-left: 14px;
-    padding-right: 12px;
-  }
-
-  .messages-container :deep(.elx-bubble--end .elx-bubble__content-wrapper) {
-    padding-left: 12px;
-    padding-right: 14px;
   }
 
   .messages-container :deep(.elx-bubble--start .elx-bubble__content),

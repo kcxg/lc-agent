@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/api/http'
 import { useAgentsStore } from '@/stores/agents'
+import { useSessionTabsStore } from '@/stores/session-tabs'
+import { useChatUiStateStore } from '@/stores/chat-ui-state'
 import { createClientId } from '@/utils/client-id'
 
 export interface Session {
@@ -28,7 +30,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     sessions.value.find(s => s.id === currentSessionId.value)
   )
 
-  const sessionNavStack = ref<Array<{ session_id: string; label: string }>>([])
+  // 子会话导航栈按标签隔离：每个已打开标签各存一份，切标签时各自保留钻取深度
+  const sessionNavStack = computed<Array<{ session_id: string; label: string }>>(
+    () => useSessionTabsStore().activeNavStack,
+  )
 
   const effectiveThreadId = computed(() => {
     const stack = sessionNavStack.value
@@ -36,17 +41,27 @@ export const useSessionsStore = defineStore('sessions', () => {
   })
 
   function pushSubSession(sub_session_id: string, label: string) {
-    const last = sessionNavStack.value[sessionNavStack.value.length - 1]
+    const tabsStore = useSessionTabsStore()
+    const stack = tabsStore.activeNavStack
+    const last = stack[stack.length - 1]
     if (last?.session_id === sub_session_id) return  // prevent duplicate push on repeated clicks
-    sessionNavStack.value.push({ session_id: sub_session_id, label })
+    tabsStore.setActiveNavStack([...stack, { session_id: sub_session_id, label }])
+    tabsStore.bumpNavRevision()
   }
 
   function popSubSession() {
-    sessionNavStack.value.pop()
+    const tabsStore = useSessionTabsStore()
+    const stack = tabsStore.activeNavStack
+    if (stack.length === 0) return
+    tabsStore.setActiveNavStack(stack.slice(0, -1))
+    tabsStore.bumpNavRevision()
   }
 
   function popToRoot() {
-    sessionNavStack.value = []
+    const tabsStore = useSessionTabsStore()
+    if (tabsStore.activeNavStack.length === 0) return
+    tabsStore.setActiveNavStack([])
+    tabsStore.bumpNavRevision()
   }
 
   function isLocalSession(id: string): boolean {
@@ -147,6 +162,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (currentSessionId.value === id) {
       currentSessionId.value = newId
     }
+    // 本地 id 换成真实 id：标签、激活项、导航栈、草稿与滚动位置一起搬迁，
+    // 否则会留下指向不存在会话的幽灵标签和取不回的草稿
+    useSessionTabsStore().renameTab(id, newId)
+    useChatUiStateStore().migrateSession(id, newId)
     return newId
   }
 
@@ -173,6 +192,8 @@ export const useSessionsStore = defineStore('sessions', () => {
       localSessionIds.value.delete(id)
     }
     sessions.value = sessions.value.filter(s => s.id !== id)
+    // 会话被删，对应标签与导航栈一并清掉，避免留下指向不存在会话的标签
+    useSessionTabsStore().removeTab(id)
     if (currentSessionId.value === id) {
       currentSessionId.value = sessions.value[0]?.id || null
     }
@@ -258,7 +279,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   })
 
   function selectSession(id: string) {
-    sessionNavStack.value = []
+    // 导航栈按标签存，不再在此清空：切回一个钻取过的标签要停在原来的子会话
     currentSessionId.value = id
     markSessionViewed(id)
   }

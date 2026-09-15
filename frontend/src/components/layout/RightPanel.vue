@@ -1,4 +1,4 @@
-﻿<template>
+﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <aside
     class="right-panel"
     :class="{ collapsed }"
@@ -50,7 +50,7 @@
         </div>
       </div>
 
-      <div class="right-panel-scroll">
+      <div class="right-panel-scroll" :class="{ 'is-editor': activeTab === 'editor' }">
         <transition name="fade-up" mode="out-in">
         <div :key="activeTab" class="tab-pane">
 
@@ -414,8 +414,8 @@
             <FileChangesPanel />
           </template>
 
-          <template v-if="activeTab === 'files'">
-            <FileTreePanel v-if="agentsStore.currentAgent?.project_mode" />
+          <template v-if="activeTab === 'editor'">
+            <FileEditorPane />
           </template>
 
           <template v-if="activeTab === 'tasks'">
@@ -524,6 +524,7 @@ import DetailModal from '@/components/panels/DetailModal.vue'
 import TodoList from '@/components/panels/TodoList.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 import FileChangesPanel from '@/components/panels/FileChangesPanel.vue'
+import FileEditorPane from '@/components/panels/FileEditorPane.vue'
 
 const ansiUp = new AnsiUp()
 
@@ -549,10 +550,8 @@ const tabs = computed((): Array<{ id: RightPanelTab; label: string; icon: any; b
     { id: 'abilities', label: '能力', icon: Tools, badge: mcpErrorCount.value },
     { id: 'changes', label: '变更', icon: Files, badge: 0 },
   ]
-  // 项目模式 agent 才有项目目录可浏览
-  if (agentsStore.currentAgent?.project_mode) {
-    list.push({ id: 'files', label: '文件', icon: FolderOpened, badge: 0 })
-  }
+  // 文件查看区：打开的文件以标签展示，内容在此查看
+  list.push({ id: 'editor', label: '文件', icon: FolderOpened, badge: 0 })
   list.push({ id: 'tasks', label: '任务', icon: Clock, badge: runningProcessCount.value })
   return list
 })
@@ -636,15 +635,6 @@ async function fetchProcesses() {
 watch(activeTab, (tab) => {
   if (tab === 'tasks') void fetchProcesses()
 })
-
-// 非项目模式 agent 没有文件 tab，避免记忆的 files tab 残留成空白页
-watch(
-  () => [uiStore.activeTab, agentsStore.currentAgent?.project_mode] as const,
-  ([tab, projectMode]) => {
-    if (tab === 'files' && !projectMode) uiStore.setActiveTab('model')
-  },
-  { immediate: true },
-)
 
 async function killTrackedProcess(pid: number) {
   killingPids.value = { ...killingPids.value, [pid]: true }
@@ -840,11 +830,12 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   transform: translateY(-1px);
 }
 
+/* 面板 tab 区域色相：紫，与会话标签靛蓝、文件标签翠绿区分 */
 .panel-tab.active {
-  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-info));
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
   color: #fff;
-  border-color: color-mix(in srgb, var(--el-color-primary) 60%, transparent);
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--el-color-primary) 34%, transparent);
+  border-color: rgba(124, 58, 237, 0.6);
+  box-shadow: 0 2px 10px rgba(124, 58, 237, 0.35);
 }
 
 .panel-tab-icon {
@@ -884,6 +875,20 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   flex: 1;
   overflow-y: auto;
   padding: 12px 16px 16px;
+}
+
+/* 文件编辑区自己就是滚动容器：外层必须交出滚动权并去掉内边距，
+   否则外层先滚动，编辑器内部的 overflow 拿不到高度约束，滚轮会失效 */
+.right-panel-scroll.is-editor {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.right-panel-scroll.is-editor > .tab-pane {
+  flex: 1;
+  min-height: 0;
 }
 
 .tab-pane {

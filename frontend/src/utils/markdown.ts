@@ -97,7 +97,7 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   if (projectFilePath) {
     tokens[idx].attrSet('href', '#')
     tokens[idx].attrSet('data-lc-file-path', projectFilePath)
-    tokens[idx].attrSet('title', `在应用内预览 ${projectFilePath}`)
+    tokens[idx].attrSet('title', `在文件区打开 ${projectFilePath}`)
     return defaultLinkOpen(tokens, idx, options, env, self)
   }
 

@@ -369,7 +369,7 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 14px 0;
+  padding: 10px 10px 0;
   cursor: pointer;
   user-select: none;
 }
@@ -486,7 +486,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 8px 14px 0;
+  margin: 8px 10px 0;
 }
 
 .tt-cmdline {
@@ -584,7 +584,7 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 6px 14px 10px;
+  padding: 6px 10px 10px;
 }
 
 .tt-link-btn {

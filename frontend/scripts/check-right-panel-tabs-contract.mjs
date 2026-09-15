@@ -25,7 +25,7 @@ function expectMatch(content, pattern, message) {
 }
 
 // 1. tab 按钮存在且顺序为 模型/能力/变更/(文件)/任务
-const tabOrder = ["'model'", "'abilities'", "'changes'", "'files'", "'tasks'"]
+const tabOrder = ["'model'", "'abilities'", "'changes'", "'editor'", "'tasks'"]
 let cursor = -1
 for (const id of tabOrder) {
   const at = rightPanel.indexOf(id)
@@ -36,19 +36,20 @@ for (const id of tabOrder) {
 expect(!rightPanel.includes("'appearance'"), 'RightPanel.vue 仍残留 appearance tab（外观已并入模型）')
 expect(rightPanel.includes('v-for="tab in tabs"'), 'RightPanel.vue 未按 tabs 列表渲染 tab 按钮')
 expect(
-  uiStore.includes("export type RightPanelTab = 'model' | 'abilities' | 'changes' | 'files' | 'tasks'"),
+  uiStore.includes("export type RightPanelTab = 'model' | 'abilities' | 'changes' | 'editor' | 'tasks'"),
   'ui store 缺少 RightPanelTab 联合类型',
 )
 expect(
-  uiStore.includes("export const RIGHT_PANEL_TABS: RightPanelTab[] = ['model', 'abilities', 'changes', 'files', 'tasks']"),
+  uiStore.includes("export const RIGHT_PANEL_TABS: RightPanelTab[] = ['model', 'abilities', 'changes', 'editor', 'tasks']"),
   'ui store 缺少 RIGHT_PANEL_TABS 顺序定义',
 )
-// 文件 tab 仅在项目模式 agent 下出现，且排在变更之后、任务之前
+// 文件查看区：打开的文件以标签展示，editor tab 渲染 FileEditorPane
 expect(
-  /if \(agentsStore\.currentAgent\?\.project_mode\) \{\s*list\.push\(\{ id: 'files'/.test(rightPanel),
-  'RightPanel.vue 文件 tab 未按项目模式条件插入',
+  /list\.push\(\{ id: 'editor'/.test(rightPanel),
+  'RightPanel.vue 缺少 editor tab',
 )
-expect(rightPanel.includes('<FileTreePanel'), 'RightPanel.vue 文件 tab 未渲染 FileTreePanel')
+expect(rightPanel.includes('<FileEditorPane'), 'RightPanel.vue editor tab 未渲染 FileEditorPane')
+expect(rightPanel.includes('import FileEditorPane'), 'RightPanel.vue 未导入 FileEditorPane')
 
 // 文件树：懒加载 + 递归节点 + 项目目录沙箱
 const treeNode = read('src/components/panels/FileTreeNode.vue')
@@ -209,7 +210,7 @@ expect(fileChangesPanel.includes('selectedRound'), 'FileChangesPanel.vue 缺少�
 expect(fileChangesPanel.includes("'side-by-side'"), 'FileChangesPanel.vue 缺少 side-by-side diff 模式')
 expect(!fileChangesPanel.includes('el-drawer'), 'FileChangesPanel.vue 仍残留 el-drawer 外壳')
 expect(
-  /watch\(\(\) => uiStore\.activeTab[\s\S]*fetchFileChanges/.test(fileChangesPanel),
+  /watch\(\(\) => uiStore\.activeTab[\s\S]*switchToSession/.test(fileChangesPanel),
   'FileChangesPanel.vue 未在切到变更 tab 时拉取数据',
 )
 
@@ -231,15 +232,28 @@ expect(
   /`\$\{props\.sourcePath\}#\$\{span\}`/.test(codeModal),
   'CodeBlockModal.vue 行号复制格式不是「路径#Lx-y」',
 )
-// 文件树预览传入绝对路径供复制行号使用
+// 文件树不再走预览弹层：点击文件统一打开 editor 标签
 expect(
-  /:source-path="previewSourcePath"/.test(treePanel),
-  'FileTreePanel.vue 未向预览弹层传 sourcePath',
+  !treePanel.includes('CodeBlockModal'),
+  'FileTreePanel.vue 仍残留预览弹层（应改为标签打开）',
 )
 expect(
-  /const previewSourcePath = computed\(\(\) =>/.test(treePanel),
-  'FileTreePanel.vue 未由项目根拼出绝对路径',
+  /openedFilesStore\.open\(/.test(treePanel),
+  'FileTreePanel.vue 未通过 opened-files store 打开文件标签',
 )
+// 左侧栏：Chats / 文件 视图切换，文件树嵌入侧栏
+const leftSidebar = read('src/components/layout/LeftSidebar.vue')
+expect(leftSidebar.includes('sidebarView'), 'LeftSidebar.vue 缺少视图切换状态')
+expect(leftSidebar.includes('<FileTreePanel'), 'LeftSidebar.vue 未嵌入 FileTreePanel')
+// opened-files store：标签列表 + 激活 + 内容缓存
+const openedFiles = read('src/stores/opened-files.ts')
+expect(/function open\(path: string/.test(openedFiles), 'opened-files store 缺少 open()')
+expect(/function close\(path: string/.test(openedFiles), 'opened-files store 缺少 close()')
+expect(openedFiles.includes("requestTab('editor')"), 'opened-files store 打开文件未切到 editor tab')
+// FileEditorPane：标签栏 + 关闭 + 内容查看
+const editorPane = read('src/components/panels/FileEditorPane.vue')
+expect(editorPane.includes('editor-tab'), 'FileEditorPane.vue 缺少文件标签栏')
+expect(editorPane.includes('store.close('), 'FileEditorPane.vue 标签缺少关闭按钮')
 
 // 后端 tree 端点必须真的返回 git_branch（前端拿到字段≠后端吐了字段）
 const backendTools = readFileSync(join(root, '..', 'lc_agent/server/routes/tools.py'), 'utf8')
@@ -286,7 +300,7 @@ expect(
   'FileChangesPanel.vue 仍残留旧的 gitBaseHash 门控',
 )
 expect(
-  /const gitAvailable = ref\(false\)/.test(changesStore),
+  /const gitAvailable = computed\(\(\) => _active\.value\?\.gitAvailable \?\? false\)/.test(changesStore),
   'file-changes.ts 缺少 gitAvailable 状态',
 )
 expect(

@@ -17,6 +17,8 @@ export const useProjectTreeStore = defineStore('projectTree', () => {
   // 当前 git 分支；项目不是 git 仓库时为 null
   const gitBranch = ref<string | null>(null)
   const agentId = ref<string | null>(null)
+  // 待定位的文件路径：「在树中显示」/切换标签时写入，由 FileTreeNode 递归消费
+  const revealPath = ref('')
 
   function entriesOf(path: string): ProjectTreeEntry[] {
     return children.value[path] ?? []
@@ -58,6 +60,13 @@ export const useProjectTreeStore = defineStore('projectTree', () => {
     error.value = {}
     gitBranch.value = null
     agentId.value = null
+    revealPath.value = ''
+  }
+
+  /** 请求在树中展开并滚动定位到某个文件/目录 */
+  function reveal(path: string) {
+    revealPath.value = ''
+    revealPath.value = path
   }
 
   return {
@@ -67,10 +76,12 @@ export const useProjectTreeStore = defineStore('projectTree', () => {
     projectRoot,
     gitBranch,
     agentId,
+    revealPath,
     entriesOf,
     isLoading,
     isLoaded,
     load,
     clear,
+    reveal,
   }
 })

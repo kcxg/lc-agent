@@ -383,7 +383,8 @@ watch(() => uiStore.activeTab, async (tab) => {
   if (tab !== 'changes') return
   const sessionId = sessionsStore.currentSessionId
   if (sessionId && sessionId !== store.loadedSessionId) {
-    await store.fetchFileChanges(sessionId)
+    // 分桶 store 自己判断缓存命中，这里只是兜底触发
+    store.switchToSession(sessionId)
   }
   if (store.pendingOpenFile) await handlePendingOpenFile(store.pendingOpenFile)
 }, { immediate: true })

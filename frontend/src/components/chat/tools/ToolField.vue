@@ -48,13 +48,14 @@ const offsetStyle = computed(() => (props.offset ? { marginTop: `${props.offset}
 .tool-field {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
+/* 标签都是两字（工具/入参/结果/命令/输出），26px 刚好，不必留 32px 的余量 */
 .tool-field-label {
   flex-shrink: 0;
-  width: 32px;
+  width: 26px;
   font-size: 11px;
   line-height: 18px;
   color: var(--el-text-color-secondary);
@@ -72,7 +73,7 @@ const offsetStyle = computed(() => (props.offset ? { marginTop: `${props.offset}
 .tool-field-body:not(.is-slot) {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .tool-field-value {

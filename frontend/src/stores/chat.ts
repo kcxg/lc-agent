@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, shallowReactive } from 'vue'
 import { ChatSseClient, type SseMessage } from '@/api/sse-client'
 import { useSessionsStore } from '@/stores/sessions'
+import { useSessionTabsStore } from '@/stores/session-tabs'
 import { useFileChangesStore } from '@/stores/file-changes'
 import { api } from '@/api/http'
 import { createClientId } from '@/utils/client-id'
@@ -630,6 +631,22 @@ export const useChatStore = defineStore('chat', () => {
     activeSessions.delete(sessionId)
   }
 
+  /**
+   * 后台流结束后决定要不要回收资源：只有「不在已打开标签里」的会话才回收。
+   * 标签栏里的会话必须保活，否则后台跑完就把标签内容丢了，切回又得重拉。
+   */
+  function _releaseAfterStreamEnd(sessionId: string, state: SessionState): void {
+    if (sessionId === activeSessionId.value) return
+    if (useSessionTabsStore().isTabOpen(sessionId)) return
+    _releaseBackgroundSession(sessionId, state)
+  }
+
+  /** 关闭标签时调用：这是唯一真正释放会话缓存的入口 */
+  function releaseSession(sessionId: string): void {
+    const state = activeSessions.get(sessionId)
+    if (state) _releaseBackgroundSession(sessionId, state)
+  }
+
   function _registerHandlers(client: ChatSseClient, state: SessionState, sessionId: string) {
     client.on('thinking', (msg: SseMessage) => {
       if (!state.isStreaming.value) {
@@ -846,7 +863,6 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     client.on('file_change', (msg: SseMessage) => {
-      if (sessionId !== activeSessionId.value) return
       const filePath = (msg as any).file_path || ''
       if (!filePath) return
       const eventSessionId = (msg as any).session_id || ''
@@ -856,6 +872,8 @@ export const useChatStore = defineStore('chat', () => {
         // Sub-agent change — will be fully loaded on changes panel open via fetchFileChanges
         return
       }
+      // 归属到事件所属会话的桶，而不是「当前激活会话」：后台标签仍在流式，
+      // 其变更必须记进自己的桶，切回标签时才不会丢。
       fileChangesStore.addFileChange({
         file_path: filePath,
         change_type: (msg as any).change_type || 'edit',
@@ -863,16 +881,15 @@ export const useChatStore = defineStore('chat', () => {
         round_number: (msg as any).round_number ?? null,
         old_string: (msg as any).old_string,
         new_string: (msg as any).new_string,
-      })
+      }, sessionId)
     })
 
     client.on('file_change_git_snapshot', (msg: SseMessage) => {
-      if (sessionId !== activeSessionId.value) return
       const eventSessionId = (msg as any).session_id || ''
       if (eventSessionId && eventSessionId !== sessionId) return
       const fileChangesStore = useFileChangesStore()
       const hash = (msg as any).git_base_hash
-      if (hash) fileChangesStore.gitBaseHash = hash
+      if (hash) fileChangesStore.setGitBaseHash(sessionId, hash)
     })
 
     client.on('subagent_start', (msg: SseMessage) => {
@@ -979,10 +996,10 @@ export const useChatStore = defineStore('chat', () => {
         const sessionsStore = useSessionsStore()
         sessionsStore.refreshSessionTitle(sessionId)
       }, 3000)
-      // Auto-cleanup: if this session is no longer the active one, release resources
+      // Auto-cleanup: if this session is no longer the active one and not an open tab, release resources
       if (sessionId !== activeSessionId.value) {
         useSessionsStore().markCompletedUnseen(sessionId)
-        _releaseBackgroundSession(sessionId, state)
+        _releaseAfterStreamEnd(sessionId, state)
       }
     })
 
@@ -992,10 +1009,8 @@ export const useChatStore = defineStore('chat', () => {
       state.inThinking = false
       const last = state.messages.value[state.messages.value.length - 1]
       if (last) last.isStreaming = false
-      // Auto-cleanup: if this session is no longer the active one, release resources
-      if (sessionId !== activeSessionId.value) {
-        _releaseBackgroundSession(sessionId, state)
-      }
+      // Auto-cleanup: if this session is no longer the active one and not an open tab, release resources
+      _releaseAfterStreamEnd(sessionId, state)
     })
 
     client.on('error', (msg: SseMessage) => {
@@ -1028,10 +1043,8 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
       console.error('[Chat] Error:', msg.message || msg.title)
-      // Auto-cleanup: if this session is no longer the active one, release resources
-      if (sessionId !== activeSessionId.value) {
-        _releaseBackgroundSession(sessionId, state)
-      }
+      // Auto-cleanup: if this session is no longer the active one and not an open tab, release resources
+      _releaseAfterStreamEnd(sessionId, state)
     })
 
     client.on('title_update', (msg: SseMessage) => {
@@ -1043,10 +1056,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * Switch the active session. If the departing session is streaming, it stays
-   * in the registry and continues in the background. If it is idle, it is
-   * released immediately. The arriving session is loaded from DB unless it is
-   * already in the registry (was streaming in background).
+   * Switch the active session. The departing session is kept in the registry when
+   * it is an open tab (or still streaming) so switching back reuses the loaded
+   * messages instead of re-fetching. Only sessions with no tab are released.
+   * The arriving session is loaded from DB unless it is already in the registry.
    */
   async function switchToSession(sessionId: string): Promise<void> {
     if (activeSessionId.value === sessionId) return
@@ -1055,17 +1068,16 @@ export const useChatStore = defineStore('chat', () => {
     const oldId = activeSessionId.value
     if (oldId) {
       const old = activeSessions.get(oldId)
-      if (old && !old.isStreaming.value) {
+      if (old && !old.isStreaming.value && !useSessionTabsStore().isTabOpen(oldId)) {
         _releaseBackgroundSession(oldId, old)
       }
-      // Streaming session: keep in map — SSE continues in background
+      // Streaming sessions and open tabs: keep in map — SSE continues, cache is reused
     }
 
     activeSessionId.value = sessionId
     useSessionsStore().markSessionViewed(sessionId)
-    const fcStore = useFileChangesStore()
-    fcStore.reset()
-    fcStore.fetchFileChanges(sessionId)
+    // 文件变更按会话分桶：命中缓存直接复用，切回标签不重拉
+    useFileChangesStore().switchToSession(sessionId)
 
     // Arriving session: already in registry means it was streaming in background
     if (activeSessions.has(sessionId)) return
@@ -1313,6 +1325,7 @@ export const useChatStore = defineStore('chat', () => {
     switchToSession,
     isSessionStreaming,
     getStreamingSessionIds,
+    releaseSession,
     loadMessages,
     loadOlderMessages,
     sendMessage,

@@ -160,6 +160,9 @@ import { MagicStick } from '@element-plus/icons-vue'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore, type Skill } from '@/stores/tools'
+import { useSessionsStore } from '@/stores/sessions'
+import { useChatUiStateStore } from '@/stores/chat-ui-state'
+import { useSessionTabsStore } from '@/stores/session-tabs'
 import { useInputAnimation } from '@/composables/useInputAnimation'
 import {
   type Attachment,
@@ -285,6 +288,33 @@ watch(() => [props.editContent, props.editAttachments] as const, async ([content
   if (messageText.value || attachments.value.length > 0) {
     focusTextarea('end')
   }
+}, { immediate: true })
+
+// 草稿按会话分离：切标签时先存当前会话草稿，再取目标会话草稿，两个标签不共用一个输入框
+const sessionsStore = useSessionsStore()
+const sessionTabsStore = useSessionTabsStore()
+const chatUiState = useChatUiStateStore()
+const lastDraftSessionId = ref<string | null>(null)
+
+watch(() => sessionsStore.currentSessionId, async (sessionId) => {
+  const prevId = lastDraftSessionId.value
+  // 只给「仍是已打开标签」的会话存草稿：会话被关闭或本地 id 被改写后
+  // 再往旧 id 写会留下取不回的残留草稿
+  if (prevId && prevId !== sessionId && !props.isEditing && sessionTabsStore.isTabOpen(prevId)) {
+    chatUiState.rememberDraft(prevId, {
+      text: messageText.value,
+      attachments: [...attachments.value],
+    })
+  }
+  lastDraftSessionId.value = sessionId
+
+  // 编辑态由 props.editContent 驱动，不能覆盖
+  if (!sessionId || props.isEditing) return
+  const draft = chatUiState.getDraft(sessionId)
+  messageText.value = draft?.text ?? ''
+  attachments.value = draft ? [...draft.attachments] : []
+  await nextTick()
+  resizeTextarea()
 }, { immediate: true })
 
 onMounted(async () => {
@@ -513,7 +543,7 @@ function handleCancelEdit() {
 
 <style scoped>
 .chat-input-wrapper {
-  padding: 10px 20px 14px;
+  padding: 10px 12px 14px;
   border-top: 1px solid var(--el-border-color);
   background: var(--el-bg-color);
   box-sizing: border-box;
