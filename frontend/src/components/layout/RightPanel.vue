@@ -1,465 +1,514 @@
-<template>
+﻿<template>
   <aside
     class="right-panel"
     :class="{ collapsed }"
     :style="!collapsed && panelWidth !== undefined ? { width: panelWidth + 'px' } : {}"
   >
-    <div class="right-panel-header">
-      <span v-if="!collapsed" class="right-panel-title">设置</span>
-      <button
-        type="button"
-        class="toggle-btn"
-        :title="collapsed ? '展开右侧面板' : '收起右侧面板'"
-        @click="emit('toggle-collapse')"
-      >
-        <span class="toggle-icon">{{ collapsed ? '«' : '»' }}</span>
-      </button>
-    </div>
+    <button
+      v-if="collapsed"
+      type="button"
+      class="toggle-btn rail-toggle"
+      title="展开右侧面板"
+      @click="emit('toggle-collapse')"
+    >
+      <span class="toggle-icon">«</span>
+    </button>
 
-    <div v-if="!collapsed" class="right-panel-body">
-    <div class="right-panel-fixed">
-      <div class="settings-collapsible" :class="{ collapsed: fixedCollapsed }">
-        <div class="panel-collapse-bar" @click="fixedCollapsed = !fixedCollapsed">
-          <span class="collapse-label">{{ fixedCollapsed ? '展开设置' : '折叠设置' }}</span>
-          <span class="collapse-arrow">{{ fixedCollapsed ? '▸' : '▾' }}</span>
+    <div v-else class="right-panel-body">
+      <div class="right-panel-topbar">
+        <button
+          type="button"
+          class="toggle-btn"
+          title="收起右侧面板"
+          @click="emit('toggle-collapse')"
+        >
+          <span class="toggle-icon">»</span>
+        </button>
+
+        <div class="right-panel-tabs" role="tablist" aria-label="右侧面板分区">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            class="panel-tab"
+            :class="{ active: activeTab === tab.id }"
+            :aria-selected="activeTab === tab.id"
+            :title="tab.label"
+            @click="uiStore.setActiveTab(tab.id)"
+          >
+            <el-icon class="panel-tab-icon"><component :is="tab.icon" /></el-icon>
+            <span class="panel-tab-label">{{ tab.label }}</span>
+            <span v-if="tab.badge > 0" class="panel-tab-badge">{{ tab.badge }}</span>
+          </button>
         </div>
-        <template v-if="!fixedCollapsed">
-      <template v-if="!agentsStore.isCodeAgent">
-        <div class="panel-section">
-          <h4>模型</h4>
-          <ModelSelector
-            :models="toolsStore.models"
-            :current-model="toolsStore.currentModel"
-            @change="toolsStore.setModel"
-          />
-          <div class="llm-params-controls">
-            <div class="param-row">
-              <div class="param-label-group">
-                <span class="param-label">思考级别</span>
-                <span v-if="reasoningFromPreset" class="param-source-hint">预设</span>
-                <span v-else-if="hasReasoningOverride" class="param-source-hint override">覆盖</span>
+      </div>
+
+      <div v-if="chatStore.todos.length > 0" class="right-panel-pinned">
+        <div class="panel-section todo-section">
+          <TodoList :todos="chatStore.todos" />
+        </div>
+      </div>
+
+      <div class="right-panel-scroll">
+        <transition name="fade-up" mode="out-in">
+        <div :key="activeTab" class="tab-pane">
+
+          <template v-if="activeTab === 'model'">
+            <template v-if="!agentsStore.isCodeAgent">
+              <div class="panel-section">
+                <h4>模型</h4>
+                <ModelSelector
+                  :models="toolsStore.models"
+                  :current-model="toolsStore.currentModel"
+                  @change="toolsStore.setModel"
+                />
+                <div class="llm-params-controls">
+                  <div class="param-row">
+                    <div class="param-label-group">
+                      <span class="param-label">思考级别</span>
+                      <span v-if="reasoningFromPreset" class="param-source-hint">预设</span>
+                      <span v-else-if="hasReasoningOverride" class="param-source-hint override">覆盖</span>
+                    </div>
+                    <div class="param-control-group">
+                      <el-select
+                        :model-value="effectiveReasoningEffort ?? 'default'"
+                        size="small"
+                        class="reasoning-effort-select"
+                        @update:model-value="(v: string) => toolsStore.setLlmParam('reasoning_effort', v === 'default' ? null : v)"
+                      >
+                        <el-option
+                          v-for="effort in ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']"
+                          :key="effort"
+                          :label="effort"
+                          :value="effort"
+                        />
+                      </el-select>
+                      <button
+                        v-if="hasReasoningOverride"
+                        class="param-reset-btn"
+                        type="button"
+                        title="清除覆盖，恢复预设/默认"
+                        @click="toolsStore.setLlmParam('reasoning_effort', null)"
+                      >×</button>
+                    </div>
+                  </div>
+                  <div class="param-row param-row-slider">
+                    <div class="param-label-group">
+                      <span class="param-label">温度</span>
+                      <span v-if="temperatureFromPreset" class="param-source-hint">预设</span>
+                      <span v-else-if="hasTemperatureOverride" class="param-source-hint override">覆盖</span>
+                    </div>
+                    <div class="temperature-control">
+                      <el-slider
+                        :model-value="effectiveTemperature"
+                        :min="0"
+                        :max="2"
+                        :step="0.1"
+                        size="small"
+                        class="temperature-slider"
+                        @update:model-value="(v: number) => toolsStore.setLlmParam('temperature', v)"
+                      />
+                      <el-input-number
+                        :model-value="effectiveTemperature"
+                        :min="0"
+                        :max="2"
+                        :step="0.1"
+                        :precision="1"
+                        size="small"
+                        controls-position="right"
+                        class="temperature-input"
+                        @update:model-value="(v: number | undefined) => toolsStore.setLlmParam('temperature', v ?? null)"
+                      />
+                      <button
+                        v-if="hasTemperatureOverride"
+                        class="param-reset-btn"
+                        type="button"
+                        title="清除覆盖，恢复预设/默认"
+                        @click="toolsStore.setLlmParam('temperature', null)"
+                      >×</button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div class="param-control-group">
+
+              <div class="panel-section window-trim-section">
+                <div class="window-trim-control">
+                  <h4>窗口裁剪模型</h4>
+                  <el-switch
+                    :model-value="summEnabled"
+                    size="small"
+                    @change="(val: boolean) => { summEnabled = val; updateSummarization({ enabled: val }) }"
+                  />
+                </div>
                 <el-select
-                  :model-value="effectiveReasoningEffort ?? 'default'"
+                  v-if="summEnabled"
+                  v-model="summModel"
+                  placeholder="默认同主模型"
                   size="small"
-                  class="reasoning-effort-select"
-                  @update:model-value="(v: string) => toolsStore.setLlmParam('reasoning_effort', v === 'default' ? null : v)"
+                  filterable
+                  clearable
+                  class="window-trim-select"
+                  @change="updateSummarization({ default_model: $event || '' })"
                 >
                   <el-option
-                    v-for="effort in ['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']"
-                    :key="effort"
-                    :label="effort"
-                    :value="effort"
+                    v-for="model in toolsStore.models"
+                    :key="model.model_id"
+                    :label="model.model_id"
+                    :value="model.model_id"
                   />
                 </el-select>
-                <button
-                  v-if="hasReasoningOverride"
-                  class="param-reset-btn"
-                  type="button"
-                  title="清除覆盖，恢复预设/默认"
-                  @click="toolsStore.setLlmParam('reasoning_effort', null)"
-                >×</button>
+              </div>
+            </template>
+
+            <div v-if="agentsStore.isCodeAgent" class="panel-section code-agent-hint">
+              <div class="hint-box code-agent-box">
+                <span class="hint-icon">⚙️</span>
+                <span class="hint-text">代码智能体</span>
+                <span class="hint-sub">此智能体由代码注册，工具、MCP、Skills、提示词和模型由代码中的 graph 决定。当前面板的框架级配置不适用于它。</span>
               </div>
             </div>
-            <div class="param-row param-row-slider">
-              <div class="param-label-group">
-                <span class="param-label">温度</span>
-                <span v-if="temperatureFromPreset" class="param-source-hint">预设</span>
-                <span v-else-if="hasTemperatureOverride" class="param-source-hint override">覆盖</span>
-              </div>
-              <div class="temperature-control">
-                <el-slider
-                  :model-value="effectiveTemperature"
-                  :min="0"
-                  :max="2"
-                  :step="0.1"
-                  size="small"
-                  class="temperature-slider"
-                  @update:model-value="(v: number) => toolsStore.setLlmParam('temperature', v)"
-                />
-                <el-input-number
-                  :model-value="effectiveTemperature"
-                  :min="0"
-                  :max="2"
-                  :step="0.1"
-                  :precision="1"
-                  size="small"
-                  controls-position="right"
-                  class="temperature-input"
-                  @update:model-value="(v: number | undefined) => toolsStore.setLlmParam('temperature', v ?? null)"
-                />
-                <button
-                  v-if="hasTemperatureOverride"
-                  class="param-reset-btn"
-                  type="button"
-                  title="清除覆盖，恢复预设/默认"
-                  @click="toolsStore.setLlmParam('temperature', null)"
-                >×</button>
+
+            <div v-if="chatStore.threadId" class="panel-section status-section">
+              <h4>会话</h4>
+              <div class="status-item">
+                <span>Thread:</span>
+                <code :title="chatStore.threadId">{{ chatStore.threadId }}</code>
               </div>
             </div>
-          </div>
-        </div>
-      </template>
-        </template>
-      </div>
 
-      <div v-if="chatStore.todos.length > 0" class="panel-section todo-section">
-        <TodoList :todos="chatStore.todos" />
-      </div>
-    </div>
-
-    <div class="right-panel-scroll">
-      <template v-if="!agentsStore.isCodeAgent">
-        <div class="panel-section window-trim-section">
-          <div class="window-trim-control">
-            <h4>窗口裁剪模型</h4>
-            <el-switch
-              :model-value="summEnabled"
-              size="small"
-              @change="(val: boolean) => { summEnabled = val; updateSummarization({ enabled: val }) }"
-            />
-          </div>
-          <el-select
-            v-if="summEnabled"
-            v-model="summModel"
-            placeholder="默认同主模型"
-            size="small"
-            filterable
-            clearable
-            class="window-trim-select"
-            @change="updateSummarization({ default_model: $event || '' })"
-          >
-            <el-option
-              v-for="model in toolsStore.models"
-              :key="model.model_id"
-              :label="model.model_id"
-              :value="model.model_id"
-            />
-          </el-select>
-        </div>
-      </template>
-
-      <div class="panel-section markdown-layout-section appearance-section">
-        <div class="section-header compact-section-header">
-          <h4>Markdown 版式</h4>
-          <span class="theme-current">{{ currentLayoutOption.label }}</span>
-        </div>
-        <el-select
-          v-model="markdownLayout"
-          size="small"
-          class="markdown-theme-select"
-          @change="(value: MarkdownLayoutId) => setMarkdownLayout(value)"
-        >
-          <el-option
-            v-for="option in MARKDOWN_LAYOUT_OPTIONS"
-            :key="option.id"
-            :label="option.label"
-            :value="option.id"
-          >
-            <div class="theme-option-row">
-              <span class="layout-option-mark">Aa</span>
-              <div class="theme-option-copy">
-                <span class="theme-option-name">{{ option.label }}</span>
-                <span class="theme-option-desc">{{ option.description }}</span>
+            <div class="panel-section markdown-layout-section appearance-section">
+              <div class="section-header compact-section-header">
+                <h4>Markdown 版式</h4>
+                <span class="theme-current">{{ currentLayoutOption.label }}</span>
               </div>
-            </div>
-          </el-option>
-        </el-select>
-      </div>
-
-      <div class="panel-section markdown-theme-section appearance-section">
-        <div class="section-header compact-section-header">
-          <h4>Markdown 色盘</h4>
-          <span class="theme-current">{{ currentOption.label }}</span>
-        </div>
-        <el-select
-          v-model="markdownTheme"
-          size="small"
-          class="markdown-theme-select"
-          @change="(value: MarkdownThemeId) => setMarkdownTheme(value)"
-        >
-          <el-option
-            v-for="option in MARKDOWN_THEME_OPTIONS"
-            :key="option.id"
-            :label="option.label"
-            :value="option.id"
-          >
-            <div class="theme-option-row">
-              <span class="theme-option-dot" :style="{ background: option.accent }"></span>
-              <div class="theme-option-copy">
-                <span class="theme-option-name">{{ option.label }}</span>
-                <span class="theme-option-desc">{{ option.description }}</span>
-              </div>
-            </div>
-          </el-option>
-        </el-select>
-      </div>
-
-      <div class="panel-section input-animation-section appearance-section">
-        <div class="section-header compact-section-header">
-          <h4>输入框动画</h4>
-          <span class="theme-current">{{ currentAnimationOption.label }}</span>
-        </div>
-        <el-select
-          v-model="inputAnimation"
-          size="small"
-          class="input-animation-select"
-          @change="(value: InputAnimationType) => setInputAnimation(value)"
-        >
-          <el-option
-            v-for="option in INPUT_ANIMATION_OPTIONS"
-            :key="option.id"
-            :label="option.label"
-            :value="option.id"
-          >
-            <div class="theme-option-row">
-              <span class="theme-option-dot" :style="{ background: option.id === 'marquee' || option.id === 'rainbow-gradient' ? 'linear-gradient(90deg,#ff2d95,#9b5cff,#2da8ff,#18e6c3,#ffe14d,#ff7a2d)' : option.id === 'transparent-arc' ? 'conic-gradient(transparent 60%, #ff2d95 70%, #2da8ff 80%, transparent 90%)' : 'conic-gradient(#ff2d95,#2da8ff,#18e6c3,#ff2d95)' }"></span>
-              <div class="theme-option-copy">
-                <span class="theme-option-name">{{ option.label }}</span>
-                <span class="theme-option-desc">{{ option.description }}</span>
-              </div>
-            </div>
-          </el-option>
-        </el-select>
-      </div>
-
-      <div class="panel-section automation-section appearance-section">
-        <div class="section-header compact-section-header">
-          <h4>自动化任务</h4>
-          <span class="theme-current">{{ enabledAutomationTaskCount }}/{{ automationStore.taskCount }}</span>
-        </div>
-        <button class="automation-entry-btn" type="button" @click="emit('open-automation')">
-          <el-icon><Clock /></el-icon>
-          管理定时任务
-        </button>
-      </div>
-
-      <div v-if="agentsStore.isCodeAgent" class="panel-section code-agent-hint">
-        <div class="hint-box code-agent-box">
-          <span class="hint-icon">⚙️</span>
-          <span class="hint-text">代码智能体</span>
-          <span class="hint-sub">此智能体由代码注册，工具、MCP、Skills、提示词和模型由代码中的 graph 决定。当前面板的框架级配置不适用于它。</span>
-        </div>
-      </div>
-
-      <template v-if="!agentsStore.isChatAgent && !agentsStore.isCodeAgent">
-        <div class="panel-section processes-section">
-          <div class="section-header">
-            <h4>Agent 启动的后台进程</h4>
-            <span class="process-count" v-if="bgProcesses.length">{{ bgProcesses.length }}</span>
-            <button class="refresh-btn" type="button" :disabled="processFetching" @click="fetchProcesses">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ spinning: processFetching }">
-                <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
-              </svg>
-              刷新
-            </button>
-          </div>
-          <div v-if="bgProcesses.length === 0" class="empty-hint">无 Agent 启动的后台进程</div>
-          <div v-for="proc in bgProcesses" :key="proc.pid" class="process-item" :class="{ exited: !proc.status.startsWith('running') }" @click="openProcessDetail(proc)">
-            <div class="process-row">
-              <span class="process-pid">{{ proc.pid }}</span>
-              <span class="process-status-dot" :class="proc.status.startsWith('running') ? 'alive' : 'dead'"></span>
-              <span class="process-elapsed">{{ formatElapsed(proc.elapsed_s) }}</span>
-              <button
-                v-if="proc.status.startsWith('running')"
-                class="process-kill-btn"
-                @click.stop="killTrackedProcess(proc.pid)"
-                :disabled="killingPids[proc.pid]"
-              >终止</button>
-            </div>
-            <div class="process-cmd">{{ proc.command }}</div>
-          </div>
-        </div>
-
-        <teleport to="body">
-          <div v-if="processModalVisible" class="process-modal-backdrop" @click="processModalVisible = false">
-            <div class="process-modal" @click.stop>
-              <div class="process-modal-header">
-                <span class="process-modal-title">PID {{ processModalData.pid }}</span>
-                <div class="process-modal-actions">
-                  <button v-if="processModalData.status === 'running'" class="process-kill-btn" @click="killFromModal">终止</button>
-                  <button class="process-modal-refresh" @click="refreshProcessModal">刷新</button>
-                  <button class="process-modal-close" @click="processModalVisible = false">✕</button>
-                </div>
-              </div>
-              <div class="process-modal-cmd">
-                <pre>{{ processModalData.command }}</pre>
-              </div>
-              <div class="process-modal-meta">
-                <span>状态: {{ processModalData.status }}</span>
-                <span>运行: {{ formatElapsed(processModalData.elapsed_s) }}</span>
-              </div>
-              <div class="process-modal-output">
-                <div class="process-modal-output-content" v-html="renderedModalOutput"></div>
-              </div>
-            </div>
-          </div>
-        </teleport>
-
-        <div class="panel-section tools-section">
-          <div class="section-header tools-section-header">
-            <h4>工具</h4>
-            <span class="section-summary">{{ toolsStore.filteredGroups.length }} 组</span>
-          </div>
-          <ToolGroupPanel
-            :groups="toolsStore.filteredGroups"
-            @toggle="toolsStore.toggleGroup"
-            @detail="(group) => openDetail('tool-group', group.description || group.id, group)"
-          />
-        </div>
-
-        <div class="panel-section">
-          <div class="section-header">
-            <h4>MCP 服务器</h4>
-            <button class="refresh-btn" type="button" :disabled="toolsStore.mcpRefreshing" @click="toolsStore.refreshMcpServers()">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                :class="{ spinning: toolsStore.mcpRefreshing }"
-              >
-                <path d="M21 2v6h-6" />
-                <path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" />
-                <path d="M3 22v-6h6" />
-                <path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
-              </svg>
-              刷新
-            </button>
-          </div>
-          <div v-for="server in toolsStore.filteredMcp" :key="server.name" class="mcp-item" :class="{ 'not-allowed': !server.allowed }">
-            <div class="mcp-header">
-              <div class="mcp-left">
-                <el-switch
-                  :model-value="server.enabled"
-                  :disabled="!server.allowed"
-                  size="small"
-                  @change="toolsStore.toggleMcp(server.name)"
-                />
-                <span class="mcp-name">{{ server.name }}</span>
-                <button
-                  class="mcp-refresh-btn"
-                  type="button"
-                  :disabled="!server.allowed || !server.enabled || toolsStore.isMcpRefreshing(server.name)"
-                  :title="`刷新 ${server.name}`"
-                  :aria-label="`刷新 ${server.name}`"
-                  @click="toolsStore.refreshMcpServer(server.name)"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    :class="{ spinning: toolsStore.isMcpRefreshing(server.name) }"
-                  >
-                    <path d="M21 2v6h-6" />
-                    <path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" />
-                    <path d="M3 22v-6h6" />
-                    <path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
-                  </svg>
-                </button>
-                <button class="detail-btn" type="button" @click="openDetail('mcp', server.name, server)">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="16" x2="12" y2="12" />
-                    <line x1="12" y1="8" x2="12.01" y2="8" />
-                  </svg>
-                  详情
-                </button>
-              </div>
-              <el-tag size="small" :type="!server.allowed ? 'warning' : server.status === 'connected' ? 'success' : server.status === 'error' ? 'danger' : server.status === 'disabled' ? 'warning' : 'info'">
-                {{ !server.allowed ? '未授权' : server.status === 'connected' ? '已连接' : server.status === 'error' ? '错误' : server.status === 'disabled' ? '已禁用' : '未连接' }}
-              </el-tag>
-            </div>
-            <div v-if="server.error && server.allowed" class="mcp-error">{{ server.error }}</div>
-            <div v-if="server.tools && server.tools.length && server.allowed" class="mcp-tools">
-              <el-tag v-for="tool in server.tools.slice(0, 5)" :key="tool" size="small" :class="server.enabled ? 'tool-tag-enabled' : 'tool-tag-disabled'">{{ tool }}</el-tag>
-              <el-tag v-if="server.tools.length > 5" size="small" :class="server.enabled ? 'tool-tag-enabled' : 'tool-tag-disabled'">+{{ server.tools.length - 5 }}</el-tag>
-            </div>
-          </div>
-          <p v-if="!toolsStore.mcpServers.length" class="empty-hint">暂无 MCP 服务器</p>
-        </div>
-
-        <div class="panel-section">
-          <h4>Skills</h4>
-          <div v-for="skill in toolsStore.filteredSkills" :key="skill.name" class="skill-item" :class="{ 'not-allowed': !skill.allowed, 'skill-disabled': !skill.enabled }">
-            <div class="skill-header">
-              <el-switch
-                :model-value="skill.enabled"
-                :disabled="!skill.allowed"
+              <el-select
+                v-model="markdownLayout"
                 size="small"
-                @change="toolsStore.toggleSkill(skill.name)"
-              />
-              <div class="skill-body">
-                <div class="skill-line">
-                  <span class="skill-name" :class="{ dimmed: !skill.enabled }">{{ skill.name }}</span>
-                  <span v-if="skill.source" class="skill-path" :title="skill.source">{{ skill.source }}</span>
-                </div>
-                <span class="skill-desc">{{ skill.description }}</span>
+                class="markdown-theme-select"
+                @change="(value: MarkdownLayoutId) => setMarkdownLayout(value)"
+              >
+                <el-option
+                  v-for="option in MARKDOWN_LAYOUT_OPTIONS"
+                  :key="option.id"
+                  :label="option.label"
+                  :value="option.id"
+                >
+                  <div class="theme-option-row">
+                    <span class="layout-option-mark">Aa</span>
+                    <div class="theme-option-copy">
+                      <span class="theme-option-name">{{ option.label }}</span>
+                      <span class="theme-option-desc">{{ option.description }}</span>
+                    </div>
+                  </div>
+                </el-option>
+              </el-select>
+            </div>
+
+            <div class="panel-section markdown-theme-section appearance-section">
+              <div class="section-header compact-section-header">
+                <h4>Markdown 色盘</h4>
+                <span class="theme-current">{{ currentOption.label }}</span>
               </div>
-              <button class="detail-btn" type="button" @click="openDetail('skill', skill.name, skill)">
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="16" x2="12" y2="12" />
-                  <line x1="12" y1="8" x2="12.01" y2="8" />
-                </svg>
-                详情
+              <el-select
+                v-model="markdownTheme"
+                size="small"
+                class="markdown-theme-select"
+                @change="(value: MarkdownThemeId) => setMarkdownTheme(value)"
+              >
+                <el-option
+                  v-for="option in MARKDOWN_THEME_OPTIONS"
+                  :key="option.id"
+                  :label="option.label"
+                  :value="option.id"
+                >
+                  <div class="theme-option-row">
+                    <span class="theme-option-dot" :style="{ background: option.accent }"></span>
+                    <div class="theme-option-copy">
+                      <span class="theme-option-name">{{ option.label }}</span>
+                      <span class="theme-option-desc">{{ option.description }}</span>
+                    </div>
+                  </div>
+                </el-option>
+              </el-select>
+            </div>
+
+            <div class="panel-section input-animation-section appearance-section">
+              <div class="section-header compact-section-header">
+                <h4>输入框动画</h4>
+                <span class="theme-current">{{ currentAnimationOption.label }}</span>
+              </div>
+              <el-select
+                v-model="inputAnimation"
+                size="small"
+                class="input-animation-select"
+                @change="(value: InputAnimationType) => setInputAnimation(value)"
+              >
+                <el-option
+                  v-for="option in INPUT_ANIMATION_OPTIONS"
+                  :key="option.id"
+                  :label="option.label"
+                  :value="option.id"
+                >
+                  <div class="theme-option-row">
+                    <span class="theme-option-dot" :style="{ background: option.id === 'marquee' || option.id === 'rainbow-gradient' ? 'linear-gradient(90deg,#ff2d95,#9b5cff,#2da8ff,#18e6c3,#ffe14d,#ff7a2d)' : option.id === 'transparent-arc' ? 'conic-gradient(transparent 60%, #ff2d95 70%, #2da8ff 80%, transparent 90%)' : 'conic-gradient(#ff2d95,#2da8ff,#18e6c3,#ff2d95)' }"></span>
+                    <div class="theme-option-copy">
+                      <span class="theme-option-name">{{ option.label }}</span>
+                      <span class="theme-option-desc">{{ option.description }}</span>
+                    </div>
+                  </div>
+                </el-option>
+              </el-select>
+            </div>
+          </template>
+
+          <template v-if="activeTab === 'abilities'">
+            <div v-if="agentsStore.isCodeAgent" class="panel-section code-agent-hint">
+              <div class="hint-box code-agent-box">
+                <span class="hint-icon">⚙️</span>
+                <span class="hint-text">代码智能体</span>
+                <span class="hint-sub">此智能体由代码注册，工具、MCP、Skills、提示词和模型由代码中的 graph 决定。当前面板的框架级配置不适用于它。</span>
+              </div>
+            </div>
+
+            <div v-if="agentsStore.isChatAgent" class="panel-section chat-only-hint">
+              <div class="hint-box">
+                <span class="hint-icon">💬</span>
+                <span class="hint-text">Chat 模式：纯对话，无工具</span>
+                <span class="hint-sub">切换至 Empty 或 Power 智能体以启用工具</span>
+              </div>
+            </div>
+
+            <template v-if="!agentsStore.isChatAgent && !agentsStore.isCodeAgent">
+              <div class="panel-section tools-section">
+                <div class="section-header tools-section-header">
+                  <h4>工具</h4>
+                  <span class="section-summary">{{ toolsStore.filteredGroups.length }} 组</span>
+                </div>
+                <ToolGroupPanel
+                  :groups="toolsStore.filteredGroups"
+                  @toggle="toolsStore.toggleGroup"
+                  @detail="(group) => openDetail('tool-group', group.description || group.id, group)"
+                />
+              </div>
+
+              <div class="panel-section">
+                <div class="section-header">
+                  <h4>MCP 服务器</h4>
+                  <button class="refresh-btn" type="button" :disabled="toolsStore.mcpRefreshing" @click="toolsStore.refreshMcpServers()">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      :class="{ spinning: toolsStore.mcpRefreshing }"
+                    >
+                      <path d="M21 2v6h-6" />
+                      <path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" />
+                      <path d="M3 22v-6h6" />
+                      <path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
+                    </svg>
+                    刷新
+                  </button>
+                </div>
+                <div v-for="server in toolsStore.filteredMcp" :key="server.name" class="mcp-item" :class="{ 'not-allowed': !server.allowed }">
+                  <div class="mcp-header">
+                    <div class="mcp-left">
+                      <el-switch
+                        :model-value="server.enabled"
+                        :disabled="!server.allowed"
+                        size="small"
+                        @change="toolsStore.toggleMcp(server.name)"
+                      />
+                      <span class="mcp-name">{{ server.name }}</span>
+                      <button
+                        class="mcp-refresh-btn"
+                        type="button"
+                        :disabled="!server.allowed || !server.enabled || toolsStore.isMcpRefreshing(server.name)"
+                        :title="`刷新 ${server.name}`"
+                        :aria-label="`刷新 ${server.name}`"
+                        @click="toolsStore.refreshMcpServer(server.name)"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          :class="{ spinning: toolsStore.isMcpRefreshing(server.name) }"
+                        >
+                          <path d="M21 2v6h-6" />
+                          <path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" />
+                          <path d="M3 22v-6h6" />
+                          <path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
+                        </svg>
+                      </button>
+                      <button class="detail-btn" type="button" @click="openDetail('mcp', server.name, server)">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="16" x2="12" y2="12" />
+                          <line x1="12" y1="8" x2="12.01" y2="8" />
+                        </svg>
+                        详情
+                      </button>
+                    </div>
+                    <el-tag size="small" :type="!server.allowed ? 'warning' : server.status === 'connected' ? 'success' : server.status === 'error' ? 'danger' : server.status === 'disabled' ? 'warning' : 'info'">
+                      {{ !server.allowed ? '未授权' : server.status === 'connected' ? '已连接' : server.status === 'error' ? '错误' : server.status === 'disabled' ? '已禁用' : '未连接' }}
+                    </el-tag>
+                  </div>
+                  <div v-if="server.error && server.allowed" class="mcp-error">{{ server.error }}</div>
+                  <div v-if="server.tools && server.tools.length && server.allowed" class="mcp-tools">
+                    <el-tag v-for="tool in server.tools.slice(0, 5)" :key="tool" size="small" :class="server.enabled ? 'tool-tag-enabled' : 'tool-tag-disabled'">{{ tool }}</el-tag>
+                    <el-tag v-if="server.tools.length > 5" size="small" :class="server.enabled ? 'tool-tag-enabled' : 'tool-tag-disabled'">+{{ server.tools.length - 5 }}</el-tag>
+                  </div>
+                </div>
+                <p v-if="!toolsStore.mcpServers.length" class="empty-hint">暂无 MCP 服务器</p>
+              </div>
+
+              <div class="panel-section">
+                <h4>Skills</h4>
+                <div v-for="skill in toolsStore.filteredSkills" :key="skill.name" class="skill-item" :class="{ 'not-allowed': !skill.allowed, 'skill-disabled': !skill.enabled }">
+                  <div class="skill-header">
+                    <el-switch
+                      :model-value="skill.enabled"
+                      :disabled="!skill.allowed"
+                      size="small"
+                      @change="toolsStore.toggleSkill(skill.name)"
+                    />
+                    <div class="skill-body">
+                      <div class="skill-line">
+                        <span class="skill-name" :class="{ dimmed: !skill.enabled }">{{ skill.name }}</span>
+                        <span v-if="skill.source" class="skill-path" :title="skill.source">{{ skill.source }}</span>
+                      </div>
+                      <span class="skill-desc">{{ skill.description }}</span>
+                    </div>
+                    <button class="detail-btn" type="button" @click="openDetail('skill', skill.name, skill)">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="16" x2="12" y2="12" />
+                        <line x1="12" y1="8" x2="12.01" y2="8" />
+                      </svg>
+                      详情
+                    </button>
+                  </div>
+                </div>
+                <p v-if="!toolsStore.skills.length" class="empty-hint">暂无 Skills</p>
+              </div>
+
+              <div class="panel-section">
+                <PermissionsPanel />
+              </div>
+            </template>
+          </template>
+
+          <template v-if="activeTab === 'changes'">
+            <FileChangesPanel />
+          </template>
+
+          <template v-if="activeTab === 'files'">
+            <FileTreePanel v-if="agentsStore.currentAgent?.project_mode" />
+          </template>
+
+          <template v-if="activeTab === 'tasks'">
+            <div class="panel-section automation-section">
+              <div class="section-header compact-section-header">
+                <h4>自动化任务</h4>
+                <span class="theme-current">{{ enabledAutomationTaskCount }}/{{ automationStore.taskCount }}</span>
+              </div>
+              <button class="automation-entry-btn" type="button" @click="emit('open-automation')">
+                <el-icon><Clock /></el-icon>
+                管理定时任务
               </button>
             </div>
-          </div>
-          <p v-if="!toolsStore.skills.length" class="empty-hint">暂无 Skills</p>
-        </div>
 
-        <div class="panel-section">
-          <PermissionsPanel />
-        </div>
-      </template>
+            <template v-if="!agentsStore.isChatAgent && !agentsStore.isCodeAgent">
+              <div class="panel-section processes-section">
+                <div class="section-header">
+                  <h4>Agent 启动的后台进程</h4>
+                  <span class="process-count" v-if="bgProcesses.length">{{ bgProcesses.length }}</span>
+                  <button class="refresh-btn" type="button" :disabled="processFetching" @click="fetchProcesses">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ spinning: processFetching }">
+                      <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15.55-6.36L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15.55 6.36L3 16" />
+                    </svg>
+                    刷新
+                  </button>
+                </div>
+                <div v-if="bgProcesses.length === 0" class="empty-hint">无 Agent 启动的后台进程</div>
+                <div v-for="proc in bgProcesses" :key="proc.pid" class="process-item" :class="{ exited: !proc.status.startsWith('running') }" @click="openProcessDetail(proc)">
+                  <div class="process-row">
+                    <span class="process-pid">{{ proc.pid }}</span>
+                    <span class="process-status-dot" :class="proc.status.startsWith('running') ? 'alive' : 'dead'"></span>
+                    <span class="process-elapsed">{{ formatElapsed(proc.elapsed_s) }}</span>
+                    <button
+                      v-if="proc.status.startsWith('running')"
+                      class="process-kill-btn"
+                      @click.stop="killTrackedProcess(proc.pid)"
+                      :disabled="killingPids[proc.pid]"
+                    >终止</button>
+                  </div>
+                  <div class="process-cmd">{{ proc.command }}</div>
+                </div>
+              </div>
 
-      <div v-if="agentsStore.isChatAgent" class="panel-section chat-only-hint">
-        <div class="hint-box">
-          <span class="hint-icon">💬</span>
-          <span class="hint-text">Chat 模式：纯对话，无工具</span>
-          <span class="hint-sub">切换至 Empty 或 Power 智能体以启用工具</span>
+              <teleport to="body">
+                <div v-if="processModalVisible" class="process-modal-backdrop" @click="processModalVisible = false">
+                  <div class="process-modal" @click.stop>
+                    <div class="process-modal-header">
+                      <span class="process-modal-title">PID {{ processModalData.pid }}</span>
+                      <div class="process-modal-actions">
+                        <button v-if="processModalData.status === 'running'" class="process-kill-btn" @click="killFromModal">终止</button>
+                        <button class="process-modal-refresh" @click="refreshProcessModal">刷新</button>
+                        <button class="process-modal-close" @click="processModalVisible = false">✕</button>
+                      </div>
+                    </div>
+                    <div class="process-modal-cmd">
+                      <pre>{{ processModalData.command }}</pre>
+                    </div>
+                    <div class="process-modal-meta">
+                      <span>状态: {{ processModalData.status }}</span>
+                      <span>运行: {{ formatElapsed(processModalData.elapsed_s) }}</span>
+                    </div>
+                    <div class="process-modal-output">
+                      <div class="process-modal-output-content" v-html="renderedModalOutput"></div>
+                    </div>
+                  </div>
+                </div>
+              </teleport>
+            </template>
+          </template>
+
+
         </div>
+        </transition>
       </div>
 
-      <div v-if="chatStore.threadId" class="panel-section status-section">
-        <h4>会话</h4>
-        <div class="status-item">
-          <span>Thread:</span>
-          <code>{{ chatStore.threadId.slice(0, 8) }}...</code>
-        </div>
-      </div>
-    </div>
-
-    <DetailModal
-      v-model:visible="detailModal.visible"
-      :title="detailModal.title"
-      :mode="detailModal.mode"
-      :data="detailModal.data"
-    />
+      <DetailModal
+        v-model:visible="detailModal.visible"
+        :title="detailModal.title"
+        :mode="detailModal.mode"
+        :data="detailModal.data"
+      />
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { reactive, ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 
 defineProps<{ collapsed?: boolean; panelWidth?: number }>()
 const emit = defineEmits<{ 'toggle-collapse': []; 'open-automation': [] }>()
 
 import { useToolsStore } from '@/stores/tools'
+import { useUiStore, type RightPanelTab } from '@/stores/ui'
 import { api, fetchApi } from '@/api/http'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
@@ -468,21 +517,45 @@ import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '
 import { useMarkdownLayout, MARKDOWN_LAYOUT_OPTIONS, type MarkdownLayoutId } from '@/composables/useMarkdownLayout'
 import { useInputAnimation, INPUT_ANIMATION_OPTIONS, type InputAnimationType } from '@/composables/useInputAnimation'
 import { AnsiUp } from 'ansi_up'
-import { Clock } from '@element-plus/icons-vue'
+import { Clock, Cpu, Tools, Files, FolderOpened } from '@element-plus/icons-vue'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
 import DetailModal from '@/components/panels/DetailModal.vue'
 import TodoList from '@/components/panels/TodoList.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
+import FileChangesPanel from '@/components/panels/FileChangesPanel.vue'
 
 const ansiUp = new AnsiUp()
 
 const toolsStore = useToolsStore()
+const uiStore = useUiStore()
 const chatStore = useChatStore()
 const agentsStore = useAgentsStore()
 const automationStore = useAutomationStore()
 const enabledAutomationTaskCount = computed(() => automationStore.tasks.filter(task => task.enabled).length)
-const fixedCollapsed = ref(false)
+
+const activeTab = computed(() => uiStore.activeTab)
+
+const runningProcessCount = computed(() =>
+  bgProcesses.value.filter(proc => proc.status.startsWith('running')).length,
+)
+const mcpErrorCount = computed(() =>
+  toolsStore.filteredMcp.filter(server => server.allowed && server.status === 'error').length,
+)
+
+const tabs = computed((): Array<{ id: RightPanelTab; label: string; icon: any; badge: number }> => {
+  const list: Array<{ id: RightPanelTab; label: string; icon: any; badge: number }> = [
+    { id: 'model', label: '模型', icon: Cpu, badge: 0 },
+    { id: 'abilities', label: '能力', icon: Tools, badge: mcpErrorCount.value },
+    { id: 'changes', label: '变更', icon: Files, badge: 0 },
+  ]
+  // 项目模式 agent 才有项目目录可浏览
+  if (agentsStore.currentAgent?.project_mode) {
+    list.push({ id: 'files', label: '文件', icon: FolderOpened, badge: 0 })
+  }
+  list.push({ id: 'tasks', label: '任务', icon: Clock, badge: runningProcessCount.value })
+  return list
+})
 
 const presetLlmParams = computed(() => agentsStore.currentAgent?.llm_params ?? null)
 
@@ -559,6 +632,19 @@ async function fetchProcesses() {
   } catch { /* ignore */ }
   processFetching.value = false
 }
+
+watch(activeTab, (tab) => {
+  if (tab === 'tasks') void fetchProcesses()
+})
+
+// 非项目模式 agent 没有文件 tab，避免记忆的 files tab 残留成空白页
+watch(
+  () => [uiStore.activeTab, agentsStore.currentAgent?.project_mode] as const,
+  ([tab, projectMode]) => {
+    if (tab === 'files' && !projectMode) uiStore.setActiveTab('model')
+  },
+  { immediate: true },
+)
 
 async function killTrackedProcess(pid: number) {
   killingPids.value = { ...killingPids.value, [pid]: true }
@@ -664,63 +750,45 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 
 .right-panel.collapsed {
   width: 44px;
-}
-
-.right-panel-header {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  padding: 10px 12px;
+  padding-top: 10px;
+}
+
+.rail-toggle {
   flex-shrink: 0;
-  border-bottom: 1px solid var(--el-border-color);
 }
 
-.right-panel.collapsed .right-panel-header {
-  flex-direction: column;
-  justify-content: flex-start;
-  padding: 10px 8px;
-  border-bottom: none;
+.right-panel-topbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px 0;
+  flex-shrink: 0;
 }
 
-.right-panel-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  letter-spacing: 0.3px;
-}
-
-.right-panel.collapsed .right-panel-title {
-  display: none;
-}
-
-.right-panel-header .toggle-btn {
+.toggle-btn {
   width: 28px;
   height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--el-fill-color) 90%, var(--el-bg-color) 10%);
   color: var(--el-text-color-secondary);
   cursor: pointer;
   font-size: 14px;
+  flex-shrink: 0;
   transition: all 0.15s ease;
 }
 
-.right-panel-header .toggle-btn:hover {
+.toggle-btn:hover {
   background: var(--el-fill-color-light);
   color: var(--el-text-color-primary);
 }
 
 .toggle-icon {
   display: inline-block;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.right-panel.collapsed .toggle-icon {
-  transform: rotate(180deg);
 }
 
 .right-panel-body {
@@ -731,57 +799,113 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   overflow: hidden;
 }
 
-.right-panel-fixed {
-  flex-shrink: 0;
-  padding: 14px 16px 0;
-}
-
-.settings-collapsible {
-  margin-bottom: 14px;
-  padding: 10px 10px 0;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--el-fill-color) 86%, var(--el-color-primary) 14%);
-}
-
-.settings-collapsible.collapsed {
-  padding-bottom: 10px;
-}
-
-.panel-collapse-bar {
+.right-panel-tabs {
+  flex: 1;
+  min-width: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 9px;
-  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 4px;
   border: 1px solid var(--el-border-color-lighter);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--el-fill-color) 90%, var(--el-bg-color) 10%);
+}
+
+.panel-tab {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: var(--el-fill-color-light);
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.15s;
-}
-
-.panel-collapse-bar:hover {
-  background: var(--el-fill-color);
-}
-
-.collapse-label {
+  background: transparent;
+  color: var(--el-text-color-secondary);
   font-size: 12px;
-  color: var(--el-text-color-primary);
   font-weight: 700;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
-.collapse-arrow {
+.panel-tab:hover:not(.active) {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+  transform: translateY(-1px);
+}
+
+.panel-tab.active {
+  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-info));
+  color: #fff;
+  border-color: color-mix(in srgb, var(--el-color-primary) 60%, transparent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--el-color-primary) 34%, transparent);
+}
+
+.panel-tab-icon {
+  font-size: 13px;
+}
+
+.panel-tab-label {
+  line-height: 1;
+}
+
+.panel-tab-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--el-color-danger);
+  color: #fff;
   font-size: 10px;
-  color: var(--el-text-color-placeholder);
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--el-bg-color);
+}
+
+.right-panel-pinned {
+  flex-shrink: 0;
+  padding: 10px 16px 0;
+}
+.right-panel-pinned .panel-section {
+  margin-bottom: 0;
 }
 
 .right-panel-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 0 16px 16px;
+  padding: 12px 16px 16px;
+}
+
+.tab-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.fade-up-enter-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.fade-up-leave-active {
+  transition: opacity 0.12s ease;
+}
+
+.fade-up-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.fade-up-leave-to {
+  opacity: 0;
 }
 
 .panel-section {
@@ -1232,8 +1356,12 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 }
 
 .status-section code {
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
   color: var(--el-text-color-secondary);
+  word-break: break-all;
+  user-select: all;
 }
 
 .mcp-item {
@@ -1406,6 +1534,32 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   line-height: 1.45;
 }
 
+.hint-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+}
+
+.hint-icon {
+  font-size: 16px;
+}
+
+.hint-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.hint-sub {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+
 .code-agent-box {
   border: 1px solid var(--el-color-primary-light-7);
   background: color-mix(in srgb, var(--el-color-primary) 7%, var(--el-fill-color-light));
@@ -1414,6 +1568,40 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-tab,
+  .fade-up-enter-active,
+  .fade-up-leave-active {
+    transition: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .right-panel {
+    width: min(90vw, 380px);
+    max-width: 90vw;
+  }
+
+  .right-panel-topbar {
+    padding: 8px 10px 0;
+  }
+
+  .right-panel-scroll {
+    padding: 10px 12px 14px;
+  }
+
+  .right-panel-pinned {
+    padding: 8px 12px 0;
+  }
+
+  /* 窄栏下图标文字并排会挤，退化为图标 + 更小字号 */
+  .panel-tab {
+    gap: 3px;
+    padding: 5px 4px;
+    font-size: 11px;
+  }
 }
 </style>
 

@@ -120,6 +120,31 @@ export const api = {
   refreshMcpServers: () => fetchApi<any[]>('/mcp/refresh', { method: 'POST' }),
   refreshMcpServer: (name: string) => fetchApi<any>(`/mcp/${name}/refresh`, { method: 'POST' }),
   toggleMcpServer: (name: string) => fetchApi<{ name: string; enabled: boolean }>(`/mcp/${name}/toggle`, { method: 'POST' }),
+
+  // 项目模式文件树：一次列一层目录
+  getProjectTree: (agentId: string, path: string = '') =>
+    fetchApi<{
+      project_root?: string
+      git_branch?: string | null
+      path?: string
+      entries?: Array<{ name: string; path: string; type: 'dir' | 'file' }>
+      error?: string
+    }>(`/tools/project/tree?agent_id=${encodeURIComponent(agentId)}&path=${encodeURIComponent(path)}`),
+
+  readFile: (path: string, maxLines: number = 500, agentId?: string) =>
+    fetchApi<{ file?: string; lines?: string[]; total_lines?: number; truncated?: boolean; error?: string }>(
+      `/tools/file/read?path=${encodeURIComponent(path)}&max_lines=${maxLines}${agentId ? `&agent_id=${encodeURIComponent(agentId)}` : ''}`,
+    ),
+
+  // 在整个项目目录内按名称搜索（含未展开的目录）
+  searchProjectFiles: (agentId: string, q: string) =>
+    fetchApi<{
+      project_root?: string
+      git_branch?: string | null
+      results?: Array<{ name: string; path: string; type: 'dir' | 'file' }>
+      truncated?: boolean
+      error?: string
+    }>(`/tools/project/search?agent_id=${encodeURIComponent(agentId)}&q=${encodeURIComponent(q)}`),
   getSkills: (projectRoot?: string, extraDirs?: string[]) => {
     const params: string[] = []
     if (projectRoot) params.push(`project_root=${encodeURIComponent(projectRoot)}`)
@@ -212,7 +237,7 @@ export const api = {
 
   // File changes
   getFileChanges: (sessionId: string) =>
-    fetchApi<{ session_id: string; git_base_hash: string | null; files: any[]; sub_sessions?: any[]; rounds?: any[] }>(
+    fetchApi<{ session_id: string; git_base_hash: string | null; git_available?: boolean; files: any[]; sub_sessions?: any[]; rounds?: any[] }>(
       `/sessions/${sessionId}/file-changes`
     ),
   getFileDiff: (sessionId: string, filePath: string, round?: number | null) =>

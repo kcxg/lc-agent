@@ -51,6 +51,7 @@
 
       <div
         v-if="skillMenuOpen && !isStreamingState"
+        ref="skillPickerRef"
         class="skill-picker"
         role="listbox"
         aria-label="选择 Skill"
@@ -193,6 +194,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const messageText = ref('')
 const attachments = ref<Attachment[]>([])
 const skillMenuOpen = ref(false)
+const skillPickerRef = ref<HTMLElement | null>(null)
 const skillQuery = ref('')
 const activeSkillIndex = ref(0)
 
@@ -357,6 +359,25 @@ function closeSkillMenu() {
   activeSkillIndex.value = 0
 }
 
+/** 键盘上下移动高亮项时，让高亮项滚动进可视区域 */
+function scrollActiveSkillIntoView() {
+  nextTick(() => {
+    const container = skillPickerRef.value
+    if (!container) return
+    const item = container.querySelector<HTMLElement>('.skill-picker-item.is-active')
+    if (!item) return
+    const itemTop = item.offsetTop
+    const itemBottom = itemTop + item.offsetHeight
+    const viewTop = container.scrollTop
+    const viewBottom = viewTop + container.clientHeight
+    if (itemTop < viewTop) {
+      container.scrollTop = itemTop
+    } else if (itemBottom > viewBottom) {
+      container.scrollTop = itemBottom - container.clientHeight
+    }
+  })
+}
+
 function selectSkill(skill: SkillSuggestion) {
   const textarea = textareaRef.value
   const trigger = getSkillTrigger()
@@ -396,11 +417,13 @@ function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'ArrowDown' && skillSuggestions.value.length > 0) {
       event.preventDefault()
       activeSkillIndex.value = (activeSkillIndex.value + 1) % skillSuggestions.value.length
+      scrollActiveSkillIntoView()
       return
     }
     if (event.key === 'ArrowUp' && skillSuggestions.value.length > 0) {
       event.preventDefault()
       activeSkillIndex.value = (activeSkillIndex.value - 1 + skillSuggestions.value.length) % skillSuggestions.value.length
+      scrollActiveSkillIntoView()
       return
     }
     if ((event.key === 'Enter' || event.key === 'Tab') && skillSuggestions.value.length > 0) {
@@ -649,9 +672,18 @@ function handleCancelEdit() {
   text-align: left;
 }
 
-.skill-picker-item:hover,
-.skill-picker-item.is-active {
+.skill-picker-item:hover {
   background: var(--el-fill-color-light);
+}
+
+/* 键盘高亮项：主色底 + 左侧色条，必须一眼能看出选中了哪一行 */
+.skill-picker-item.is-active {
+  background: color-mix(in srgb, var(--el-color-primary) 16%, var(--el-bg-color-overlay));
+  box-shadow: inset 3px 0 0 var(--el-color-primary);
+}
+
+.skill-picker-item.is-active .skill-picker-name {
+  color: var(--el-color-primary);
 }
 
 .skill-picker-icon {

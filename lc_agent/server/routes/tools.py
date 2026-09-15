@@ -1,3 +1,5 @@
+import asyncio
+from collections import deque
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
@@ -205,6 +207,14 @@ def _require_path_within_project(path: str, project_root: Path) -> str:
     return str(resolved)
 
 
+def _resolve_project_file_path(path: str, project_root: Path) -> str:
+    """Resolve a project-relative (or absolute) file path against the project root."""
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = project_root / candidate
+    return _require_path_within_project(str(candidate), project_root)
+
+
 @router.get("/tools/file/read")
 async def read_file_content(
     path: str,
@@ -218,10 +228,12 @@ async def read_file_content(
     from lc_agent.tools.system_tools._config import validate_read_path
 
     try:
-        resolved = validate_read_path(path)
         if agent_id:
+            # 项目模式下前端可能传项目相对路径（如文件树），统一按项目根解析
             project_root = await _get_project_preview_root(agent_id, engine, user, db)
-            resolved = _require_path_within_project(resolved, project_root)
+            resolved = _resolve_project_file_path(path, project_root)
+        else:
+            resolved = validate_read_path(path)
     except PermissionError as e:
         return {"error": str(e)}
 
@@ -252,6 +264,159 @@ async def read_file_content(
         "total_lines": len(lines),
         "truncated": len(lines) > max_lines,
     }
+
+
+def _git_branch_info(project_root: Path) -> str | None:
+    """Return the current git branch, or None when the project is not a git repo."""
+    import subprocess
+
+    def _git(args: list[str]) -> str:
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            return ""
+        if result.returncode != 0:
+            return ""
+        return result.stdout.strip()
+
+    if not _git(["rev-parse", "--is-inside-work-tree"]):
+        return None
+    return _git(["branch", "--show-current"]) or "(detached HEAD)"
+
+
+@router.get("/tools/project/tree")
+async def list_project_directory(
+    path: str = "",
+    agent_id: str | None = None,
+    user: User = Depends(get_current_user),
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db_session),
+):
+    """List one level of the agent's project directory for the file tree.
+
+    Paths are relative to the project root; an empty path lists the root itself.
+    """
+    if not agent_id:
+        return {"error": "agent_id is required"}
+
+    try:
+        project_root = await _get_project_preview_root(agent_id, engine, user, db)
+    except PermissionError as e:
+        return {"error": str(e)}
+
+    target = (project_root / path).resolve() if path else project_root
+    try:
+        target.relative_to(project_root)
+    except ValueError:
+        return {"error": "Path is outside the agent project directory"}
+
+    if not target.is_dir():
+        return {"error": f"Directory not found: {path or '.'}"}
+
+    entries = []
+    try:
+        for child in target.iterdir():
+            try:
+                is_dir = child.is_dir()
+            except OSError:
+                continue
+            entries.append({
+                "name": child.name,
+                "path": str(child.relative_to(project_root)).replace("\\", "/"),
+                "type": "dir" if is_dir else "file",
+            })
+    except OSError as e:
+        return {"error": str(e)}
+
+    entries.sort(key=lambda e: (e["type"] != "dir", e["name"].lower()))
+
+    return {
+        "project_root": str(project_root),
+        "git_branch": await asyncio.to_thread(_git_branch_info, project_root),
+        "path": str(target.relative_to(project_root)).replace("\\", "/") if target != project_root else "",
+        "entries": entries,
+    }
+
+
+_PROJECT_SEARCH_MAX_RESULTS = 100
+_PROJECT_SEARCH_MAX_SCANNED = 20000
+
+
+def _search_project_tree(
+    project_root: Path,
+    keyword: str,
+    limit: int = _PROJECT_SEARCH_MAX_RESULTS,
+) -> dict:
+    """Breadth-first name search across the whole project directory."""
+    keyword = keyword.strip().lower()
+    if not keyword:
+        return {"results": [], "truncated": False}
+
+    limit = max(1, min(limit, _PROJECT_SEARCH_MAX_RESULTS))
+
+    results: list[dict[str, str]] = []
+    truncated = False
+    scanned = 0
+    queue = deque([project_root])
+
+    while queue and not truncated:
+        current = queue.popleft()
+        try:
+            children = sorted(current.iterdir(), key=lambda p: p.name.lower())
+        except OSError:
+            continue
+
+        for child in children:
+            scanned += 1
+            if scanned > _PROJECT_SEARCH_MAX_SCANNED:
+                truncated = True
+                break
+            try:
+                is_dir = child.is_dir()
+            except OSError:
+                continue
+            if keyword in child.name.lower():
+                if len(results) >= limit:
+                    truncated = True
+                    break
+                results.append({
+                    "name": child.name,
+                    "path": str(child.relative_to(project_root)).replace("\\", "/"),
+                    "type": "dir" if is_dir else "file",
+                })
+            if is_dir:
+                queue.append(child)
+
+    return {"results": results, "truncated": truncated}
+
+
+@router.get("/tools/project/search")
+async def search_project_files(
+    q: str = "",
+    agent_id: str | None = None,
+    limit: int = _PROJECT_SEARCH_MAX_RESULTS,
+    user: User = Depends(get_current_user),
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db_session),
+):
+    """Search file and directory names anywhere under the agent's project directory."""
+    if not agent_id:
+        return {"error": "agent_id is required"}
+
+    try:
+        project_root = await _get_project_preview_root(agent_id, engine, user, db)
+    except PermissionError as e:
+        return {"error": str(e)}
+
+    found = _search_project_tree(project_root, q, limit)
+    branch = await asyncio.to_thread(_git_branch_info, project_root)
+    return {"project_root": str(project_root), "git_branch": branch, **found}
 
 
 @router.get("/tools/processes")

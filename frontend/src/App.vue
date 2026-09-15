@@ -69,7 +69,6 @@
     <AgentManagerDialog ref="agentManagerRef" />
     <CleanupDialog ref="cleanupDialogRef" @cleaned="handleCleanupDone" />
     <ChangePasswordDialog ref="changePasswordRef" />
-    <FileChangesDrawer />
     <AutomationDrawer ref="automationDrawerRef" />
     </div>
   </ConfigProvider>
@@ -92,9 +91,9 @@ import RightPanel from '@/components/layout/RightPanel.vue'
 import AgentManagerDialog from '@/components/dialogs/AgentManagerDialog.vue'
 import CleanupDialog from '@/components/dialogs/CleanupDialog.vue'
 import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
-import FileChangesDrawer from '@/components/chat/FileChangesDrawer.vue'
 import AutomationDrawer from '@/components/automation/AutomationDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useUiStore } from '@/stores/ui'
 
 const { isDark } = useTheme()
 const { leftWidth, rightWidth, startResize } = usePanelResize()
@@ -108,6 +107,7 @@ const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
 const sessionsStore = useSessionsStore()
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 const agentManagerRef = ref<InstanceType<typeof AgentManagerDialog>>()
 const cleanupDialogRef = ref<InstanceType<typeof CleanupDialog>>()
 const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
@@ -132,6 +132,16 @@ watch(rightCollapsed, (v) => {
   try {
     localStorage.setItem(RIGHT_COLLAPSED_KEY, v ? '1' : '0')
   } catch { /* ignore */ }
+})
+
+// 跨组件请求切 tab：收起状态下自动展开右侧面板（移动端则打开右侧抽屉）
+watch(() => uiStore.rightPanelOpenRequest, () => {
+  if (window.innerWidth <= 900) {
+    mobileLeftOpen.value = false
+    mobileRightOpen.value = true
+    return
+  }
+  rightCollapsed.value = false
 })
 
 async function initApp() {

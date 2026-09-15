@@ -1,97 +1,84 @@
 <template>
-  <el-drawer
-    v-model="store.isDrawerOpen"
-    direction="rtl"
-    :size="isMobile ? '100%' : '40%'"
-    :modal="true"
-    :append-to-body="true"
-    :close-on-click-modal="true"
-    :close-on-press-escape="true"
-    class="file-changes-drawer"
-    @opened="handleDrawerOpened"
-  >
-    <template #header>
-      <div class="drawer-header">
-        <div class="drawer-heading">
-          <h3 class="drawer-title">文件变更</h3>
-          <span v-if="changeSource === 'git' && gitBaselineLabel" class="baseline-label">
-            {{ gitBaselineLabel }}
-          </span>
-        </div>
-        <div class="drawer-actions">
-          <el-button-group class="source-switch">
-            <el-button
-              size="small"
-              :type="changeSource === 'agent' ? 'primary' : 'default'"
-              @click="changeSource = 'agent'"
-            >
-              Agent 修改
-            </el-button>
-            <el-button
-              v-if="store.gitBaseHash"
-              size="small"
-              :type="changeSource === 'git' ? 'primary' : 'default'"
-              :loading="gitDiffLoading && gitDiffFiles.length === 0"
-              @click="changeSource = 'git'"
-            >
-              Git Diff
-            </el-button>
-          </el-button-group>
-          <el-select
-            v-if="changeSource === 'agent' && store.rounds.length > 0"
-            v-model="store.selectedRound"
+  <div class="file-changes-panel">
+    <div class="panel-section changes-toolbar">
+      <div class="changes-toolbar-row">
+        <el-button-group class="source-switch">
+          <el-button
             size="small"
-            class="round-select"
-            aria-label="对话轮次"
+            :type="changeSource === 'agent' ? 'primary' : 'default'"
+            @click="changeSource = 'agent'"
           >
-            <el-option label="全部轮次" :value="null" />
-            <el-option
-              v-for="r in store.rounds"
-              :key="r.round_number"
-              :label="`第 ${r.round_number} 轮`"
-              :value="r.round_number"
-            />
-          </el-select>
-          <el-select
-            v-if="changeSource === 'git'"
-            v-model="gitBaseline"
+            Agent 修改
+          </el-button>
+          <el-button
+            v-if="store.gitAvailable"
             size="small"
-            class="git-baseline-select"
-            aria-label="Git 基准"
-            @change="handleBaselineChange"
+            :type="changeSource === 'git' ? 'primary' : 'default'"
+            :loading="gitDiffLoading && gitDiffFiles.length === 0"
+            @click="changeSource = 'git'"
           >
-            <el-option label="会话基准" value="session" :disabled="!store.gitBaseHash" />
-            <el-option label="HEAD" value="head" />
-            <el-option label="暂存区（HEAD → 暂存区）" value="staged" />
-            <el-option label="指定提交" value="commit" />
-          </el-select>
-          <el-select
-            v-if="changeSource === 'git' && gitBaseline === 'commit'"
-            v-model="selectedCommit"
-            size="small"
-            class="git-commit-select"
-            placeholder="选择提交"
-            aria-label="选择 Git 提交"
-            @change="loadGitDiff"
-          >
-            <el-option
-              v-for="item in gitCommits"
-              :key="item.hash"
-              :label="`${item.short_hash} ${item.subject}`"
-              :value="item.hash"
-            />
-          </el-select>
-          <el-segmented
-            v-model="diffMode"
-            :options="[
-              { label: 'Unified', value: 'unified' },
-              { label: 'Side by Side', value: 'side-by-side' },
-            ]"
-            size="small"
-          />
-        </div>
+            Git Diff
+          </el-button>
+        </el-button-group>
+        <el-segmented
+          v-model="diffMode"
+          :options="[
+            { label: 'Unified', value: 'unified' },
+            { label: 'Side by Side', value: 'side-by-side' },
+          ]"
+          size="small"
+        />
       </div>
-    </template>
+      <div class="changes-toolbar-row changes-toolbar-filters">
+        <el-select
+          v-if="changeSource === 'agent' && store.rounds.length > 0"
+          v-model="store.selectedRound"
+          size="small"
+          class="round-select"
+          aria-label="对话轮次"
+        >
+          <el-option label="全部轮次" :value="null" />
+          <el-option
+            v-for="r in store.rounds"
+            :key="r.round_number"
+            :label="`第 ${r.round_number} 轮`"
+            :value="r.round_number"
+          />
+        </el-select>
+        <el-select
+          v-if="changeSource === 'git'"
+          v-model="gitBaseline"
+          size="small"
+          class="git-baseline-select"
+          aria-label="Git 基准"
+          @change="handleBaselineChange"
+        >
+          <el-option label="会话基准" value="session" :disabled="!store.gitBaseHash" />
+          <el-option label="HEAD" value="head" />
+          <el-option label="暂存区（HEAD → 暂存区）" value="staged" />
+          <el-option label="指定提交" value="commit" />
+        </el-select>
+        <el-select
+          v-if="changeSource === 'git' && gitBaseline === 'commit'"
+          v-model="selectedCommit"
+          size="small"
+          class="git-commit-select"
+          placeholder="选择提交"
+          aria-label="选择 Git 提交"
+          @change="loadGitDiff"
+        >
+          <el-option
+            v-for="item in gitCommits"
+            :key="item.hash"
+            :label="`${item.short_hash} ${item.subject}`"
+            :value="item.hash"
+          />
+        </el-select>
+        <span v-if="changeSource === 'git' && gitBaselineLabel" class="baseline-label">
+          {{ gitBaselineLabel }}
+        </span>
+      </div>
+    </div>
 
     <div v-if="changeSource === 'agent' && !store.hasChanges" class="empty-state">
       <p>当前会话没有文件变更</p>
@@ -101,7 +88,7 @@
       <p>当前轮次没有文件变更</p>
     </div>
 
-    <div v-if="changeSource === 'agent' && store.hasChanges && store.displayFiles.length > 0" class="file-list">
+    <div v-if="changeSource === 'agent' && store.hasChanges && store.displayFiles.length > 0" class="panel-section file-list">
       <div
         v-for="file in store.displayFiles"
         :key="file.file_path"
@@ -146,7 +133,7 @@
     </div>
 
     <!-- Sub-agent summaries -->
-    <div v-if="changeSource === 'agent' && store.displaySubSessions.length > 0" class="sub-agent-section">
+    <div v-if="changeSource === 'agent' && store.displaySubSessions.length > 0" class="panel-section sub-agent-section">
       <div class="sub-agent-section-title">子 Agent 变更</div>
       <div
         v-for="sub in store.displaySubSessions"
@@ -235,10 +222,15 @@
               @keydown.enter="toggleGitFile(file.file_path)"
               @keydown.space.prevent="toggleGitFile(file.file_path)"
             >
-              <span class="expand-icon">{{ expandedGitFiles.has(file.file_path) ? '▼' : '▶' }}</span>
+              <span class="expand-icon" :class="{ 'is-open': expandedGitFiles.has(file.file_path) }">
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
               <span :class="['change-tag', `change-tag--${file.change_type}`]">
                 {{ changeTypeLabels[file.change_type] || '?' }}
               </span>
+              <FileTypeIcon :name="file.file_path" />
               <span class="file-name" :title="file.file_path">{{ getFileName(file.file_path) }}</span>
               <span class="file-dir" :title="file.file_path">{{ getFileDir(file.file_path) }}</span>
               <span class="line-stats">
@@ -261,20 +253,23 @@
         </div>
       </template>
     </div>
-  </el-drawer>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import { useFileChangesStore } from '@/stores/file-changes'
 import { useSessionsStore } from '@/stores/sessions'
+import { useUiStore } from '@/stores/ui'
 import { api } from '@/api/http'
+import FileTypeIcon from '@/components/common/FileTypeIcon.vue'
 import { html as diff2htmlHtml } from 'diff2html'
 import 'diff2html/bundles/css/diff2html.min.css'
 
 const store = useFileChangesStore()
 const sessionsStore = useSessionsStore()
+const uiStore = useUiStore()
 
 type ChangeSource = 'agent' | 'git'
 type GitBaseline = 'session' | 'head' | 'staged' | 'commit'
@@ -309,11 +304,6 @@ const gitTotalAdditions = computed(() =>
 const gitTotalDeletions = computed(() =>
   gitDiffFiles.value.reduce((sum, file) => sum + file.deletions, 0),
 )
-
-const isMobile = ref(window.innerWidth <= 900)
-const handleResize = () => { isMobile.value = window.innerWidth <= 900 }
-onMounted(() => { window.addEventListener('resize', handleResize) })
-onBeforeUnmount(() => { window.removeEventListener('resize', handleResize) })
 
 const changeTypeLabels: Record<string, string> = {
   edit: 'M',
@@ -384,14 +374,19 @@ async function toggleExpand(filePath: string) {
   }
 }
 
-// 卡片点击：打开 Drawer 后自动展开并滚动定位到该文件
+// 卡片点击：切到变更 tab 后自动展开并滚动定位到该文件
 watch(() => store.pendingOpenFile, (path) => {
-  if (path) void handlePendingOpenFile(path)
+  if (path && uiStore.activeTab === 'changes') void handlePendingOpenFile(path)
 })
 
-async function handleDrawerOpened() {
+watch(() => uiStore.activeTab, async (tab) => {
+  if (tab !== 'changes') return
+  const sessionId = sessionsStore.currentSessionId
+  if (sessionId && sessionId !== store.loadedSessionId) {
+    await store.fetchFileChanges(sessionId)
+  }
   if (store.pendingOpenFile) await handlePendingOpenFile(store.pendingOpenFile)
-}
+}, { immediate: true })
 
 async function handlePendingOpenFile(path: string) {
   store.pendingOpenFile = null
@@ -468,7 +463,6 @@ function renderDiff(data: any, filePath: string): string {
 }
 
 watch(() => store.selectedRound, () => {
-
   // 轮次切换后缓存的 diff 内容不再适用，全部作废
   expandedFiles.clear()
   expandedSubSessions.clear()
@@ -629,7 +623,8 @@ async function toggleExpandSubFile(subSessionId: string, filePath: string) {
 
 watch(() => store.loadedSessionId, () => {
   changeSource.value = 'agent'
-  gitBaseline.value = 'session'
+  // 无会话基准（本次会话未改过文件）时回退到 HEAD，否则「会话基准」取不到 ref
+  gitBaseline.value = store.gitBaseHash ? 'session' : 'head'
   selectedCommit.value = ''
   gitCommits.value = []
   expandedFiles.clear()
@@ -647,50 +642,31 @@ watch(() => store.loadedSessionId, () => {
 watch(changeSource, (source) => {
   if (source === 'git') void loadGitDiff()
 })
-
-watch(() => store.isDrawerOpen, async (open) => {
-  if (open) {
-    const sessionId = sessionsStore.currentSessionId
-    if (sessionId && sessionId !== store.loadedSessionId) {
-      await store.fetchFileChanges(sessionId)
-    }
-  }
-})
 </script>
 
 <style scoped>
-.drawer-header {
+.changes-toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
-  width: 100%;
 }
 
-.drawer-heading {
+.changes-toolbar-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   min-width: 0;
-  gap: 8px;
 }
 
-.drawer-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.drawer-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+.changes-toolbar-filters {
+  justify-content: flex-start;
 }
 
 .baseline-label {
   overflow: hidden;
-  max-width: 180px;
+  flex: 1;
+  min-width: 0;
   color: var(--el-text-color-secondary);
   font-size: 11px;
   text-overflow: ellipsis;
@@ -699,27 +675,29 @@ watch(() => store.isDrawerOpen, async (open) => {
 
 .git-baseline-select {
   width: 150px;
+  max-width: 100%;
 }
 
 .round-select {
   width: 120px;
+  max-width: 100%;
 }
 
 .git-commit-select {
-  width: 220px;
+  width: 100%;
 }
 
 .empty-state {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 200px;
+  padding: 32px 12px;
   color: var(--el-text-color-secondary);
+  font-size: 13px;
 }
 
 .file-list {
-  display: flex;
-  flex-direction: column;
+  padding: 4px 10px;
 }
 
 .file-item {
@@ -730,7 +708,7 @@ watch(() => store.isDrawerOpen, async (open) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 4px;
   cursor: pointer;
   transition: background 0.15s;
   user-select: none;
@@ -803,11 +781,16 @@ watch(() => store.isDrawerOpen, async (open) => {
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 12px;
+  color: var(--el-text-color-secondary);
   border-radius: 4px;
   flex-shrink: 0;
   opacity: 0.5;
   transition: opacity 0.15s, background 0.15s;
+}
+
+.copy-path-btn svg {
+  width: 12px;
+  height: 12px;
 }
 
 .file-header:hover .copy-path-btn {
@@ -829,7 +812,7 @@ watch(() => store.isDrawerOpen, async (open) => {
 }
 
 .file-diff-container {
-  padding: 0 12px 12px;
+  padding: 0 0 10px;
 }
 
 .diff-loading {
@@ -922,7 +905,6 @@ watch(() => store.isDrawerOpen, async (open) => {
 }
 
 .git-diff-file-list {
-  max-height: calc(100vh - 170px);
   overflow: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -975,22 +957,17 @@ watch(() => store.isDrawerOpen, async (open) => {
   font-size: 11px;
 }
 
-.git-diff-file-list .file-diff-container {
-  padding-bottom: 12px;
+.git-view {
+  display: flex;
+  flex-direction: column;
+  background: var(--el-fill-color-extra-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.git-diff-file-list .diff-content {
-  max-height: 60vh;
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.git-diff-file-list .diff-content :deep(.d2h-wrapper) {
-  font-size: 12px;
-}
-
-.git-diff-file-list .diff-content :deep(.d2h-file-header) {
-  display: none;
+.git-view .diff-content {
+  border-radius: 6px;
 }
 
 .git-diff-file-list .diff-content :deep(.d2h-diff-table) {
@@ -998,54 +975,15 @@ watch(() => store.isDrawerOpen, async (open) => {
   width: 100%;
 }
 
-.git-diff-file-list .diff-content :deep(.d2h-code-linenumber) {
-  position: static !important;
-  display: table-cell !important;
-  width: 40px !important;
-  min-width: 40px !important;
-  padding: 0 4px !important;
-  box-sizing: border-box !important;
-}
-
-.git-diff-file-list .diff-content :deep(.d2h-code-line) {
-  padding: 0 8px !important;
-  width: auto !important;
-}
-
-.git-diff-file-list .diff-content :deep(.d2h-code-line-ctn) {
-  white-space: pre-wrap !important;
-  word-break: break-all !important;
-}
-
-.git-diff-file-list .diff-content :deep(.d2h-code-side-linenumber) {
-  position: static !important;
-  display: table-cell !important;
-  width: 40px !important;
-  min-width: 40px !important;
-  padding: 0 4px !important;
-  box-sizing: border-box !important;
-}
-
-.git-diff-file-list .diff-content :deep(.d2h-code-side-line) {
-  padding: 0 8px !important;
-  width: auto !important;
-}
-
-.git-diff-file-list .diff-content :deep(.d2h-code-side-line-ctn) {
-  white-space: pre-wrap !important;
-  word-break: break-all !important;
-}
-
 .sub-agent-section {
-  border-top: 2px solid var(--el-border-color);
-  margin-top: 4px;
+  padding: 4px 10px;
 }
 
 .sub-agent-section-title {
   font-size: 12px;
   font-weight: 700;
   color: var(--el-text-color-secondary);
-  padding: 10px 12px 4px;
+  padding: 8px 4px 4px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -1058,7 +996,7 @@ watch(() => store.isDrawerOpen, async (open) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 4px;
   cursor: pointer;
   transition: background 0.15s;
   user-select: none;

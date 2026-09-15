@@ -36,7 +36,10 @@
             class="tf-filepath clickable"
             :title="`点击查看完整文件：${filePath}`"
             @click.stop="openFileModal(filePath)"
-          >{{ filePath }}</div>
+          >
+            <FileTypeIcon :name="filePath" compact />
+            <span class="tf-filepath-text">{{ filePath }}</span>
+          </div>
         </ToolField>
         <ToolField label="改动">
           <div class="tf-diff">
@@ -52,7 +55,7 @@
             </button>
             <div class="tf-actions">
               <button class="tf-link-btn" @click.stop="openFileModal(filePath)">看全文</button>
-              <button class="tf-link-btn" @click.stop="openInDrawer">在抽屉里看</button>
+              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板看</button>
             </div>
           </div>
         </ToolField>
@@ -86,7 +89,7 @@
             </div>
             <div class="tf-actions">
               <button class="tf-link-btn" @click.stop="openFileModal(filePath)">看全文</button>
-              <button class="tf-link-btn" @click.stop="openInDrawer">在抽屉里看</button>
+              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板看</button>
             </div>
           </div>
         </ToolField>
@@ -103,6 +106,7 @@
       :language="fileModalLang"
       :title="fileModalPath"
       kicker="文件内容"
+      :source-path="fileModalPath"
       @close="showFileModal = false"
     />
   </div>
@@ -111,7 +115,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { fetchApi } from '@/api/http'
-import { useFileChangesStore } from '@/stores/file-changes'
+import { useUiStore } from '@/stores/ui'
 import type { ToolCall } from '@/stores/chat'
 import CodeBlockModal from '../CodeBlockModal.vue'
 import ToolField from './ToolField.vue'
@@ -154,7 +158,7 @@ const showFileModal = ref(false)
 const fileModalCode = ref('')
 const fileModalLang = ref('')
 const fileModalPath = ref('')
-const fileChangesStore = useFileChangesStore()
+const uiStore = useUiStore()
 
 const statusType = computed(() => statusTagType(props.toolCall.status))
 const statusText = computed(() => statusLabel(props.toolCall.status))
@@ -308,10 +312,9 @@ async function openFileModal(path: string): Promise<void> {
   }
 }
 
-function openInDrawer(): void {
+function openInChangesPanel(): void {
   if (!filePath.value) return
-  fileChangesStore.pendingOpenFile = filePath.value
-  fileChangesStore.openDrawer()
+  uiStore.requestTab('changes', { filePath: filePath.value })
 }
 </script>
 
@@ -452,10 +455,18 @@ function openInDrawer(): void {
 }
 
 .tf-filepath {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   line-height: 18px;
   font-family: 'JetBrains Mono', 'Consolas', monospace;
   color: var(--el-text-color-primary);
+  overflow-wrap: anywhere;
+}
+
+.tf-filepath-text {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 

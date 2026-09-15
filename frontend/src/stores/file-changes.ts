@@ -35,9 +35,9 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
   const rounds = ref<RoundGroup[]>([])
   const selectedRound = ref<number | null>(null) // null = 全部轮次
   const gitBaseHash = ref<string | null>(null)
-  const isDrawerOpen = ref(false)
+  const gitAvailable = ref(false)
   const loadedSessionId = ref<string | null>(null)
-  // 待定位展开的文件：卡片点击后由 Drawer 消费（展开 diff 并滚动定位）
+  // 待定位展开的文件：卡片点击后由变更面板消费（展开 diff 并滚动定位）
   const pendingOpenFile = ref<string | null>(null)
 
   const displayFiles = computed(() => {
@@ -54,14 +54,6 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     return files.value.length + subFileCount
   })
   const hasChanges = computed(() => files.value.length > 0 || subSessions.value.length > 0)
-
-  function openDrawer() {
-    isDrawerOpen.value = true
-  }
-
-  function closeDrawer() {
-    isDrawerOpen.value = false
-  }
 
   function mergeIntoFileList(list: FileChangeItem[], change: {
     file_path: string
@@ -133,6 +125,7 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
       }))
       selectedRound.value = null
       gitBaseHash.value = data.git_base_hash || null
+      gitAvailable.value = Boolean((data as any).git_available)
       loadedSessionId.value = sessionId
     } catch {
       // Silently fail — may be old session without file changes
@@ -145,7 +138,6 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     rounds.value = []
     selectedRound.value = null
     gitBaseHash.value = null
-    isDrawerOpen.value = false
     loadedSessionId.value = null
     pendingOpenFile.value = null
   }
@@ -156,15 +148,13 @@ export const useFileChangesStore = defineStore('fileChanges', () => {
     rounds,
     selectedRound,
     gitBaseHash,
-    isDrawerOpen,
+    gitAvailable,
     loadedSessionId,
     pendingOpenFile,
     displayFiles,
     displaySubSessions,
     fileCount,
     hasChanges,
-    openDrawer,
-    closeDrawer,
     addFileChange,
     fetchFileChanges,
     reset,

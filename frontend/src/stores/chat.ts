@@ -853,7 +853,7 @@ export const useChatStore = defineStore('chat', () => {
       const isSubAgent = eventSessionId && eventSessionId !== sessionId && eventSessionId.includes('--sa--')
       const fileChangesStore = useFileChangesStore()
       if (isSubAgent) {
-        // Sub-agent change — will be fully loaded on drawer open via fetchFileChanges
+        // Sub-agent change — will be fully loaded on changes panel open via fetchFileChanges
         return
       }
       fileChangesStore.addFileChange({
