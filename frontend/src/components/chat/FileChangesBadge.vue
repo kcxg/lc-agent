@@ -9,7 +9,7 @@
     <button
       class="file-changes-badge"
       :aria-label="`查看 ${store.fileCount} 个文件变更`"
-      @click="store.openDrawer()"
+      @click="uiStore.requestTab('changes')"
     >
       <span class="badge-icon">👁️</span>
       <span class="badge-count">{{ store.fileCount }}</span>
@@ -20,8 +20,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useFileChangesStore } from '@/stores/file-changes'
+import { useUiStore } from '@/stores/ui'
 
 const store = useFileChangesStore()
+const uiStore = useUiStore()
 
 const changeTypeLabel: Record<string, string> = {
   edit: 'M',

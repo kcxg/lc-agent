@@ -33,6 +33,7 @@
         @new-chat="handleNewChat"
         @new-chat-for-agent="handleAgentChange"
         @switch-session="handleSwitchSession"
+        @close-session-tab="handleSessionDeleted"
         @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
         @open-settings="openCleanupDialog"
         @change-password="openChangePassword"
@@ -47,6 +48,11 @@
       />
 
       <main class="chat-main">
+        <SessionTabs
+          v-if="isChatRoute"
+          @activate="handleTabActivate"
+          @close="handleTabClose"
+        />
         <router-view />
       </main>
 
@@ -69,7 +75,6 @@
     <AgentManagerDialog ref="agentManagerRef" />
     <CleanupDialog ref="cleanupDialogRef" @cleaned="handleCleanupDone" />
     <ChangePasswordDialog ref="changePasswordRef" />
-    <FileChangesDrawer />
     <AutomationDrawer ref="automationDrawerRef" />
     </div>
   </ConfigProvider>
@@ -86,15 +91,21 @@ import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useAgentsStore } from '@/stores/agents'
 import { useSessionsStore } from '@/stores/sessions'
+import type { Session } from '@/stores/sessions'
+import { useSessionTabsStore } from '@/stores/session-tabs'
+import { useOpenedFilesStore } from '@/stores/opened-files'
+import { useChatUiStateStore } from '@/stores/chat-ui-state'
+import { useFileChangesStore } from '@/stores/file-changes'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import LeftSidebar from '@/components/layout/LeftSidebar.vue'
 import RightPanel from '@/components/layout/RightPanel.vue'
+import SessionTabs from '@/components/layout/SessionTabs.vue'
 import AgentManagerDialog from '@/components/dialogs/AgentManagerDialog.vue'
 import CleanupDialog from '@/components/dialogs/CleanupDialog.vue'
 import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
-import FileChangesDrawer from '@/components/chat/FileChangesDrawer.vue'
 import AutomationDrawer from '@/components/automation/AutomationDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useUiStore } from '@/stores/ui'
 
 const { isDark } = useTheme()
 const { leftWidth, rightWidth, startResize } = usePanelResize()
@@ -107,7 +118,11 @@ const chatStore = useChatStore()
 const toolsStore = useToolsStore()
 const agentsStore = useAgentsStore()
 const sessionsStore = useSessionsStore()
+const sessionTabsStore = useSessionTabsStore()
+const openedFilesStore = useOpenedFilesStore()
+const chatUiStateStore = useChatUiStateStore()
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 const agentManagerRef = ref<InstanceType<typeof AgentManagerDialog>>()
 const cleanupDialogRef = ref<InstanceType<typeof CleanupDialog>>()
 const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
@@ -119,6 +134,8 @@ const mobileRightOpen = ref(false)
 const appName = ref('lc_agent')
 
 const isPublicRoute = computed(() => !!route.meta.public)
+// 标签栏只管聊天会话：Admin / Usage 等整页路由不产生标签，也不该显示标签栏
+const isChatRoute = computed(() => ['home', 'chat'].includes(String(route.name || '')))
 const appInitialized = ref(false)
 
 const RIGHT_COLLAPSED_KEY = 'lc-agent:layout:rightCollapsed'
@@ -134,6 +151,16 @@ watch(rightCollapsed, (v) => {
   } catch { /* ignore */ }
 })
 
+// 跨组件请求切 tab：收起状态下自动展开右侧面板（移动端则打开右侧抽屉）
+watch(() => uiStore.rightPanelOpenRequest, () => {
+  if (window.innerWidth <= 900) {
+    mobileLeftOpen.value = false
+    mobileRightOpen.value = true
+    return
+  }
+  rightCollapsed.value = false
+})
+
 async function initApp() {
   if (appInitialized.value || isPublicRoute.value) return
   appInitialized.value = true
@@ -144,6 +171,15 @@ async function initApp() {
     agentsStore.init(),
     sessionsStore.init(initialSessionId),
   ])
+
+  // 恢复上次的标签集合，剔除已删除的会话；本地（未落库）会话 id 也算有效
+  sessionTabsStore.restoreTabs([
+    ...sessionsStore.sessions.map(s => s.id),
+    ...(initialSessionId ? [initialSessionId] : []),
+  ])
+
+  // 恢复当前 agent 上次打开的文件标签（localStorage）
+  openedFilesStore.restoreForCurrentAgent()
 
   try {
     const health = await api.health()
@@ -158,6 +194,13 @@ async function initApp() {
   const sessionId = route.params.sessionId as string
   if (sessionId) {
     await restoreSession(sessionId)
+    return
+  }
+
+  // URL 停在首页但上次有激活标签：直接恢复到那个会话。
+  // 仅在聊天路由上做，否则直接打开 /admin 会被劫持回聊天页。
+  if (isChatRoute.value && sessionTabsStore.activeTabId) {
+    await handleSwitchSession(sessionTabsStore.activeTabId)
     return
   }
 
@@ -216,33 +259,24 @@ watch(() => route.params.sessionId, (newId) => {
 })
 
 async function restoreSession(sessionId: string) {
+  // 深链 / 前进后退进入某个会话时，同样把它纳入标签栏（已打开则去重激活）
+  sessionTabsStore.openTab(sessionId)
   if (chatStore.threadId === sessionId && chatStore.isConnected) return
   if (!sessionsStore.isLoaded) return
 
   const session = sessionsStore.sessions.find(s => s.id === sessionId)
   if (session) {
     sessionsStore.selectSession(sessionId)
-    // agent_id 可能指向已被隐藏的内置 chat，不存在时保持当前选择
-    if (
-      session.agent_id &&
-      session.agent_id !== agentsStore.currentAgentId &&
-      agentsStore.agents.some(a => a.id === session.agent_id)
-    ) {
-      await agentsStore.selectAgent(session.agent_id)
-    }
-    const sessionAgent = agentsStore.agents.find(a => a.id === session.agent_id)
-    if (sessionAgent?.source === 'code') {
-      toolsStore.syncModelWithAgentDefault()
-    } else if (session.model) {
-      toolsStore.applyModel(session.model)
-    }
+    await applySessionContext(session)
     await chatStore.switchToSession(sessionId)
+    sessionTabsStore.notifySwitchCompleted()
     return
   }
 
   if (sessionsStore.lastLoadFailed) {
     sessionsStore.selectSession(sessionId)
     await chatStore.switchToSession(sessionId)
+    sessionTabsStore.notifySwitchCompleted()
     return
   }
 
@@ -256,50 +290,102 @@ async function restoreSession(sessionId: string) {
     }
     applySessionModel(sessionModel)
     await chatStore.switchToSession(sessionId)
+    sessionTabsStore.notifySwitchCompleted()
   }
 }
 
 async function handleNewChat() {
   const sessionModel = getCurrentRightPanelModelForAgent(agentsStore.currentAgentId)
   const session = sessionsStore.createLocalSession(agentsStore.currentAgentId, sessionModel)
+  sessionTabsStore.openTab(session.id)
   const sameRouteSession = route.params.sessionId === session.id
   await chatStore.switchToSession(session.id)
   await router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: agentsStore.currentAgentId } })
+  sessionTabsStore.notifySwitchCompleted()
   if (sameRouteSession) {
     await restoreSession(session.id)
   }
   closeMobileDrawers()
 }
 
-async function handleSwitchSession(sessionId: string) {
-  if (chatStore.threadId === sessionId && chatStore.isConnected) {
-    const session = sessionsStore.sessions.find(s => s.id === sessionId)
-    const agentId = session?.agent_id || agentsStore.currentAgentId
-    const sessionAgent = agentsStore.agents.find(a => a.id === agentId)
-    if (sessionAgent?.source === 'code') {
-      toolsStore.syncModelWithAgentDefault()
-    } else if (session?.model) {
-      toolsStore.applyModel(session.model)
-    }
-    router.push({ name: 'chat', params: { sessionId }, query: { agent: agentId } })
-    closeMobileDrawers()
-    return
+/**
+ * 切到某会话时对齐 agent 上下文：R3-Q1 选了跨 agent 全局标签栏，
+ * 激活别的 agent 的标签必须先把 agent 切过去，否则右侧面板/项目树/模型全是旧的。
+ * 先切 agent 再同步模型——反过来会拿旧 agent 的 source 去判断，模型会错。
+ */
+async function applySessionContext(session: Session | undefined) {
+  // agent_id 可能指向已被隐藏的内置 chat，不存在于列表时保持当前选择
+  const sessionAgent = agentsStore.agents.find(a => a.id === session?.agent_id)
+  if (sessionAgent && sessionAgent.id !== agentsStore.currentAgentId) {
+    await agentsStore.selectAgent(sessionAgent.id)
   }
-  const session = sessionsStore.sessions.find(s => s.id === sessionId)
-  sessionsStore.selectSession(sessionId)
-  const agentId = session?.agent_id || agentsStore.currentAgentId
-  const sessionAgent = agentsStore.agents.find(a => a.id === agentId)
   if (sessionAgent?.source === 'code') {
     toolsStore.syncModelWithAgentDefault()
   } else if (session?.model) {
     toolsStore.applyModel(session.model)
   }
-  await chatStore.switchToSession(sessionId)
-  if (session?.agent_id && session.agent_id !== agentsStore.currentAgentId) {
-    await agentsStore.selectAgent(session.agent_id)
+}
+
+async function handleSwitchSession(sessionId: string) {
+  // 点击侧边栏会话 = 打开标签（已打开则去重激活）
+  sessionTabsStore.openTab(sessionId)
+  const session = sessionsStore.sessions.find(s => s.id === sessionId)
+
+  if (chatStore.threadId === sessionId && chatStore.isConnected) {
+    await applySessionContext(session)
+    // 会话已在内存：仍需恢复其滚动位置（用户可能滚动过再切走）
+    useFileChangesStore().switchToSession(sessionId)
+    sessionTabsStore.notifySwitchCompleted()
+    router.push({ name: 'chat', params: { sessionId }, query: { agent: agentsStore.currentAgentId } })
+    closeMobileDrawers()
+    return
   }
-  router.push({ name: 'chat', params: { sessionId }, query: { agent: agentId } })
+
+  sessionsStore.selectSession(sessionId)
+  await applySessionContext(session)
+  await chatStore.switchToSession(sessionId)
+  // 数据加载完成，通知 ChatView 恢复该标签的滚动位置/子会话视图
+  sessionTabsStore.notifySwitchCompleted()
+  router.push({ name: 'chat', params: { sessionId }, query: { agent: agentsStore.currentAgentId } })
   closeMobileDrawers()
+}
+
+/** 点击标签：切过去，跨 agent 时自动切 agent（R3-Q1 选了全局一个标签栏） */
+async function handleTabActivate(sessionId: string) {
+  sessionTabsStore.setActiveTab(sessionId)
+  await handleSwitchSession(sessionId)
+}
+
+/** 关闭标签：断开该会话的管线并释放缓存，再激活关闭后的目标标签 */
+async function handleTabClose(sessionId: string) {
+  const nextId = sessionTabsStore.closeTab(sessionId)
+  chatStore.releaseSession(sessionId)
+  chatUiStateStore.clearSession(sessionId)
+  useFileChangesStore().dropSession(sessionId)
+
+  // 关掉的不是当前标签，主区内容不受影响
+  if (chatStore.threadId !== sessionId) return
+  if (!nextId) {
+    // 最后一个标签被关：回首页空态。会话本身仍在侧边栏列表里，未被删除
+    await router.push({ name: 'home' })
+    return
+  }
+  await handleSwitchSession(nextId)
+}
+
+/** 会话被删除：标签已由 sessionsStore 内的 removeTab 摘掉，这里只负责善后主区 */
+async function handleSessionDeleted(sessionId: string) {
+  chatStore.releaseSession(sessionId)
+  chatUiStateStore.clearSession(sessionId)
+  useFileChangesStore().dropSession(sessionId)
+
+  if (chatStore.threadId !== sessionId) return
+  const nextId = sessionTabsStore.activeTabId
+  if (!nextId) {
+    await router.push({ name: 'home' })
+    return
+  }
+  await handleSwitchSession(nextId)
 }
 
 async function handleAgentChange(agentId: string) {
@@ -307,6 +393,7 @@ async function handleAgentChange(agentId: string) {
   const sessionModel = getSessionModelForAgent(agentId)
   applySessionModel(sessionModel)
   const session = sessionsStore.createLocalSession(agentId, sessionModel)
+  sessionTabsStore.openTab(session.id)
   await chatStore.switchToSession(session.id)
   await router.push({ name: 'chat', params: { sessionId: session.id }, query: { agent: agentId } })
   closeMobileDrawers()
@@ -339,13 +426,14 @@ function handleLogout() {
 
 function handleCleanupDone() {
   // 清理后当前会话可能已被删除（用户取消"跳过活跃"勾选时），需要善后
-  const currentId = sessionsStore.currentSessionId
+  // 标签集合已在 init/删除路径里同步，这里只看主区是否还指着一个不存在的会话
+  const currentId = chatStore.threadId
   const stillExists = currentId ? sessionsStore.sessions.some(s => s.id === currentId) : false
   if (stillExists) return
-  // 当前会话已删：优先切换到第一个会话，无会话则新建
-  const firstSession = sessionsStore.sessions[0]
-  if (firstSession) {
-    handleSwitchSession(firstSession.id)
+  // 当前会话已删：优先切到激活标签，其次第一个会话，都无则新建
+  const nextId = sessionTabsStore.activeTabId || sessionsStore.sessions[0]?.id
+  if (nextId) {
+    handleSwitchSession(nextId)
   } else {
     handleNewChat()
   }

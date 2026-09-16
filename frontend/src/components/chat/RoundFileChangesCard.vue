@@ -50,10 +50,12 @@
 import { computed } from 'vue'
 import { TopRight } from '@element-plus/icons-vue'
 import { useFileChangesStore, type FileChangeItem } from '@/stores/file-changes'
+import { useUiStore } from '@/stores/ui'
 
 const props = defineProps<{ round: number }>()
 
 const store = useFileChangesStore()
+const uiStore = useUiStore()
 
 const group = computed(() => store.rounds.find(r => r.round_number === props.round) || null)
 
@@ -85,14 +87,11 @@ function fileDir(path: string): string {
 }
 
 function openRoundDrawer() {
-  store.selectedRound = props.round
-  store.openDrawer()
+  uiStore.requestTab('changes', { round: props.round })
 }
 
 function openFile(file: FileChangeItem) {
-  store.selectedRound = props.round
-  store.pendingOpenFile = file.file_path
-  store.openDrawer()
+  uiStore.requestTab('changes', { round: props.round, filePath: file.file_path })
 }
 </script>
 

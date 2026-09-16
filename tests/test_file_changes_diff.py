@@ -200,3 +200,96 @@ def test_git_baselines_report_expected_file_stats(tmp_path):
     assert commit_result["available"] is True
     assert commit_result["baseline"] == "commit"
     assert commit_result["files"][0]["file_path"] == str(file_path.resolve())
+
+
+def _fake_engine(project_root, project_mode=True, preset_exists=True):
+    """构造最小 engine，只暴露 _resolve_project_dir 需要的两个方法。"""
+    preset = SimpleNamespace(project_mode=project_mode, project_root=str(project_root))
+    return SimpleNamespace(
+        _preset_exists=lambda agent_id: preset_exists,
+        _resolve_preset=lambda agent_id: preset,
+    )
+
+
+def test_resolve_project_dir_returns_repo_for_project_mode(tmp_path):
+    from lc_agent.server.routes.file_changes import _resolve_project_dir
+
+    sess = SimpleNamespace(agent_id="lc-agent")
+    assert _resolve_project_dir(sess, _fake_engine(tmp_path)) == str(tmp_path)
+
+
+def test_resolve_project_dir_skips_non_project_mode(tmp_path):
+    from lc_agent.server.routes.file_changes import _resolve_project_dir
+
+    sess = SimpleNamespace(agent_id="chat")
+    assert _resolve_project_dir(sess, _fake_engine(tmp_path, project_mode=False)) is None
+    assert _resolve_project_dir(sess, _fake_engine(tmp_path, preset_exists=False)) is None
+    assert _resolve_project_dir(sess, None) is None
+
+
+def test_is_git_repo_detects_repo_and_plain_dir(tmp_path):
+    from lc_agent.server.routes.file_changes import _is_git_repo
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run_git(repo, "init")
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    assert _is_git_repo(str(repo)) is True
+    assert _is_git_repo(str(plain)) is False
+
+
+def test_git_context_falls_back_to_project_dir_without_changes(tmp_path):
+    """本会话没有文件变更时，仍应能从 agent 项目目录解析出 git 仓库。"""
+    import asyncio
+
+    from lc_agent.server.routes.file_changes import _get_git_context
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run_git(repo, "init")
+
+    sess = SimpleNamespace(agent_id="lc-agent", user_id="u1", git_base_hash=None)
+
+    class _Repo:
+        def __init__(self, db):
+            pass
+
+        async def get_by_id(self, session_id):
+            return sess
+
+    class _FcRepo:
+        def __init__(self, db):
+            pass
+
+        async def list_by_session(self, session_id):
+            return []
+
+    import lc_agent.server.routes.file_changes as module
+
+    original_session_repo, original_fc_repo = module.SessionRepository, module.FileChangeRepository
+    module.SessionRepository, module.FileChangeRepository = _Repo, _FcRepo
+    try:
+        user = SimpleNamespace(id="u1", role="user")
+        _, changes, cwd = asyncio.run(
+            _get_git_context("sess-1", user, object(), _fake_engine(repo))
+        )
+    finally:
+        module.SessionRepository, module.FileChangeRepository = original_session_repo, original_fc_repo
+
+    assert changes == []
+    assert cwd == str(repo)
+
+    # 明确不可用的情形：非 git 项目目录应返回 None
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    module.SessionRepository, module.FileChangeRepository = _Repo, _FcRepo
+    try:
+        _, _, no_cwd = asyncio.run(
+            _get_git_context("sess-1", user, object(), _fake_engine(plain))
+        )
+    finally:
+        module.SessionRepository, module.FileChangeRepository = original_session_repo, original_fc_repo
+    assert no_cwd is None

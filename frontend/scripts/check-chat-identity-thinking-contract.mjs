@@ -10,7 +10,8 @@ function read(relativePath) {
 
 const files = {
   chatView: read('src/views/ChatView.vue'),
-  toolCallCard: read('src/components/chat/ToolCallCard.vue'),
+  genericCard: read('src/components/chat/tools/ToolGenericCard.vue'),
+  useToolCard: read('src/components/chat/tools/useToolCard.ts'),
   chatStore: read('src/stores/chat.ts'),
   sseClient: read('src/api/sse-client.ts'),
   chatInput: read('src/components/chat/ChatInput.vue'),
@@ -26,9 +27,9 @@ function expectMatch(name, content, pattern, message) {
   if (!pattern.test(content)) failures.push(`${name} ${message}`)
 }
 
-expectIncludes('ChatView.vue', files.chatView, '#avatar="{ item }"')
 expectIncludes('ChatView.vue', files.chatView, '#header="{ item }"')
-expectIncludes('ChatView.vue', files.chatView, 'class="role-avatar"')
+expectIncludes('ChatView.vue', files.chatView, 'class="role-avatar is-ai"')
+expectIncludes('ChatView.vue', files.chatView, 'class="role-avatar is-user"')
 expectIncludes('ChatView.vue', files.chatView, 'class="role-header is-ai"')
 expectMatch('ChatView.vue', files.chatView, /v-else\s+class="role-header is-ai"/, '助手身份栏没有限制为仅助手消息展示')
 expectIncludes('ChatView.vue', files.chatView, 'getAssistantLabel()')
@@ -49,12 +50,18 @@ if (files.chatView.includes(':open="item.loading"')) {
   failures.push('ChatView.vue 思考块仍绑定 item.loading；thinking 一写入 content 后 loading 会变 false')
 }
 
-expectIncludes('ToolCallCard.vue', files.toolCallCard, 'Tools')
-expectIncludes('ToolCallCard.vue', files.toolCallCard, 'class="tool-kind"')
-expectIncludes('ToolCallCard.vue', files.toolCallCard, '工具调用')
-expectIncludes('ToolCallCard.vue', files.toolCallCard, 'watch')
-expectIncludes('ToolCallCard.vue', files.toolCallCard, 'userToggled')
-expectMatch('ToolCallCard.vue', files.toolCallCard, /watch\(\(\) => props\.collapsed[\s\S]*isCollapsed\.value = collapsed/, '工具完成后不会跟随 collapsed prop 自动折叠')
+// 工具卡片（拆成多张卡后由 ToolGenericCard + useToolCard 承载这些行为）
+expectIncludes('ToolGenericCard.vue', files.genericCard, 'badgeIcon')
+expectIncludes('ToolGenericCard.vue', files.genericCard, "@element-plus/icons-vue")
+expectIncludes('ToolGenericCard.vue', files.genericCard, 'label="工具"')
+expectIncludes('ToolGenericCard.vue', files.genericCard, '@click.stop="toggleCollapse"')
+expectIncludes('useToolCard.ts', files.useToolCard, 'userToggled')
+expectMatch(
+  'useToolCard.ts',
+  files.useToolCard,
+  /if \(userToggled\.value\) return/,
+  '工具完成后会覆盖用户手动折叠的结果（用户点过之后就不该再自动折叠）',
+)
 
 expectIncludes('sse-client.ts', files.sseClient, 'reasoning_tokens?: number')
 expectIncludes('chat.ts', files.chatStore, 'function mergeFinalUsageRounds')
@@ -68,10 +75,13 @@ expectMatch(
   '发送消息必须继续使用当前 Agent 和当前模型',
 )
 expectIncludes('ChatInput.vue', files.chatInput, "send: [content: ContentBlock[]]")
-expectIncludes('ChatView.vue', files.chatView, ':title="item.role === \'user\' ? \'你\' : getAssistantLabel()"')
-if (/<span class="role-name">\{\{\s*item\.role === 'user' \? '你'/.test(files.chatView)) {
-  failures.push('ChatView.vue 用户消息仍在 role-name 中显示悬空的“你”文本，应由右侧用户头像承担身份标识')
-}
+expectIncludes('ChatView.vue', files.chatView, '<span class="role-name">你</span>')
+expectMatch(
+  'ChatView.vue',
+  files.chatView,
+  /\.elx-bubble__avatar[\s\S]*display:\s*none/,
+  '两侧头像列没有隐藏，身份标识应收进顶部 header 行',
+)
 
 if (failures.length > 0) {
   console.error('聊天身份与思考展示契约测试失败:')

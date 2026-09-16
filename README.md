@@ -69,7 +69,7 @@
 ![HTTP追踪与Token面板](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc02.png)
 
 **智能体管理**
-![智能体管理](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/agent_management.png)
+![智能体管理](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/agent_manager2.png)
 
 **工具调用详情**
 

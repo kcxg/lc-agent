@@ -7,7 +7,14 @@ from pydantic import BaseModel, Field, create_model
 
 
 def _build_pydantic_model(tool_name: str, input_schema: dict) -> type[BaseModel]:
-    """Dynamically create a Pydantic model from JSON Schema."""
+    """Dynamically create a Pydantic model from JSON Schema.
+
+    Tools that declare no parameters get a zero-field model on purpose: the JSON
+    Schema becomes ``{"type": "object", "properties": {}}``, which is valid and
+    accepted by the providers. Filling in a dummy parameter instead would leak
+    into the schema sent to the model, and models then invent values for it
+    (``"{}"``, ``"no params"``, ...) that show up in the UI as a bogus argument.
+    """
     properties = input_schema.get("properties", {})
     required = set(input_schema.get("required", []))
     defs = input_schema.get("$defs", {}) or input_schema.get("definitions", {})
@@ -20,9 +27,6 @@ def _build_pydantic_model(tool_name: str, input_schema: dict) -> type[BaseModel]
             fields[prop_name] = (python_type, Field(description=description))
         else:
             fields[prop_name] = (python_type | None, Field(default=None, description=description))
-
-    if not fields:
-        fields["placeholder"] = (str | None, Field(default=None, description="no params"))
 
     model_name = f"McpInput_{tool_name}"
     return create_model(model_name, **fields)

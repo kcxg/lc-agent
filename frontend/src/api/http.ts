@@ -15,6 +15,8 @@ export interface UsageSummaryRow {
   reasoning_tokens?: number
   calls: number
   cost: number | null
+  // 该行里没配单价的模型名（后端归并后也会带上；金额为 — 时用它提示是哪个模型）
+  unpriced_models?: string[]
 }
 
 export interface UsageTotals {
@@ -26,6 +28,7 @@ export interface UsageTotals {
   active_users: number
   session_count: number
   cost: number | null
+  unpriced_models?: string[]
 }
 
 export interface UsageSessionRow {
@@ -42,6 +45,7 @@ export interface UsageSessionRow {
   cache_write_tokens: number
   calls: number
   cost: number | null
+  unpriced_models?: string[]
 }
 
 export interface UsageCallRow {
@@ -80,9 +84,11 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  // headers 必须合并而非直接展开覆盖：调用方只传 Content-Type 时，
+  // 直接 ...options 会把 Authorization 一起顶掉，导致后端 401
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: getAuthHeaders(),
     ...options,
+    headers: { ...getAuthHeaders(), ...(options?.headers as Record<string, string> | undefined) },
   })
   if (response.status === 401) {
     localStorage.removeItem('token')
@@ -116,6 +122,105 @@ export const api = {
   refreshMcpServers: () => fetchApi<any[]>('/mcp/refresh', { method: 'POST' }),
   refreshMcpServer: (name: string) => fetchApi<any>(`/mcp/${name}/refresh`, { method: 'POST' }),
   toggleMcpServer: (name: string) => fetchApi<{ name: string; enabled: boolean }>(`/mcp/${name}/toggle`, { method: 'POST' }),
+
+  // 项目模式文件树：一次列一层目录
+  getProjectTree: (agentId: string, path: string = '') =>
+    fetchApi<{
+      project_root?: string
+      git_branch?: string | null
+      path?: string
+      entries?: Array<{ name: string; path: string; type: 'dir' | 'file' }>
+      error?: string
+    }>(`/tools/project/tree?agent_id=${encodeURIComponent(agentId)}&path=${encodeURIComponent(path)}`),
+
+  readFile: (path: string, maxLines: number = 500, agentId?: string) =>
+    fetchApi<{
+      file?: string
+      lines?: string[]
+      total_lines?: number
+      truncated?: boolean
+      binary?: boolean
+      image?: boolean
+      image_too_large?: boolean
+      data_url?: string
+      size?: number
+      mtime?: number
+      newline?: 'lf' | 'crlf'
+      has_bom?: boolean
+      editable?: boolean
+      readonly_reason?: string
+      error?: string
+    }>(
+      `/tools/file/read?path=${encodeURIComponent(path)}&max_lines=${maxLines}${agentId ? `&agent_id=${encodeURIComponent(agentId)}` : ''}`,
+    ),
+
+  // 保存文件内容；mtime 为读取时的值，用于乐观锁检测并发修改
+  saveFile: (
+    agentId: string,
+    path: string,
+    content: string,
+    options: { mtime: number; newline: 'lf' | 'crlf'; hasBom: boolean },
+  ) => {
+    const params = new URLSearchParams({ path, agent_id: agentId })
+    return fetchApi<{ ok?: boolean; mtime?: number; conflict?: boolean; error?: string }>(
+      `/tools/project/file/save?${params.toString()}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          content,
+          mtime: options.mtime,
+          newline: options.newline,
+          has_bom: options.hasBom,
+        }),
+      },
+    )
+  },
+
+  // 在项目内新建文件或文件夹；parentPath 为父目录（相对项目根，空串表示根）
+  createProjectEntry: (agentId: string, parentPath: string, name: string, entryType: 'file' | 'dir') => {
+    const params = new URLSearchParams({ path: parentPath, name, entry_type: entryType, agent_id: agentId })
+    return fetchApi<{ ok?: boolean; name?: string; error?: string }>(
+      `/tools/project/file/create?${params.toString()}`,
+      { method: 'POST' },
+    )
+  },
+
+  renameProjectEntry: (agentId: string, path: string, newName: string) => {
+    const params = new URLSearchParams({ path, new_name: newName, agent_id: agentId })
+    return fetchApi<{ ok?: boolean; name?: string; error?: string }>(
+      `/tools/project/file/rename?${params.toString()}`,
+      { method: 'POST' },
+    )
+  },
+
+  deleteProjectEntry: (agentId: string, path: string) => {
+    const params = new URLSearchParams({ path, agent_id: agentId })
+    return fetchApi<{ ok?: boolean; error?: string }>(
+      `/tools/project/file/delete?${params.toString()}`,
+      { method: 'POST' },
+    )
+  },
+
+  // 在整个项目目录内按文件内容搜索（grep）
+  grepProjectFiles: (agentId: string, q: string, caseSensitive = false) =>
+    fetchApi<{
+      project_root?: string
+      matches?: Array<{ path: string; name: string; line: number; text: string }>
+      truncated?: boolean
+      error?: string
+    }>(
+      `/tools/project/grep?agent_id=${encodeURIComponent(agentId)}&q=${encodeURIComponent(q)}&case_sensitive=${caseSensitive}`,
+    ),
+
+  // 在整个项目目录内按名称搜索（含未展开的目录）
+  searchProjectFiles: (agentId: string, q: string) =>
+    fetchApi<{
+      project_root?: string
+      git_branch?: string | null
+      results?: Array<{ name: string; path: string; type: 'dir' | 'file' }>
+      truncated?: boolean
+      error?: string
+    }>(`/tools/project/search?agent_id=${encodeURIComponent(agentId)}&q=${encodeURIComponent(q)}`),
   getSkills: (projectRoot?: string, extraDirs?: string[]) => {
     const params: string[] = []
     if (projectRoot) params.push(`project_root=${encodeURIComponent(projectRoot)}`)
@@ -208,7 +313,7 @@ export const api = {
 
   // File changes
   getFileChanges: (sessionId: string) =>
-    fetchApi<{ session_id: string; git_base_hash: string | null; files: any[]; sub_sessions?: any[]; rounds?: any[] }>(
+    fetchApi<{ session_id: string; git_base_hash: string | null; git_available?: boolean; files: any[]; sub_sessions?: any[]; rounds?: any[] }>(
       `/sessions/${sessionId}/file-changes`
     ),
   getFileDiff: (sessionId: string, filePath: string, round?: number | null) =>
@@ -260,7 +365,7 @@ export const api = {
 
   // Token 用量统计（docs/tasks/token_stats.md §5）
   getUsageSummary: (params: { from: string; to: string; group_by: string; granularity: string; include_sub: boolean }) =>
-    fetchApi<{ rows: UsageSummaryRow[]; group_by: string[]; granularity: string }>(
+    fetchApi<{ rows: UsageSummaryRow[]; group_by: string[]; granularity: string; unpriced_models: string[] }>(
       `/admin/usage/summary?${new URLSearchParams({
         from: params.from, to: params.to, group_by: params.group_by,
         granularity: params.granularity, include_sub: String(params.include_sub),
@@ -280,7 +385,7 @@ export const api = {
   addPricing: (data: { model: string; kind: string; price_per_1m: number; effective_from?: string; note?: string }) =>
     fetchApi<PriceRow>('/admin/usage/pricing', { method: 'POST', body: JSON.stringify(data) }),
   getMyUsage: (params: { from: string; to: string; group_by: string; granularity: string; include_sub: boolean }) =>
-    fetchApi<{ rows: UsageSummaryRow[]; totals: UsageTotals; group_by: string[]; granularity: string }>(
+    fetchApi<{ rows: UsageSummaryRow[]; totals: UsageTotals; group_by: string[]; granularity: string; unpriced_models: string[] }>(
       `/me/usage?${new URLSearchParams({
         from: params.from, to: params.to, group_by: params.group_by,
         granularity: params.granularity, include_sub: String(params.include_sub),

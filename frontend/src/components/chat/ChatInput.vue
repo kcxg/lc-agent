@@ -51,6 +51,7 @@
 
       <div
         v-if="skillMenuOpen && !isStreamingState"
+        ref="skillPickerRef"
         class="skill-picker"
         role="listbox"
         aria-label="选择 Skill"
@@ -159,6 +160,9 @@ import { MagicStick } from '@element-plus/icons-vue'
 import { useChatStore } from '@/stores/chat'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore, type Skill } from '@/stores/tools'
+import { useSessionsStore } from '@/stores/sessions'
+import { useChatUiStateStore } from '@/stores/chat-ui-state'
+import { useSessionTabsStore } from '@/stores/session-tabs'
 import { useInputAnimation } from '@/composables/useInputAnimation'
 import {
   type Attachment,
@@ -193,6 +197,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const messageText = ref('')
 const attachments = ref<Attachment[]>([])
 const skillMenuOpen = ref(false)
+const skillPickerRef = ref<HTMLElement | null>(null)
 const skillQuery = ref('')
 const activeSkillIndex = ref(0)
 
@@ -285,6 +290,33 @@ watch(() => [props.editContent, props.editAttachments] as const, async ([content
   }
 }, { immediate: true })
 
+// 草稿按会话分离：切标签时先存当前会话草稿，再取目标会话草稿，两个标签不共用一个输入框
+const sessionsStore = useSessionsStore()
+const sessionTabsStore = useSessionTabsStore()
+const chatUiState = useChatUiStateStore()
+const lastDraftSessionId = ref<string | null>(null)
+
+watch(() => sessionsStore.currentSessionId, async (sessionId) => {
+  const prevId = lastDraftSessionId.value
+  // 只给「仍是已打开标签」的会话存草稿：会话被关闭或本地 id 被改写后
+  // 再往旧 id 写会留下取不回的残留草稿
+  if (prevId && prevId !== sessionId && !props.isEditing && sessionTabsStore.isTabOpen(prevId)) {
+    chatUiState.rememberDraft(prevId, {
+      text: messageText.value,
+      attachments: [...attachments.value],
+    })
+  }
+  lastDraftSessionId.value = sessionId
+
+  // 编辑态由 props.editContent 驱动，不能覆盖
+  if (!sessionId || props.isEditing) return
+  const draft = chatUiState.getDraft(sessionId)
+  messageText.value = draft?.text ?? ''
+  attachments.value = draft ? [...draft.attachments] : []
+  await nextTick()
+  resizeTextarea()
+}, { immediate: true })
+
 onMounted(async () => {
   await nextTick()
   resizeTextarea()
@@ -357,6 +389,25 @@ function closeSkillMenu() {
   activeSkillIndex.value = 0
 }
 
+/** 键盘上下移动高亮项时，让高亮项滚动进可视区域 */
+function scrollActiveSkillIntoView() {
+  nextTick(() => {
+    const container = skillPickerRef.value
+    if (!container) return
+    const item = container.querySelector<HTMLElement>('.skill-picker-item.is-active')
+    if (!item) return
+    const itemTop = item.offsetTop
+    const itemBottom = itemTop + item.offsetHeight
+    const viewTop = container.scrollTop
+    const viewBottom = viewTop + container.clientHeight
+    if (itemTop < viewTop) {
+      container.scrollTop = itemTop
+    } else if (itemBottom > viewBottom) {
+      container.scrollTop = itemBottom - container.clientHeight
+    }
+  })
+}
+
 function selectSkill(skill: SkillSuggestion) {
   const textarea = textareaRef.value
   const trigger = getSkillTrigger()
@@ -396,11 +447,13 @@ function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'ArrowDown' && skillSuggestions.value.length > 0) {
       event.preventDefault()
       activeSkillIndex.value = (activeSkillIndex.value + 1) % skillSuggestions.value.length
+      scrollActiveSkillIntoView()
       return
     }
     if (event.key === 'ArrowUp' && skillSuggestions.value.length > 0) {
       event.preventDefault()
       activeSkillIndex.value = (activeSkillIndex.value - 1 + skillSuggestions.value.length) % skillSuggestions.value.length
+      scrollActiveSkillIntoView()
       return
     }
     if ((event.key === 'Enter' || event.key === 'Tab') && skillSuggestions.value.length > 0) {
@@ -490,7 +543,7 @@ function handleCancelEdit() {
 
 <style scoped>
 .chat-input-wrapper {
-  padding: 10px 20px 14px;
+  padding: 10px 12px 14px;
   border-top: 1px solid var(--el-border-color);
   background: var(--el-bg-color);
   box-sizing: border-box;
@@ -649,9 +702,18 @@ function handleCancelEdit() {
   text-align: left;
 }
 
-.skill-picker-item:hover,
-.skill-picker-item.is-active {
+.skill-picker-item:hover {
   background: var(--el-fill-color-light);
+}
+
+/* 键盘高亮项：主色底 + 左侧色条，必须一眼能看出选中了哪一行 */
+.skill-picker-item.is-active {
+  background: color-mix(in srgb, var(--el-color-primary) 16%, var(--el-bg-color-overlay));
+  box-shadow: inset 3px 0 0 var(--el-color-primary);
+}
+
+.skill-picker-item.is-active .skill-picker-name {
+  color: var(--el-color-primary);
 }
 
 .skill-picker-icon {

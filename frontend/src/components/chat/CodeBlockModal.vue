@@ -27,17 +27,37 @@
             <button class="code-search-btn" :disabled="!matchCount" @click="jumpToNextMatch">↓</button>
           </div>
         </div>
-        <div class="code-modal-content">
-          <pre v-if="!renderAsMarkdown" ref="preRef" class="code-modal-pre hljs"><code ref="contentRef" class="hljs" /></pre>
+        <div class="code-modal-content" @contextmenu="handleContextMenu" @scroll="closeMenu">
+          <div v-if="!renderAsMarkdown" class="code-modal-code">
+            <div class="code-gutter" aria-hidden="true">{{ lineNumbers }}</div>
+            <pre ref="preRef" class="code-modal-pre hljs"><code ref="contentRef" class="hljs" /></pre>
+          </div>
           <div v-else ref="contentRef" class="code-modal-markdown markdown-body" />
         </div>
       </div>
     </div>
   </teleport>
+
+  <teleport to="body">
+    <div
+      v-if="menuVisible"
+      ref="menuEl"
+      class="code-ctx-menu"
+      :style="menuStyle"
+      role="menu"
+      @contextmenu.prevent
+    >
+      <button class="code-ctx-item" role="menuitem" @click="copySelection">复制</button>
+      <template v-if="hasSourcePath">
+        <button class="code-ctx-item" role="menuitem" @click="copyLineRef">复制行号</button>
+        <button class="code-ctx-item" role="menuitem" @click="copyLineRefWithContent">复制行号和内容</button>
+      </template>
+    </div>
+  </teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import hljs from 'highlight.js'
 import { renderMarkdown } from '@/utils/markdown'
 
@@ -48,6 +68,8 @@ const props = defineProps<{
   title?: string
   kicker?: string
   renderAsMarkdown?: boolean
+  // 文件绝对路径。提供后才显示「复制行号 / 复制行号和内容」。
+  sourcePath?: string
 }>()
 
 defineEmits<{ close: [] }>()
@@ -58,6 +80,137 @@ const matchCount = ref(0)
 const contentRef = ref<HTMLElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const copyLabel = ref('复制')
+
+// 行号栏只在代码（非 Markdown）渲染时出现
+const lineNumbers = computed(() => {
+  if (props.renderAsMarkdown) return ''
+  const total = props.code.split('\n').length
+  return Array.from({ length: total }, (_, i) => i + 1).join('\n')
+})
+
+// 复制行号需要真实文件路径，且仅在代码视图下行号可推算
+const hasSourcePath = computed(() => !!props.sourcePath && !props.renderAsMarkdown)
+
+const menuVisible = ref(false)
+const menuX = ref(0)
+const menuY = ref(0)
+const menuEl = ref<HTMLElement | null>(null)
+
+const menuStyle = computed(() => ({ left: `${menuX.value}px`, top: `${menuY.value}px` }))
+
+function closeMenu() {
+  menuVisible.value = false
+}
+
+function handleContextMenu(e: MouseEvent) {
+  const sel = window.getSelection()
+  // 无选中内容时不接管原生菜单
+  if (!sel || sel.isCollapsed || !sel.toString().trim()) return
+
+  e.preventDefault()
+  const MENU_W = 176
+  const MENU_H = hasSourcePath.value ? 116 : 44
+  menuX.value = Math.min(e.clientX, window.innerWidth - MENU_W - 8)
+  menuY.value = Math.min(e.clientY, window.innerHeight - MENU_H - 8)
+  menuVisible.value = true
+}
+
+// 从选区反推覆盖的源码行号（highlight 不改变文本，故可按换行数计数）
+function selectionLineRange(): { start: number; end: number } | null {
+  const contentEl = contentRef.value
+  const sel = window.getSelection()
+  if (!contentEl || !sel || sel.rangeCount === 0) return null
+
+  const range = sel.getRangeAt(0)
+  if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) return null
+
+  const text = range.toString()
+  if (!text.trim()) return null
+
+  const probe = document.createRange()
+  probe.selectNodeContents(contentEl)
+  probe.setEnd(range.startContainer, range.startOffset)
+  const start = (probe.toString().match(/\n/g)?.length ?? 0) + 1
+
+  probe.setEnd(range.endContainer, range.endOffset)
+  const covered = probe.toString()
+  const newlines = covered.match(/\n/g)?.length ?? 0
+  const end = Math.max(start, newlines + (text.endsWith('\n') ? 0 : 1))
+
+  return { start, end }
+}
+
+function lineRefLabel(): string | null {
+  const lines = selectionLineRange()
+  if (!lines || !props.sourcePath) return null
+  const span = lines.start === lines.end ? `L${lines.start}` : `L${lines.start}-${lines.end}`
+  return `${props.sourcePath}#${span}`
+}
+
+function selectionText(): string {
+  return window.getSelection()?.toString() ?? ''
+}
+
+async function copySelection() {
+  const text = selectionText()
+  if (text) await writeClipboard(text)
+  closeMenu()
+}
+
+async function copyLineRef() {
+  const label = lineRefLabel()
+  if (label) await writeClipboard(label)
+  closeMenu()
+}
+
+async function copyLineRefWithContent() {
+  const label = lineRefLabel()
+  const text = selectionText()
+  if (label && text) await writeClipboard(`${label}\n\n${text}`)
+  closeMenu()
+}
+
+async function writeClipboard(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.left = '-9999px'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+  } catch {
+    // 剪贴板不可用时静默失败，避免打断阅读
+  }
+}
+
+// 点击其他区域 / 按 Esc 关闭右键菜单
+function onDocumentPointerDown(e: MouseEvent) {
+  const menu = menuEl.value
+  if (menu && e.target instanceof Node && menu.contains(e.target)) return
+  closeMenu()
+}
+
+function onDocumentKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+  document.addEventListener('keydown', onDocumentKeydown)
+  window.addEventListener('resize', closeMenu)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+  document.removeEventListener('keydown', onDocumentKeydown)
+  window.removeEventListener('resize', closeMenu)
+})
 
 const renderedContent = computed(() => {
   if (props.renderAsMarkdown) return renderMarkdown(props.code)
@@ -364,6 +517,32 @@ watch(activeMatchIndex, () => {
   background: var(--md-code-bg, #101b17);
 }
 
+.code-modal-code {
+  display: flex;
+  align-items: stretch;
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.code-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  padding: 16px 10px 16px 20px;
+  border-right: 1px solid color-mix(in srgb, var(--md-code-text, #d8fff0) 12%, transparent);
+  background: var(--md-code-bg, #101b17);
+  color: color-mix(in srgb, var(--md-code-text, #d8fff0) 34%, transparent);
+  font-family: 'Cascadia Code', 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
 .code-modal-pre {
   margin: 0;
   padding: 16px 20px;
@@ -377,6 +556,38 @@ watch(activeMatchIndex, () => {
   word-break: normal;
   overflow-wrap: normal;
   tab-size: 4;
+}
+
+/* 选中文本后右键唤起的自定义菜单 */
+.code-ctx-menu {
+  position: fixed;
+  z-index: 10001;
+  min-width: 176px;
+  padding: 4px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-bg-color-overlay);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--el-bg-color-page) 55%, transparent);
+}
+
+.code-ctx-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font-size: 12.5px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.code-ctx-item:hover {
+  background: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+  color: var(--el-color-primary);
 }
 
 .code-modal-markdown {

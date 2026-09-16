@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from lc_agent.db.models_auth import User
 from lc_agent.db.repository import FileChangeRepository, SessionRepository
 from lc_agent.server.auth_middleware import get_current_user
-from lc_agent.server.dependencies import get_db_session
+from lc_agent.server.dependencies import get_db_session, get_engine
 
 router = APIRouter(tags=["file-changes"])
 
@@ -151,16 +151,48 @@ def _resolve_commit_ref(cwd: str, ref: str | None) -> str | None:
     return None
 
 
+def _is_git_repo(cwd: str) -> bool:
+    """Check whether cwd sits inside a Git work tree."""
+    try:
+        result = _run_git(cwd, ["rev-parse", "--is-inside-work-tree"], 10)
+        return result.returncode == 0 and result.stdout.strip() == "true"
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _resolve_project_dir(sess, engine) -> str | None:
+    """Resolve the session agent's project directory (project mode only).
+
+    Git Diff 只依赖「会话所属 agent 的项目目录」，与本次会话有没有改过文件无关，
+    因此没有文件变更时也要能解析出仓库目录。
+    """
+    agent_id = getattr(sess, "agent_id", None)
+    if not agent_id or engine is None:
+        return None
+    try:
+        if not engine._preset_exists(agent_id):
+            return None
+        preset = engine._resolve_preset(agent_id)
+    except Exception:
+        return None
+    if not preset.project_mode or not preset.project_root:
+        return None
+    root = Path(preset.project_root).expanduser()
+    if not root.is_dir():
+        return None
+    return str(root)
+
+
 def _resolve_baseline(
     sess,
-    file_path: str,
+    path: str,
     baseline: str,
     commit: str | None,
 ) -> dict | None:
     if baseline not in _BASELINES:
         raise HTTPException(status_code=422, detail=f"不支持的 Git 基准: {baseline}")
 
-    repo_root = _find_repo_root(file_path)
+    repo_root = _find_repo_root(path)
     if repo_root is None:
         return None
 
@@ -412,6 +444,7 @@ async def list_file_changes(
     include_subagents: bool = Query(True, description="Include sub-agent file changes"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
+    engine=Depends(get_engine),
 ):
     """Get the Agent-recorded file changes for a session."""
     repo = SessionRepository(db)
@@ -441,9 +474,14 @@ async def list_file_changes(
                     child_changes,
                 ))
 
+    # Git Diff 是否可用：只看会话所属 agent 的项目目录是不是 git 仓库
+    project_dir = _resolve_project_dir(sess, engine)
+    git_available = bool(project_dir) and await asyncio.to_thread(_is_git_repo, project_dir)
+
     return {
         "session_id": session_id,
         "git_base_hash": sess.git_base_hash,
+        "git_available": git_available,
         "files": _aggregate_file_changes(changes),
         "sub_sessions": sub_sessions,
         "rounds": _build_round_groups(changes, sub_session_changes),
@@ -501,7 +539,12 @@ async def get_file_diff(
     }
 
 
-async def _get_git_context(session_id: str, user: User, db: AsyncSession):
+async def _get_git_context(session_id: str, user: User, db: AsyncSession, engine=None):
+    """Resolve (session, changes, git cwd).
+
+    cwd 优先从文件变更反推（最贴近实际改动位置）；没有变更时回退到会话所属
+    agent 的项目目录，使 Git Diff 在「项目是 git 仓库但本会话尚未改文件」时也可用。
+    """
     repo = SessionRepository(db)
     sess = await repo.get_by_id(session_id)
     if sess is None:
@@ -509,9 +552,13 @@ async def _get_git_context(session_id: str, user: User, db: AsyncSession):
     _check_session_access(sess, user)
     fc_repo = FileChangeRepository(db)
     changes = await fc_repo.list_by_session(session_id)
-    if not changes:
-        return sess, changes, None
-    return sess, changes, str(Path(changes[0].file_path).parent)
+    if changes:
+        return sess, changes, str(Path(changes[0].file_path).parent)
+
+    project_dir = _resolve_project_dir(sess, engine)
+    if project_dir and await asyncio.to_thread(_is_git_repo, project_dir):
+        return sess, changes, project_dir
+    return sess, changes, None
 
 
 @router.get("/sessions/{session_id}/git-diff/commits")
@@ -550,12 +597,13 @@ async def get_git_diff(
     commit: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
+    engine=Depends(get_engine),
 ):
     """Get a complete Git diff for the selected baseline."""
-    sess, changes, cwd = await _get_git_context(session_id, user, db)
-    if not changes or cwd is None:
-        return {"available": False, "reason": "No file changes in this session"}
-    git_baseline = _resolve_baseline(sess, changes[0].file_path, baseline, commit)
+    sess, changes, cwd = await _get_git_context(session_id, user, db, engine)
+    if cwd is None:
+        return {"available": False, "reason": "当前会话所属项目不是 Git 仓库"}
+    git_baseline = _resolve_baseline(sess, cwd, baseline, commit)
     if git_baseline is None:
         return {"available": False, "reason": "无法解析所选 Git 基准"}
 
@@ -592,12 +640,13 @@ async def list_git_diff_files(
     commit: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
+    engine=Depends(get_engine),
 ):
     """Get changed files for one Git baseline; file bodies load separately."""
-    sess, changes, cwd = await _get_git_context(session_id, user, db)
-    if not changes or cwd is None:
-        return {"available": False, "reason": "No file changes in this session"}
-    git_baseline = _resolve_baseline(sess, changes[0].file_path, baseline, commit)
+    sess, changes, cwd = await _get_git_context(session_id, user, db, engine)
+    if cwd is None:
+        return {"available": False, "reason": "当前会话所属项目不是 Git 仓库"}
+    git_baseline = _resolve_baseline(sess, cwd, baseline, commit)
     if git_baseline is None:
         return {"available": False, "reason": "无法解析所选 Git 基准"}
     return await asyncio.to_thread(_git_files_for_baseline, cwd, git_baseline, changes)

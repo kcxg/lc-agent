@@ -116,12 +116,18 @@ $stderrLog = Join-Path $RunLogDir "bfzs-restart-$timestamp.err.log"
 
 $env:PYTHONUNBUFFERED = "1"
 $env:PYTHONPATH = if ($env:PYTHONPATH) { "$RepoDir;$env:PYTHONPATH" } else { $RepoDir }
+# WorkBuddy 工具会话会向进程的环境变量里注入 'Path'/'PATH'/'path' 三个名字只差
+# 大小写的重复条目；PS 5.1 的 Start-Process 带 -RedirectStandard* 参数时遇到
+# 重复条目会报错 "Item has already been added"，导致脚本停止在第 3 步。
+# 这里先删除全部 3 个条目，再重新设置一份 Path（值不变）。
 $processPath = [System.Environment]::GetEnvironmentVariable('Path', 'Process')
 if (-not $processPath) {
     $processPath = [System.Environment]::GetEnvironmentVariable('PATH', 'Process')
 }
-[System.Environment]::SetEnvironmentVariable('Path', $null, 'Process')
-[System.Environment]::SetEnvironmentVariable('PATH', $processPath, 'Process')
+foreach ($pathNameCase in @('Path', 'PATH', 'path')) {
+    [System.Environment]::SetEnvironmentVariable($pathNameCase, $null, 'Process')
+}
+[System.Environment]::SetEnvironmentVariable('Path', $processPath, 'Process')
 $arguments = @("-u", "-m", "bfzs.main", "--port", "$Port", "--host", $Host_)
 $proc = Start-Process `
     -FilePath $Python `

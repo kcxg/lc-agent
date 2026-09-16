@@ -77,7 +77,7 @@
           <span class="tool-display-name">{{ action.display_name || action.name }}</span>
           <span v-if="action.display_name" class="tool-internal-name">({{ action.name }})</span>
         </p>
-        <pre v-if="showDetails" class="action-args">{{ JSON.stringify(action.args ?? action.arguments, null, 2) }}</pre>
+        <pre v-if="showDetails" class="action-args">{{ formatActionArgs(action) }}</pre>
       </div>
       <el-button
         link
@@ -108,6 +108,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { InterruptInfo } from '@/stores/chat'
+import { visibleArgEntries } from '@/utils/tool-args'
 
 interface Question {
   question: string
@@ -273,6 +274,17 @@ function cancelAskUser() {
 function allowPermanently() {
   const toolName = firstToolName.value
   if (toolName) emit('allow-permanently', toolName)
+}
+
+/** 审批弹层里展开的入参：挡掉占位参数；本来就没有参数时给一句说明，别只显示一个空花括号 */
+function formatActionArgs(action: { args?: unknown; arguments?: unknown }): string {
+  const raw = action.args ?? action.arguments
+  if (raw === null || raw === undefined) return '（无参数）'
+  // 不是普通对象（数组、字符串等）时原样打印，别把内容吞掉
+  if (typeof raw !== 'object' || Array.isArray(raw)) return JSON.stringify(raw, null, 2)
+  const entries = visibleArgEntries(raw as Record<string, unknown>)
+  if (entries.length === 0) return '（无参数）'
+  return JSON.stringify(Object.fromEntries(entries), null, 2)
 }
 
 function approve() {

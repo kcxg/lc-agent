@@ -2,6 +2,7 @@ import type { HttpTrace, LlmRoundUsage } from '@/stores/chat'
 import { parseSegments as parseContentSegments } from './parse-segments'
 import type { ContentSegment } from './parse-segments'
 import type { ContentBlock } from '@/utils/fileUpload'
+import { visibleArgEntries } from '@/utils/tool-args'
 
 export interface CopyOptions {
   includeThinking?: boolean
@@ -38,9 +39,10 @@ function toolCallToMarkdown(tc: ToolCallLike): string {
   lines.push(`<details><summary>🔧 工具调用: ${tc.name}${meta}</summary>`)
   lines.push('')
 
-  if (tc.args && Object.keys(tc.args).length > 0) {
+  const argEntries = visibleArgEntries(tc.args)
+  if (argEntries.length > 0) {
     lines.push('**参数:**')
-    for (const [k, v] of Object.entries(tc.args)) {
+    for (const [k, v] of argEntries) {
       const val = typeof v === 'string' ? v : JSON.stringify(v)
       const display = val.length > 200 ? val.slice(0, 200) + '...' : val
       lines.push(`- \`${k}\`: \`${display}\``)
