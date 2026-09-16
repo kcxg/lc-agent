@@ -52,6 +52,10 @@
           v-if="isChatRoute"
           @activate="handleTabActivate"
           @close="handleTabClose"
+          @close-others="handleTabCloseOthers"
+          @close-to-right="handleTabCloseToRight"
+          @close-all="handleTabCloseAll"
+          @delete="handleSessionDeleted"
         />
         <router-view />
       </main>
@@ -384,6 +388,51 @@ async function handleSessionDeleted(sessionId: string) {
     return
   }
   await handleSwitchSession(nextId)
+}
+
+/** 释放一批已关闭标签占用的缓存（chat 管线 + UI 状态 + 文件变更桶） */
+function releaseClosedTabs(ids: string[]) {
+  for (const id of ids) {
+    chatStore.releaseSession(id)
+    chatUiStateStore.clearSession(id)
+    useFileChangesStore().dropSession(id)
+  }
+}
+
+/**
+ * 关闭其他/关闭右侧/关闭全部后统一善后主区：
+ * 被关掉的会话若正是当前 thread，则切到新激活标签或回首页。
+ */
+async function settleAfterBatchClose() {
+  const currentThread = chatStore.threadId
+  const activeId = sessionTabsStore.activeTabId
+  if (currentThread && currentThread === activeId) return
+  if (!activeId) {
+    await router.push({ name: 'home' })
+    return
+  }
+  await handleSwitchSession(activeId)
+}
+
+/** 关闭右键标签之外的全部标签 */
+async function handleTabCloseOthers(sessionId: string) {
+  const removed = sessionTabsStore.closeOthers(sessionId)
+  releaseClosedTabs(removed)
+  await settleAfterBatchClose()
+}
+
+/** 关闭右键标签右侧的全部标签 */
+async function handleTabCloseToRight(sessionId: string) {
+  const removed = sessionTabsStore.closeToRight(sessionId)
+  releaseClosedTabs(removed)
+  await settleAfterBatchClose()
+}
+
+/** 关闭全部标签，回首页空态（会话本身仍留在侧边栏，未被删除） */
+async function handleTabCloseAll() {
+  const removed = sessionTabsStore.closeAll()
+  releaseClosedTabs(removed)
+  await router.push({ name: 'home' })
 }
 
 async function handleAgentChange(agentId: string) {
