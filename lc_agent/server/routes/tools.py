@@ -1,4 +1,5 @@
 import asyncio
+import mimetypes
 from collections import deque
 from pathlib import Path
 

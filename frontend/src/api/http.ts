@@ -84,9 +84,11 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  // headers 必须合并而非直接展开覆盖：调用方只传 Content-Type 时，
+  // 直接 ...options 会把 Authorization 一起顶掉，导致后端 401
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: getAuthHeaders(),
     ...options,
+    headers: { ...getAuthHeaders(), ...(options?.headers as Record<string, string> | undefined) },
   })
   if (response.status === 401) {
     localStorage.removeItem('token')
@@ -164,7 +166,6 @@ export const api = {
       `/tools/project/file/save?${params.toString()}`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           content,
           mtime: options.mtime,

@@ -2,7 +2,15 @@
 
 背景：文件区现状为只读文件树 + 只读内容预览 + 文件名搜索，无右键菜单；图片等二进制一律拦截提示。本计划按价值排序先做 5 项。
 
-执行顺序：f1 → f2 → f3 → f4 → f5（先补“动手能力”和预览短板，再做搜索和导航；可编辑保存因涉及后端写接口和脏状态风险最大，暂不做）。
+执行顺序：f1 → f2 → f3 → f4 → f5（先补“动手能力”和预览短板，再做搜索和导航）；e1~e6 文件可编辑保存已于 2026-09-15 完成。
+
+已完成（2026-09-15）：e1~e6 可编辑保存
+- e1 后端 read：行数上限提至 200_000，返回 mtime/总行数/截断/换行符/BOM/是否 UTF-8 可编辑标记。
+- e2 后端 save：`POST /tools/project/file/save`，mtime 乐观锁、保留换行符与 BOM、复用 validate_write_path 越权校验。
+- e3 store：dirty/saving 状态、savedCode 基线、save() 动作、editable/readonlyReason 透传。
+- e4 编辑器：新增 `CodeEditor.vue`（CodeMirror 6，虚拟滚动 + 语法高亮 + oneDark 主题），FileEditorPane 双模式——可编辑文件走 CodeMirror，只读文件保留 hljs 静态渲染；跳行/搜索均按模式分流；Ctrl+S 保存；关闭脏文件弹确认；标签页显示未保存圆点。
+- e5 降级：内容 >500KB 关闭语法高亮（heavy 模式）；Markdown 维持预览态不提供编辑。
+- e6 验证：vue-tsc 通过、vite build 通过、restart-bfzs 完整重启、save 路由已注册（未认证返回 401）。
 
 通用约束：
 - 后端路径操作必须复用 `lc_agent/tools/system_tools/_config.py` 的 `validate_read_path` 及 `tools.py` 的项目根解析逻辑，不得绕过越权校验。

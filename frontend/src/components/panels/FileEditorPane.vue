@@ -20,10 +20,16 @@
             role="tab"
             :aria-selected="store.activePath === file.path"
             @click="store.activate(file.path)"
-            @auxclick.middle.prevent="store.close(file.path)"
+            @auxclick.middle.prevent="confirmClose(file.path)"
             @contextmenu.prevent="openTabMenu($event, file)"
           >
             <FileTypeIcon :name="file.name" :compact="true" />
+            <!-- 未保存标记：脏文件显示圆点，替换关闭按钮的位置语义 -->
+            <span
+              v-if="store.contentOf(file.path)?.dirty && store.activePath === file.path"
+              class="editor-tab-dot"
+              title="有未保存的修改"
+            />
             <svg v-if="file.pinned" class="editor-tab-pin" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" fill="currentColor" />
             </svg>
@@ -33,7 +39,7 @@
               type="button"
               :aria-label="`关闭 ${file.name}`"
               title="关闭标签"
-              @click.stop="store.close(file.path)"
+              @click.stop="confirmClose(file.path)"
             >
               <svg viewBox="0 0 12 12" aria-hidden="true">
                 <path
@@ -70,11 +76,6 @@
           >
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M6 3.5L10.5 8L6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <button class="editor-icon-btn" type="button" title="刷新当前文件" :disabled="!store.activePath || content?.loading" @click="store.refresh(store.activePath)">
-            <svg viewBox="0 0 16 16" :class="{ spinning: content?.loading }" aria-hidden="true">
-              <path d="M13 8a5 5 0 1 1-1.5-3.6M13 2v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
           <button class="editor-restore-btn" type="button" title="恢复已关闭的标签" @click="store.reopenClosed()">
@@ -146,21 +147,38 @@
     <template v-else-if="store.activeFile">
       <!-- 路径面包屑：位于标签栏与工具栏之间 -->
       <div class="editor-breadcrumb">
-        <template v-for="(seg, i) in breadcrumbSegments" :key="seg.path">
-          <span v-if="i > 0" class="editor-breadcrumb-sep">/</span>
-          <button
-            class="editor-breadcrumb-item"
-            :class="{ 'is-last': i === breadcrumbSegments.length - 1 }"
-            type="button"
-            :title="seg.abs"
-            @click="revealInTree(seg)"
-          >
-            {{ seg.label }}
-          </button>
-        </template>
+        <!-- 路径部分单独可收缩：长路径被裁切，不挤走右侧刷新按钮 -->
+        <div class="editor-breadcrumb-path">
+          <template v-for="(seg, i) in breadcrumbSegments" :key="seg.path">
+            <span v-if="i > 0" class="editor-breadcrumb-sep">/</span>
+            <button
+              class="editor-breadcrumb-item"
+              :class="{ 'is-last': i === breadcrumbSegments.length - 1 }"
+              type="button"
+              :title="seg.abs"
+              @click="revealInTree(seg)"
+            >
+              {{ seg.label }}
+            </button>
+          </template>
+        </div>
+        <!-- 刷新当前文件：与面包屑同排，语义上只作用于当前文件（图片等隐藏工具栏的文件也能刷新） -->
+        <button
+          class="editor-refresh-btn"
+          type="button"
+          title="刷新当前文件"
+          aria-label="刷新当前文件"
+          :disabled="!store.activePath || content?.loading"
+          @click="store.refresh(store.activePath)"
+        >
+          <svg viewBox="0 0 16 16" :class="{ spinning: content?.loading }" aria-hidden="true">
+            <path d="M13 8a5 5 0 1 1-1.5-3.6M13 2v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>刷新</span>
+        </button>
       </div>
 
-      <!-- 工具栏：搜索 + 复制。图片不参与搜索/复制，整条工具栏隐藏 -->
+      <!-- 工具栏：搜索 + 保存 + 复制。图片不参与搜索/复制，整条工具栏隐藏 -->
       <div v-if="!isImageFile" class="editor-toolbar">
         <input
           ref="searchInputRef"
@@ -175,6 +193,21 @@
           <button class="editor-search-btn" :disabled="!matchCount" @click="jumpToPrevMatch">↑</button>
           <button class="editor-search-btn" :disabled="!matchCount" @click="jumpToNextMatch">↓</button>
         </div>
+        <!-- 保存：可编辑文件才出现 -->
+        <button
+          v-if="content?.editable"
+          class="editor-save-btn"
+          type="button"
+          :title="content?.dirty ? '保存修改 (Ctrl+S)' : '没有未保存的修改'"
+          :disabled="!content?.dirty || content?.saving"
+          @click="saveActiveFile"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3 1.5h8L14 4.5V14a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14V2a.5.5 0 0 1 .5-.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            <path d="M5 1.5V5h5V1.5M4.5 14V9.5h7V14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+          </svg>
+          <span>{{ content?.saving ? '保存中…' : content?.dirty ? '保存' : '已保存' }}</span>
+        </button>
         <button class="editor-copy-btn" type="button" @click="copyCode">{{ copyLabel }}</button>
         <button class="editor-locate-btn" type="button" title="在文件树中定位当前文件" @click="revealActiveInTree">
           <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -183,6 +216,13 @@
           </svg>
           <span>定位</span>
         </button>
+      </div>
+
+      <!-- 保存错误提示（如乐观锁冲突） -->
+      <div v-if="content?.saveError" class="editor-save-error">
+        {{ content.saveError }}
+        <button class="editor-save-error-reload" type="button" @click="store.refresh(store.activePath)">重新加载</button>
+        <button class="editor-save-error-dismiss" type="button" @click="content && (content.saveError = '')">✕</button>
       </div>
 
       <!-- 加载中 -->
@@ -233,9 +273,9 @@
 
       <!-- 内容 -->
       <div v-else-if="content" ref="contentWrapRef" class="editor-content" @scroll="closeMenu">
-        <!-- 跳行高亮：绝对定位色带随滚动跟随该行，1.5s 后由定时器移除 -->
+        <!-- 跳行高亮：绝对定位色带随滚动跟随该行，1.5s 后由定时器移除（仅只读 hljs 模式使用） -->
         <div
-          v-if="jumpFlash"
+          v-if="jumpFlash && !content.editable"
           class="editor-jump-band"
           :style="{
             top: `${jumpLineTop}px`,
@@ -252,11 +292,21 @@
           class="editor-markdown markdown-body"
           v-html="renderedHtml"
         />
-        <!-- 代码 + 行号 -->
-        <div v-else class="editor-code">
+        <!-- 代码（只读模式：hljs 静态渲染，支持搜索 mark 与跳行色带） -->
+        <div v-else-if="!content.editable" class="editor-code">
           <div class="editor-gutter" aria-hidden="true">{{ lineNumbers }}</div>
           <pre ref="renderRef" class="editor-pre hljs" v-html="renderedHtml" />
         </div>
+        <!-- 可编辑：CodeMirror 6（虚拟滚动 + 语法高亮） -->
+        <CodeEditor
+          v-else
+          ref="codeEditorRef"
+          :code="content.code"
+          :language="store.activeFile.language"
+          :editable="true"
+          :heavy="content.code.length > 500_000"
+          @update:code="onCodeChange"
+        />
       </div>
 
       <!-- 右键菜单 -->
@@ -282,6 +332,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import hljs from 'highlight.js'
 import { Loading } from '@element-plus/icons-vue'
 import { renderMarkdown } from '@/utils/markdown'
@@ -289,11 +340,48 @@ import { useOpenedFilesStore } from '@/stores/opened-files'
 import type { OpenedFile } from '@/stores/opened-files'
 import { useProjectTreeStore } from '@/stores/project-tree'
 import FileTypeIcon from '@/components/common/FileTypeIcon.vue'
+import CodeEditor from '@/components/panels/CodeEditor.vue'
 
 const store = useOpenedFilesStore()
 const treeStore = useProjectTreeStore()
 
 const content = computed(() => store.activeContent)
+const codeEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
+
+// CodeMirror 编辑产生的回调：写入 store 并维护脏状态
+function onCodeChange(next: string) {
+  if (!store.activePath) return
+  store.markDirty(store.activePath, next)
+}
+
+async function saveActiveFile() {
+  const path = store.activePath
+  if (!path) return
+  const result = await store.save(path)
+  if (result.error) {
+    ElMessage.error(result.conflict ? '文件已被其他会话修改，请重新加载' : result.error)
+  } else if (result.ok) {
+    ElMessage.success('已保存')
+  }
+}
+
+/** 关闭标签前检查脏状态：有未保存修改时先询问 */
+async function confirmClose(path: string) {
+  const c = store.contentOf(path)
+  if (!c?.dirty) {
+    store.close(path)
+    return
+  }
+  const name = store.files.find(f => f.path === path)?.name || path
+  try {
+    const action = await ElMessageBox.confirm(
+      `「${name}」有未保存的修改，关闭后将丢失。`,
+      '未保存的修改',
+      { confirmButtonText: '丢弃并关闭', cancelButtonText: '取消', distinguishCancelAndClose: true, type: 'warning' },
+    )
+    if (action === 'confirm') store.close(path)
+  } catch { /* 取消/关闭弹窗：什么都不做 */ }
+}
 
 // 图片不参与搜索与复制：既看扩展名（内容未到达前就能判断），也看后端识别结果
 const isImageFile = computed(() =>
@@ -393,7 +481,8 @@ function escapeRegExp(s: string): string {
 
 function applyMarks() {
   const el = renderRef.value
-  if (!el) return
+  // 可编辑模式由 CodeMirror 的 search 扩展负责，不走 DOM mark
+  if (!el || content.value?.editable) return
   // 代码模式下 v-html 已渲染，需要重新写入以清除旧 mark
   if (!store.activeFile?.asMarkdown) {
     el.innerHTML = renderedHtml.value
@@ -444,15 +533,27 @@ function syncActive() {
 
 function jumpToNextMatch() {
   if (!matchCount.value) return
+  if (content.value?.editable) { codeEditorRef.value?.gotoMatch(1); return }
   activeMatchIndex.value = (activeMatchIndex.value + 1) % matchCount.value
 }
 
 function jumpToPrevMatch() {
   if (!matchCount.value) return
+  if (content.value?.editable) { codeEditorRef.value?.gotoMatch(-1); return }
   activeMatchIndex.value = (activeMatchIndex.value - 1 + matchCount.value) % matchCount.value
 }
 
-watch(searchQuery, async () => { activeMatchIndex.value = 0; await nextTick(); applyMarks() })
+// 搜索词变化：可编辑模式同步给 CodeMirror，由其返回匹配数
+watch(searchQuery, async (query, prev) => {
+  activeMatchIndex.value = 0
+  if (content.value?.editable) {
+    if (query.trim() === prev?.trim()) return
+    matchCount.value = query.trim() ? (codeEditorRef.value?.search(query.trim()) ?? 0) : 0
+    return
+  }
+  await nextTick()
+  applyMarks()
+})
 watch(activeMatchIndex, () => syncActive())
 watch(() => store.activePath, async () => {
   searchQuery.value = ''
@@ -478,6 +579,12 @@ async function applyJumpLine() {
   if (line <= 0 || !c?.code) return
   // Markdown 是渲染后的排版，行号与源码行不对应；图片/二进制无代码区，均只清空请求
   if (c.image || c.binary || store.activeFile?.asMarkdown) {
+    store.consumeJumpLine()
+    return
+  }
+  // 可编辑模式：交给 CodeMirror 原生滚动定位
+  if (c.editable) {
+    codeEditorRef.value?.jumpToLine(line)
     store.consumeJumpLine()
     return
   }
@@ -568,7 +675,7 @@ function openTabMenu(e: MouseEvent, file: OpenedFile) {
 }
 
 function toggleTabPin() { const p = tabMenuPath.value; closeTabMenu(); if (p) store.togglePin(p) }
-function closeTabFromMenu() { const p = tabMenuPath.value; closeTabMenu(); if (p) store.close(p) }
+function closeTabFromMenu() { const p = tabMenuPath.value; closeTabMenu(); if (p) confirmClose(p) }
 function closeOtherTabs() { const p = tabMenuPath.value; closeTabMenu(); if (p) store.closeOthers(p) }
 function closeTabsToRight() { const p = tabMenuPath.value; closeTabMenu(); if (p) store.closeToRight(p) }
 function closeAllTabs() { closeTabMenu(); store.closeAll() }
@@ -624,9 +731,20 @@ const menuStyle = computed(() => ({ left: `${menuX.value}px`, top: `${menuY.valu
 function closeMenu() { menuVisible.value = false }
 
 function handleContextMenu(e: MouseEvent) {
+  // CodeMirror 模式下选区在编辑器内部，window.getSelection() 不反映其选中状态
+  if (content.value?.editable) {
+    if (!codeEditorRef.value?.getSelectionInfo()) return
+    e.preventDefault()
+    openCodeMenu(e)
+    return
+  }
   const sel = window.getSelection()
   if (!sel || sel.isCollapsed || !sel.toString().trim()) return
   e.preventDefault()
+  openCodeMenu(e)
+}
+
+function openCodeMenu(e: MouseEvent) {
   const MENU_W = 176
   const MENU_H = store.activeFile?.sourcePath && !store.activeFile?.asMarkdown ? 116 : 44
   menuX.value = Math.min(e.clientX, window.innerWidth - MENU_W - 8)
@@ -634,7 +752,12 @@ function handleContextMenu(e: MouseEvent) {
   menuVisible.value = true
 }
 
+/** 当前选区的行号范围；CodeMirror 模式直接问编辑器，只读模式从 DOM 推算 */
 function selectionLineRange(): { start: number; end: number } | null {
+  if (content.value?.editable) {
+    const sel = codeEditorRef.value?.getSelectionInfo()
+    return sel ? { start: sel.startLine, end: sel.endLine } : null
+  }
   const el = renderRef.value
   const sel = window.getSelection()
   if (!el || !sel || sel.rangeCount === 0) return null
@@ -651,6 +774,12 @@ function selectionLineRange(): { start: number; end: number } | null {
   const newlines = covered.match(/\n/g)?.length ?? 0
   const end = Math.max(start, newlines + (text.endsWith('\n') ? 0 : 1))
   return { start, end }
+}
+
+/** 当前选中的文本；CodeMirror 模式取编辑器选区，只读模式取 DOM 选区 */
+function selectionText(): string {
+  if (content.value?.editable) return codeEditorRef.value?.getSelectionInfo()?.text ?? ''
+  return window.getSelection()?.toString() ?? ''
 }
 
 function lineRefLabel(): string | null {
@@ -672,10 +801,10 @@ async function writeClipboard(text: string) {
   } catch { /* 静默 */ }
 }
 
-async function copySelection() { const t = window.getSelection()?.toString() ?? ''; if (t) await writeClipboard(t); closeMenu() }
+async function copySelection() { const t = selectionText(); if (t) await writeClipboard(t); closeMenu() }
 async function copyLineRef() { const l = lineRefLabel(); if (l) await writeClipboard(l); closeMenu() }
 async function copyLineRefWithContent() {
-  const l = lineRefLabel(); const t = window.getSelection()?.toString() ?? ''
+  const l = lineRefLabel(); const t = selectionText()
   if (l && t) await writeClipboard(`${l}\n\n${t}`); closeMenu()
 }
 
@@ -688,6 +817,14 @@ function onDocumentPointerDown(e: MouseEvent) {
   if (!insideTabMenu) closeTabMenu()
 }
 function onDocumentKeydown(e: KeyboardEvent) {
+  // Ctrl/Cmd+S：保存当前文件（仅编辑器面板挂载时接管）
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 's' || e.key === 'S')) {
+    if (content.value?.editable && content.value?.dirty) {
+      e.preventDefault()
+      void saveActiveFile()
+    }
+    return
+  }
   // Ctrl/Cmd+Shift+T：恢复最近关闭的标签（与浏览器/VS Code 习惯一致）
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'T' || e.key === 't')) {
     if (store.files.length === 0) return
@@ -824,6 +961,15 @@ watch(contentWrapRef, (el, prev) => {
   height: 12px;
   flex-shrink: 0;
   opacity: 0.85;
+}
+
+/* 未保存圆点：激活标签上显示，与关闭按钮错开 */
+.editor-tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: currentColor;
 }
 
 .editor-tab-close {
@@ -1005,7 +1151,7 @@ watch(contentWrapRef, (el, prev) => {
 .editor-breadcrumb {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
   padding: 4px 10px;
   border-bottom: 1px solid var(--el-border-color-lighter);
   background: var(--el-bg-color);
@@ -1013,6 +1159,16 @@ watch(contentWrapRef, (el, prev) => {
   overflow: hidden;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+/* 路径区：占据剩余宽度，过长时裁切而非挤走右侧按钮 */
+.editor-breadcrumb-path {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .editor-breadcrumb-item {
@@ -1046,6 +1202,49 @@ watch(contentWrapRef, (el, prev) => {
   flex-shrink: 0;
   color: var(--el-text-color-placeholder);
   opacity: 0.7;
+}
+
+/* 刷新当前文件：描边胶囊，与「定位」实底按钮区分主次，不抢视觉焦点 */
+.editor-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, #10b981 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #10b981 10%, transparent);
+  color: #059669;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.editor-refresh-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.editor-refresh-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, #10b981 20%, transparent);
+  border-color: #10b981;
+}
+
+.editor-refresh-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.editor-refresh-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.editor-refresh-btn .spinning {
+  animation: spin 0.9s linear infinite;
 }
 
 /* 工具栏 */
@@ -1111,6 +1310,75 @@ watch(contentWrapRef, (el, prev) => {
 }
 .editor-copy-btn:hover { background: var(--el-fill-color); color: var(--el-text-color-primary); }
 
+/* 保存按钮：翠绿实底，与文件区色相一致 */
+.editor-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  box-shadow: 0 1px 6px rgba(5, 150, 105, 0.32);
+  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.editor-save-btn svg { width: 12px; height: 12px; }
+.editor-save-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 2px 10px rgba(5, 150, 105, 0.44);
+  transform: translateY(-1px);
+}
+.editor-save-btn:active:not(:disabled) { transform: translateY(0); }
+.editor-save-btn:disabled {
+  background: var(--el-fill-color);
+  color: var(--el-text-color-placeholder);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* 保存错误条：乐观锁冲突等 */
+.editor-save-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  color: #b45309;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.editor-save-error-reload {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, #f59e0b 55%, transparent);
+  border-radius: 4px;
+  background: transparent;
+  color: #b45309;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.editor-save-error-reload:hover { background: color-mix(in srgb, #f59e0b 18%, transparent); }
+.editor-save-error-dismiss {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+.editor-save-error-dismiss:hover { background: color-mix(in srgb, #f59e0b 18%, transparent); }
+
 /* 「定位」按钮：带彩色底的胶囊，与文件区翠绿色系一致 */
 .editor-locate-btn {
   display: inline-flex;
@@ -1163,6 +1431,35 @@ watch(contentWrapRef, (el, prev) => {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   background: var(--md-code-bg, #0d1117);
+}
+
+/* 深色代码底上全局灰色滚动条几乎不可见，改用明亮天蓝色 */
+.editor-content::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.editor-content::-webkit-scrollbar-track {
+  background: rgba(56, 189, 248, 0.1);
+  border-radius: 999px;
+}
+
+.editor-content::-webkit-scrollbar-thumb {
+  background: #38bdf8;
+  border-radius: 999px;
+  min-height: 40px;
+}
+
+.editor-content::-webkit-scrollbar-thumb:hover {
+  background: #7dd3fc;
+}
+
+.editor-content::-webkit-scrollbar-thumb:active {
+  background: #0ea5e9;
+}
+
+.editor-content::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* 跳行高亮：色带随内容一起滚动，1.5s 后由定时器摘除 */
@@ -1279,7 +1576,7 @@ watch(contentWrapRef, (el, prev) => {
 }
 
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .editor-icon-btn .spinning { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .editor-icon-btn .spinning, .editor-refresh-btn .spinning { animation: none; } }
 </style>
 
 <style>

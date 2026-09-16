@@ -29,6 +29,23 @@ interface FileContent {
   image: boolean
   imageDataUrl: string
   imageTooLarge: boolean
+  // ---- 编辑支持 ----
+  // 相对未保存修改
+  dirty: boolean
+  // 保存中锁：防止重复提交
+  saving: boolean
+  // 读取时的 mtime，保存时做乐观锁
+  mtime: number
+  // 原文件换行符与 BOM，写回时原样保留
+  newline: 'lf' | 'crlf'
+  hasBom: boolean
+  // 后端判定是否允许编辑（UTF-8 无损且未截断）；不可编辑时给出原因
+  editable: boolean
+  readonlyReason: string
+  // 保存失败的错误（与加载错误 error 分开，不互相覆盖）
+  saveError: string
+  // 最近一次保存/加载时的内容基线，与 code 比较判断脏状态
+  savedCode: string
 }
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif']
@@ -122,6 +139,8 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
     return {
       code: '', truncated: false, loading: false, error: '', loaded: false,
       binary: false, image: false, imageDataUrl: '', imageTooLarge: false,
+      dirty: false, saving: false, mtime: 0, newline: 'lf', hasBom: false,
+      editable: false, readonlyReason: '', saveError: '', savedCode: '',
       ...overrides,
     }
   }
@@ -148,7 +167,8 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
     try {
       // 相对路径需要 agent_id 才能定位项目根；绝对路径后端直接读
       const isRelative = !/^[a-zA-Z]:[\\/]/.test(file.path) && !file.path.startsWith('/')
-      const data = await api.readFile(file.path, 2000, isRelative ? agentsStore.currentAgentId : undefined)
+      // 请求大行数，配合 CodeMirror 虚拟滚动可打开大文件
+      const data = await api.readFile(file.path, 200000, isRelative ? agentsStore.currentAgentId : undefined)
       if (data.error) {
         contents.value[file.path] = emptyContent({ error: data.error, loaded: true })
         return
@@ -167,9 +187,15 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
         return
       }
       contents.value[file.path] = emptyContent({
-        code: (data.lines || []).join('\n') + (data.truncated ? '\n\n... (内容已截断)' : ''),
+        code: (data.lines || []).join('\n'),
         truncated: !!data.truncated,
         loaded: true,
+        mtime: data.mtime ?? 0,
+        newline: data.newline === 'crlf' ? 'crlf' : 'lf',
+        hasBom: !!data.has_bom,
+        editable: !!data.editable,
+        readonlyReason: data.readonly_reason || '',
+        savedCode: (data.lines || []).join('\n'),
       })
     } catch (e: any) {
       contents.value[file.path] = emptyContent({ error: e.message || '读取文件失败', loaded: true })
@@ -362,6 +388,48 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
     void loadContent(file)
   }
 
+  /** 编辑器内容变化时调用：与保存基线比较维护脏状态 */
+  function markDirty(path: string, nextCode: string) {
+    const c = contents.value[path]
+    if (!c || !c.loaded) return
+    c.code = nextCode
+    c.dirty = nextCode !== c.savedCode
+  }
+
+  /** 保存当前文件；成功后更新 mtime 并清除脏标记 */
+  async function save(path: string): Promise<{ ok?: boolean; error?: string; conflict?: boolean }> {
+    const c = contents.value[path]
+    if (!c || !c.loaded || !c.editable) return { error: '文件不可编辑' }
+    if (c.saving) return {}
+    c.saving = true
+    c.saveError = ''
+    const agentsStore = useAgentsStore()
+    const agentId = agentsStore.currentAgentId
+    try {
+      if (!agentId) return { error: '无活跃 Agent' }
+      const result = await api.saveFile(agentId, path, c.code, {
+        mtime: c.mtime, newline: c.newline, hasBom: c.hasBom,
+      })
+      if (result.error) {
+        c.saveError = result.error
+        if (result.conflict) {
+          // 冲突后刷新 mtime，用户重载后才能再保存
+          c.mtime = result.mtime ?? c.mtime
+        }
+        return result
+      }
+      c.mtime = result.mtime ?? c.mtime
+      c.dirty = false
+      c.savedCode = c.code
+      return { ok: true }
+    } catch (e: any) {
+      c.saveError = e.message || '保存失败'
+      return { error: c.saveError }
+    } finally {
+      c.saving = false
+    }
+  }
+
   return {
     files,
     activePath,
@@ -385,5 +453,7 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
     requestJumpToLine,
     consumeJumpLine,
     refresh,
+    markDirty,
+    save,
   }
 })
