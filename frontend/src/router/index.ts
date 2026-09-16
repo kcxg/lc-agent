@@ -9,9 +9,6 @@ const router = createRouter({
     { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
     { path: '/', name: 'home', component: ChatView },
     { path: '/c/:sessionId', name: 'chat', component: ChatView, props: true },
-    { path: '/admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { requiresAdmin: true } },
-    { path: '/admin/usage', name: 'usage-admin', component: () => import('@/views/UsageAdminView.vue'), meta: { requiresAdmin: true } },
-    { path: '/me/usage', name: 'usage-me', component: () => import('@/views/MyUsageView.vue') },
     { path: '/test-segments', name: 'test-segments', component: () => import('@/views/TestSegments.vue') },
   ],
 })
@@ -30,7 +27,6 @@ router.beforeEach(async (to) => {
     const valid = await authStore.checkAuth()
     if (!valid) return { name: 'login' }
   }
-  if (to.meta.requiresAdmin && !authStore.isAdmin) return { name: 'home' }
   return true
 })
 

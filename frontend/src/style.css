@@ -49,3 +49,10 @@ a {
   color: var(--el-color-danger);
   opacity: 0.8;
 }
+
+/* 大弹窗（用户管理 / 用量统计 / 我的用量）：正文超长时内部滚动，标题与关闭按钮常驻 */
+.app-usage-dialog .el-dialog__body {
+  max-height: 80vh;
+  overflow-y: auto;
+  padding-top: 10px;
+}

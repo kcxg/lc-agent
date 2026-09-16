@@ -65,6 +65,8 @@ class SubAgentRunTracker:
             return event_type, payload
         if event_type == "subagent_done":
             return event_type, self._handle_done(payload)
+        if event_type in ("summarization_start", "summarization_done", "summarization_failed"):
+            return event_type, self._handle_summarization(event_type, payload)
         return event_type, payload
 
     def finalize_open_runs(self, status: str = "error") -> list[tuple[str, dict[str, Any]]]:
@@ -220,6 +222,33 @@ class SubAgentRunTracker:
         if traces:
             done_payload["http_traces"] = traces
         return done_payload
+
+    def _handle_summarization(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """子会话内部压缩：留痕进子会话 content_parts，前端按 tool_call_id 归属。
+
+        主会话的压缩不走这里（tool_call_id 为空，直接透传，前端挂到当前消息）。
+        """
+        from lc_agent.server.stream_utils import (
+            _sanitize_summarize_count,
+            _sanitize_summarize_reason,
+        )
+
+        tool_call_id = payload.get("tool_call_id") or ""
+        if not tool_call_id:
+            return payload
+        run = self._runs.get(tool_call_id)
+        if run is None:
+            return payload
+        if event_type == "summarization_done":
+            summarized = _sanitize_summarize_count(payload.get("summarized_count", 0))
+            kept = _sanitize_summarize_count(payload.get("kept_count", 0))
+            run.content_parts.append(f"\n<!--SUMMARIZE:{summarized}:{kept}-->\n")
+            return {**payload, "summarized_count": summarized, "kept_count": kept}
+        if event_type == "summarization_failed":
+            reason = _sanitize_summarize_reason(payload.get("reason", ""))
+            run.content_parts.append(f"\n<!--SUMMARIZE_FAIL:{reason}-->\n")
+            return {**payload, "reason": reason}
+        return payload
 
     def _mark_parent_tool_call(self, tool_call_id: str, display_name: str, sub_session_id: str) -> None:
         for tool_call in self.tool_calls:

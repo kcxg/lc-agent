@@ -38,6 +38,8 @@
         @open-settings="openCleanupDialog"
         @change-password="openChangePassword"
         @go-admin="goAdmin"
+        @go-usage-admin="openUsageAdmin"
+        @go-my-usage="openMyUsage"
         @logout="handleLogout"
       />
 
@@ -80,6 +82,9 @@
     <CleanupDialog ref="cleanupDialogRef" @cleaned="handleCleanupDone" />
     <ChangePasswordDialog ref="changePasswordRef" />
     <AutomationDrawer ref="automationDrawerRef" />
+    <AdminView ref="adminViewRef" />
+    <UsageAdminView ref="usageAdminViewRef" />
+    <MyUsageView ref="myUsageViewRef" />
     </div>
   </ConfigProvider>
 </template>
@@ -108,6 +113,9 @@ import AgentManagerDialog from '@/components/dialogs/AgentManagerDialog.vue'
 import CleanupDialog from '@/components/dialogs/CleanupDialog.vue'
 import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
 import AutomationDrawer from '@/components/automation/AutomationDrawer.vue'
+import AdminView from '@/views/AdminView.vue'
+import UsageAdminView from '@/views/UsageAdminView.vue'
+import MyUsageView from '@/views/MyUsageView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 
@@ -131,6 +139,9 @@ const agentManagerRef = ref<InstanceType<typeof AgentManagerDialog>>()
 const cleanupDialogRef = ref<InstanceType<typeof CleanupDialog>>()
 const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
 const automationDrawerRef = ref<InstanceType<typeof AutomationDrawer>>()
+const adminViewRef = ref<InstanceType<typeof AdminView>>()
+const usageAdminViewRef = ref<InstanceType<typeof UsageAdminView>>()
+const myUsageViewRef = ref<InstanceType<typeof MyUsageView>>()
 const sidebarCollapsed = ref(false)
 const rightCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
@@ -463,7 +474,15 @@ function openChangePassword() {
 }
 
 function goAdmin() {
-  router.push('/admin')
+  adminViewRef.value?.open()
+}
+
+function openUsageAdmin() {
+  usageAdminViewRef.value?.open()
+}
+
+function openMyUsage() {
+  myUsageViewRef.value?.open()
 }
 
 function handleLogout() {

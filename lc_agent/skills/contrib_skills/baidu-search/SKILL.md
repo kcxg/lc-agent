@@ -2,7 +2,7 @@
 name: baidu-search
 description: >-
   百度联网检索。search 按关键词搜索网页返回摘要/链接；extract 阅读指定网页提取正文。
-  用户要搜索、查资料时用 search；要读某篇文章、看某个链接内容时用 extract。
+  用户要搜索、查资料时用 search；要读某篇文章、看某个链接内容时用 extract或者用浏览器打开。
 version: 1.1.0
 ---
 
@@ -53,9 +53,9 @@ search 返回结果中的 results 的 url 就是需要调用 extract 提取url�
 | `--max-chars N` | 正文最大字符数，默认 20000，传 0 不截断 |
 | `--client` | 同 search |
 
-！！注意：
+#### ！！注意：
 很多网站直接extract的http请求主url拿不到正文，例如有的是js动态渲染页面，
-如果你当前有playwright的mcp工具，你使用浏览器来打开url， 禁止每次使用完后你主动关闭浏览器，你不需要关闭浏览器。
+如果你当前有playwright的mcp工具或者使用agent-browser skill，你使用浏览器来打开url， 禁止每次使用完后你主动关闭浏览器，你不需要重启和关闭浏览器。
 
 ## 返回格式
 

@@ -1,17 +1,18 @@
 <template>
-  <div class="admin-page">
-    <el-card shadow="never">
-      <template #header>
-        <div class="admin-header">
-          <h2>用户管理</h2>
-          <div class="admin-actions">
-            <el-button @click="router.push('/')">返回首页</el-button>
-            <el-button type="primary" @click="openCreateDialog">创建用户</el-button>
-          </div>
-        </div>
-      </template>
+  <el-dialog
+    v-model="visible"
+    title="用户管理"
+    width="min(1100px, 94vw)"
+    top="6vh"
+    class="app-usage-dialog"
+    :close-on-click-modal="false"
+  >
+    <div class="admin-page">
+    <div class="admin-actions">
+      <el-button type="primary" @click="openCreateDialog">创建用户</el-button>
+    </div>
 
-      <el-table v-loading="loading" :data="users" stripe style="width: 100%">
+    <el-table v-loading="loading" :data="users" stripe style="width: 100%">
         <el-table-column prop="username" label="用户名" min-width="140" />
         <el-table-column prop="role" label="角色" width="160">
           <template #default="{ row }">
@@ -48,7 +49,6 @@
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
 
     <!-- Create user dialog -->
     <el-dialog v-model="createVisible" title="创建用户" width="420px" :close-on-click-modal="false">
@@ -102,12 +102,12 @@
         <el-button type="primary" :loading="agentsLoading" @click="handleSaveAgents">保存</el-button>
       </template>
     </el-dialog>
-  </div>
+    </div>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchApi, api } from '@/api/http'
 
@@ -126,7 +126,6 @@ interface AgentItem {
   source?: string
 }
 
-const router = useRouter()
 const users = ref<AdminUser[]>([])
 const agents = ref<AgentItem[]>([])
 const loading = ref(false)
@@ -146,9 +145,12 @@ const agentsError = ref('')
 const selectedUser = ref<AdminUser | null>(null)
 const selectedAgentIds = ref<string[]>([])
 
-onMounted(async () => {
+const visible = ref(false)
+
+async function open() {
+  visible.value = true
   await Promise.all([loadUsers(), loadAgents()])
-})
+}
 
 async function loadUsers() {
   loading.value = true
@@ -327,31 +329,21 @@ async function copyPassword() {
     document.body.removeChild(textarea)
   }
 }
+
+defineExpose({ open })
 </script>
 
 <style scoped>
 .admin-page {
-  padding: 20px;
-  overflow: auto;
-  height: 100%;
-}
-
-.admin-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.admin-header h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  max-width: 1040px;
+  margin: 0 auto;
 }
 
 .admin-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
+  margin-bottom: 12px;
 }
 
 .password-hint {

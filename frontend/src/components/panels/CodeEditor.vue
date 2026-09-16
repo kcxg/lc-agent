@@ -8,7 +8,7 @@ import { EditorState, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { search as searchExt, SearchQuery, setSearchQuery, findNext, findPrevious } from '@codemirror/search'
+import { search as searchExt, SearchQuery, setSearchQuery, getSearchQuery } from '@codemirror/search'
 import { python } from '@codemirror/lang-python'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
@@ -120,13 +120,21 @@ function jumpToLine(line: number) {
   view.focus()
 }
 
-/** 设置搜索词并返回匹配总数；后续用 gotoMatch 在匹配间跳转 */
+/** 设置搜索词并返回匹配总数；后续用 gotoMatchIndex 在匹配间跳转 */
 function search(query: string): number {
   if (!view) return 0
   const q = new SearchQuery({ search: query, caseSensitive: false })
   view.dispatch({ effects: setSearchQuery.of(q) })
+  const total = countMatches(view, q)
+  // 命中时先把视图落到第一个匹配上，计数与光标位置保持一致
+  if (total > 0) matchIndexAt(view, 0)
+  return total
+}
+
+/** 统计当前文档里该查询的匹配总数 */
+function countMatches(target: EditorView, query: SearchQuery): number {
   let count = 0
-  const cursor = q.getCursor(view.state)
+  const cursor = query.getCursor(target.state)
   let step = cursor.next()
   while (!step.done) {
     count++
@@ -135,10 +143,33 @@ function search(query: string): number {
   return count
 }
 
-function gotoMatch(direction: 1 | -1) {
-  if (!view) return
-  if (direction === 1) findNext(view)
-  else findPrevious(view)
+/** 把视图落到第 index 个匹配（0 起），返回匹配总数；越界或查询非法返回 0 */
+function matchIndexAt(target: EditorView, index: number): number {
+  const query = getSearchQuery(target.state)
+  if (!query.valid) return 0
+  const total = countMatches(target, query)
+  if (!total || index < 0 || index >= total) return 0
+  const cursor = query.getCursor(target.state)
+  for (let i = 0, step = cursor.next(); !step.done; step = cursor.next(), i++) {
+    if (i !== index) continue
+    const { from, to } = step.value
+    target.dispatch({
+      selection: { anchor: from, head: to },
+      effects: EditorView.scrollIntoView(from, { y: 'center' }),
+    })
+    return total
+  }
+  return 0
+}
+
+/**
+ * 跳到第 index 个匹配（0 起），返回 { found, total }。
+ * 环绕由调用方计算，这样「1/2」的计数与视图共用同一个下标。
+ */
+function gotoMatchIndex(index: number): { found: boolean; total: number } {
+  if (!view) return { found: false, total: 0 }
+  const total = matchIndexAt(view, index)
+  return { found: total > 0, total }
 }
 
 /** 当前选区信息：文本与首尾行号（1 起）。无选区或全空白返回 null */
@@ -158,7 +189,7 @@ function getSelectionInfo(): { text: string; startLine: number; endLine: number 
 defineExpose({
   jumpToLine,
   search,
-  gotoMatch,
+  gotoMatchIndex,
   getSelectionInfo,
   focus: () => view?.focus(),
 })

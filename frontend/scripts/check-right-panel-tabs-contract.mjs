@@ -25,10 +25,12 @@ function expectMatch(content, pattern, message) {
 }
 
 // 1. tab 按钮存在且顺序为 模型/能力/变更/(文件)/任务
-const tabOrder = ["'model'", "'abilities'", "'changes'", "'editor'", "'tasks'"]
+// 只按 tabs 列表的定义（id: 'xxx'）比顺序：文件别处也会出现这些裸字符串
+// （例如滚动容器的 :class="{ 'is-editor': activeTab === 'editor' }"），按裸字符串比对会误判
+const tabOrder = ['model', 'abilities', 'changes', 'editor', 'tasks']
 let cursor = -1
 for (const id of tabOrder) {
-  const at = rightPanel.indexOf(id)
+  const at = rightPanel.indexOf(`id: '${id}'`)
   expect(at >= 0, `RightPanel.vue 缺少 tab ${id}`)
   expect(at > cursor, `RightPanel.vue tab 顺序错误：${id} 位置不对`)
   cursor = at
@@ -117,6 +119,14 @@ expectMatch(
   /function loadActiveTab\(\)[\s\S]*return 'model'/,
   'ui store 默认 tab 必须回落到 model',
 )
+// 任务进度只属于任务 tab：不得放在跨 tab 置顶区，也不得残留置顶样式
+expect(!rightPanel.includes('right-panel-pinned'), 'RightPanel.vue 仍残留跨 tab 的待办置顶区（任务进度只能在任务 tab 内）')
+expect(
+  /<template v-if="activeTab === 'tasks'">[\s\S]*<TodoList :todos="chatStore\.todos"/.test(rightPanel),
+  '任务进度未收进任务 tab 内部',
+)
+expect(rightPanel.includes('<TodoList'), 'RightPanel.vue 未渲染任务进度 TodoList')
+expect(rightPanel.includes("import TodoList from '@/components/panels/TodoList.vue'"), 'RightPanel.vue 未导入 TodoList')
 expect(
   /const activeTab = ref<RightPanelTab>\(loadActiveTab\(\)\)/.test(uiStore),
   'ui store 初始化未读取记忆的 tab',

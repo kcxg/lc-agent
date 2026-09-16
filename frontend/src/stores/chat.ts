@@ -4,6 +4,7 @@ import { ChatSseClient, type SseMessage } from '@/api/sse-client'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSessionTabsStore } from '@/stores/session-tabs'
 import { useFileChangesStore } from '@/stores/file-changes'
+import { useOpenedFilesStore } from '@/stores/opened-files'
 import { api } from '@/api/http'
 import { createClientId } from '@/utils/client-id'
 import { createSessionState } from './chat-session-state'
@@ -70,6 +71,14 @@ export interface ContentSegment {
   toolCall?: ToolCall
 }
 
+export interface SummarizationNotice {
+  kind: 'running' | 'done' | 'failed'
+  summarizedCount: number
+  keptCount?: number
+  reason?: string
+  timestamp: number
+}
+
 export interface SubAgentEntry {
   tool_call_id: string
   name: string
@@ -85,6 +94,7 @@ export interface SubAgentEntry {
   innerToolCalls: Array<{ name: string; status: string; args?: unknown; result?: string }>
   duration?: number
   httpTraces?: HttpTrace[]
+  summarization?: SummarizationNotice
 }
 
 export interface ChatMessage {
@@ -100,6 +110,7 @@ export interface ChatMessage {
   usage?: MessageUsage
   httpTraces?: HttpTrace[]
   httpTracesCount?: number
+  summarizations?: SummarizationNotice[]
 }
 
 export interface FileDiffData {
@@ -183,6 +194,39 @@ function ensureHttpMarkers(content: string, traceCount: number): string {
     .filter(i => !content.includes(`<!--HTTP:${i}-->`))
   if (missing.length === 0) return content
   return `${content}\n${missing.map(i => `<!--HTTP:${i}-->`).join('\n')}\n`
+}
+
+const SUMMARIZE_MARKER_RE = /<!--SUMMARIZE:(\d+):(\d+)-->/
+const SUMMARIZE_FAIL_MARKER_RE = /<!--SUMMARIZE_FAIL:([^>]*)-->/
+
+export function parseSummarizationMarkers(textContent: string): SummarizationNotice[] {
+  const notices: SummarizationNotice[] = []
+  let match: RegExpExecArray | null
+  const doneRe = new RegExp(SUMMARIZE_MARKER_RE.source, 'g')
+  const failRe = new RegExp(SUMMARIZE_FAIL_MARKER_RE.source, 'g')
+  while ((match = doneRe.exec(textContent)) !== null) {
+    notices.push({
+      kind: 'done',
+      summarizedCount: parseInt(match[1], 10) || 0,
+      keptCount: parseInt(match[2], 10) || 0,
+      timestamp: Date.now(),
+    })
+  }
+  while ((match = failRe.exec(textContent)) !== null) {
+    notices.push({
+      kind: 'failed',
+      summarizedCount: 0,
+      reason: (match[1] || '').trim(),
+      timestamp: Date.now(),
+    })
+  }
+  return notices
+}
+
+export function stripSummarizationMarkers(textContent: string): string {
+  return textContent
+    .replace(/<!--SUMMARIZE:\d+:\d+-->/g, '')
+    .replace(/<!--SUMMARIZE_FAIL:[^>]*-->/g, '')
 }
 
 function normalizeHistoryUsage(rawUsage: any): MessageUsage | undefined {
@@ -299,6 +343,7 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
   const httpTraces = normalizeHttpTraces(msg.http_traces || msg.httpTraces)
   const httpTracesCount = msg.http_traces_count ?? msg.httpTracesCount ?? httpTraces?.length ?? 0
   let content: string | ContentBlock[]
+  let summarizations: SummarizationNotice[] | undefined
   if (role === 'user') {
     content = Array.isArray(msg.content)
       ? msg.content
@@ -311,6 +356,9 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     } else {
       textContent = rawContent || ''
     }
+    const parsed = parseSummarizationMarkers(textContent)
+    if (parsed.length > 0) summarizations = parsed
+    textContent = stripSummarizationMarkers(textContent)
     textContent = ensureToolMarkers(textContent, toolCalls)
     if (httpTracesCount > 0) {
       textContent = ensureHttpMarkers(textContent, httpTracesCount)
@@ -328,6 +376,7 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     usage,
     httpTraces,
     httpTracesCount,
+    summarizations,
   }
 }
 
@@ -447,6 +496,7 @@ export function applySubAgentStart(
     innerToolCalls: existing?.innerToolCalls || [],
     duration: existing?.duration,
     httpTraces: existing?.httpTraces,
+    summarization: existing?.summarization,
   }
   if (!message.subAgents) {
     message.subAgents = {}
@@ -580,6 +630,87 @@ export function applySubAgentDone(
     tc.resultLength = (tc.result || '').length
   }
   return { changed: !!sa || !!tc, shouldRefresh: true }
+}
+
+export function applySummarizationStart(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message || message.role !== 'assistant') return SUBAGENT_UNCHANGED
+  const notice: SummarizationNotice = {
+    kind: 'running',
+    summarizedCount: msg.summarized_count ?? 0,
+    timestamp: Date.now(),
+  }
+  message.summarizations = [...(message.summarizations || []), notice]
+  return { changed: true, shouldRefresh: true }
+}
+
+export function applySummarizationDone(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message || message.role !== 'assistant') return SUBAGENT_UNCHANGED
+  const list = message.summarizations || []
+  const runningIdx = [...list].reverse().findIndex(n => n.kind === 'running')
+  const done: SummarizationNotice = {
+    kind: 'done',
+    summarizedCount: msg.summarized_count ?? 0,
+    keptCount: msg.kept_count ?? 0,
+    timestamp: Date.now(),
+  }
+  if (runningIdx === -1) {
+    message.summarizations = [...list, done]
+  } else {
+    const realIdx = list.length - 1 - runningIdx
+    const next = [...list]
+    next[realIdx] = done
+    message.summarizations = next
+  }
+  return { changed: true, shouldRefresh: true }
+}
+
+export function applySummarizationFailed(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+): SubAgentReducerResult {
+  if (!message || message.role !== 'assistant') return SUBAGENT_UNCHANGED
+  const list = message.summarizations || []
+  const runningIdx = [...list].reverse().findIndex(n => n.kind === 'running')
+  const failed: SummarizationNotice = {
+    kind: 'failed',
+    summarizedCount: 0,
+    reason: msg.reason || '',
+    timestamp: Date.now(),
+  }
+  if (runningIdx === -1) {
+    message.summarizations = [...list, failed]
+  } else {
+    const realIdx = list.length - 1 - runningIdx
+    const next = [...list]
+    next[realIdx] = failed
+    message.summarizations = next
+  }
+  return { changed: true, shouldRefresh: true }
+}
+
+export function applySubAgentSummarization(
+  message: ChatMessage | undefined,
+  msg: SseMessage,
+  kind: 'running' | 'done' | 'failed',
+): SubAgentReducerResult {
+  if (!message?.subAgents) return SUBAGENT_UNCHANGED
+  const toolCallId = msg.tool_call_id
+  if (!toolCallId) return SUBAGENT_UNCHANGED
+  const sa = message.subAgents[toolCallId]
+  if (!sa) return SUBAGENT_UNCHANGED
+  const notice: SummarizationNotice = kind === 'running'
+    ? { kind, summarizedCount: msg.summarized_count ?? 0, timestamp: Date.now() }
+    : kind === 'done'
+      ? { kind, summarizedCount: msg.summarized_count ?? 0, keptCount: msg.kept_count ?? 0, timestamp: Date.now() }
+      : { kind, summarizedCount: 0, reason: msg.reason || '', timestamp: Date.now() }
+  message.subAgents[toolCallId] = { ...sa, summarization: notice }
+  return { changed: true, shouldRefresh: true }
 }
 
 export interface TodoItem {
@@ -882,6 +1013,8 @@ export const useChatStore = defineStore('chat', () => {
         old_string: (msg as any).old_string,
         new_string: (msg as any).new_string,
       }, sessionId)
+      // 已打开的编辑器标签若正是这个文件，磁盘内容已变，标记出来提示重载
+      useOpenedFilesStore().markExternalChanged(filePath)
     })
 
     client.on('file_change_git_snapshot', (msg: SseMessage) => {
@@ -929,6 +1062,80 @@ export const useChatStore = defineStore('chat', () => {
 
     client.on('subagent_done', (msg: SseMessage) => {
       const result = applySubAgentEventToMessages(state.messages.value, msg, applySubAgentDone, sessionId)
+      if (result.shouldRefresh) {
+        state.messages.value = [...state.messages.value]
+      }
+    })
+
+    client.on('summarization_start', (msg: SseMessage) => {
+      if (msg.tool_call_id) {
+        const result = applySubAgentEventToMessages(
+          state.messages.value, msg,
+          (message, m) => applySubAgentSummarization(message, m, 'running'),
+          sessionId,
+        )
+        if (result.shouldRefresh) {
+          state.messages.value = [...state.messages.value]
+        }
+        return
+      }
+      let last = state.messages.value[state.messages.value.length - 1]
+      if (!last || last.role !== 'assistant') {
+        state.isStreaming.value = true
+        state.streamStartTime = state.streamStartTime || Date.now()
+        state.messages.value.push({
+          id: createClientId(),
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+          isStreaming: true,
+          usage: { rounds: [], toolCallCount: 0 },
+        })
+        last = state.messages.value[state.messages.value.length - 1]
+      }
+      const result = applySummarizationStart(last, msg)
+      if (result.shouldRefresh) {
+        state.messages.value = [...state.messages.value]
+      }
+    })
+
+    client.on('summarization_done', (msg: SseMessage) => {
+      if (msg.tool_call_id) {
+        const result = applySubAgentEventToMessages(
+          state.messages.value, msg,
+          (message, m) => applySubAgentSummarization(message, m, 'done'),
+          sessionId,
+        )
+        if (result.shouldRefresh) {
+          state.messages.value = [...state.messages.value]
+        }
+        return
+      }
+      const last = state.messages.value[state.messages.value.length - 1]
+      const result = applySummarizationDone(
+        last && last.role === 'assistant' ? last : undefined, msg,
+      )
+      if (result.shouldRefresh) {
+        state.messages.value = [...state.messages.value]
+      }
+    })
+
+    client.on('summarization_failed', (msg: SseMessage) => {
+      if (msg.tool_call_id) {
+        const result = applySubAgentEventToMessages(
+          state.messages.value, msg,
+          (message, m) => applySubAgentSummarization(message, m, 'failed'),
+          sessionId,
+        )
+        if (result.shouldRefresh) {
+          state.messages.value = [...state.messages.value]
+        }
+        return
+      }
+      const last = state.messages.value[state.messages.value.length - 1]
+      const result = applySummarizationFailed(
+        last && last.role === 'assistant' ? last : undefined, msg,
+      )
       if (result.shouldRefresh) {
         state.messages.value = [...state.messages.value]
       }

@@ -1,8 +1,15 @@
 <template>
-  <div class="usage-admin usage-page">
+  <el-dialog
+    v-model="visible"
+    title="Token 用量统计"
+    width="min(1320px, 96vw)"
+    top="4vh"
+    class="usage-page app-usage-dialog"
+    :close-on-click-modal="false"
+  >
+    <div class="usage-admin-body">
     <div class="page-header">
       <div class="page-title">
-        <h2>Token 用量统计</h2>
         <span class="page-subtitle">按人 / Agent / 模型统计 token 消耗与费用</span>
       </div>
       <div class="page-actions">
@@ -19,7 +26,6 @@
             class="pricing-badge"
           />
         </el-button>
-        <el-button @click="$router.push('/admin')">返回管理后台</el-button>
       </div>
     </div>
 
@@ -344,11 +350,12 @@
         <el-button type="primary" :loading="priceSaving" @click="handleAddPrice">保存</el-button>
       </template>
     </el-dialog>
-  </div>
+    </div>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   api, downloadUsageCsv,
@@ -365,6 +372,8 @@ const groupBy = ref<string[]>(['user'])
 const includeSub = ref(true)
 const allModels = ref<string[]>([])
 const activeTab = ref('summary')
+
+const visible = ref(false)
 
 const loading = ref(false)
 const rows = ref<UsageSummaryRow[]>([])
@@ -626,12 +635,17 @@ async function handleExport() {
   }
 }
 
-onMounted(loadAll)
+async function open() {
+  visible.value = true
+  await loadAll()
+}
+
+defineExpose({ open })
 </script>
 
 <style scoped>
-.usage-admin {
-  padding: 20px 28px;
+.usage-admin-body {
+  padding: 2px 2px 0;
   max-width: 1280px;
   margin: 0 auto;
 }
@@ -641,8 +655,8 @@ onMounted(loadAll)
   align-items: flex-start;
   margin-bottom: 16px;
 }
-.page-title h2 {
-  margin: 0 0 4px;
+.page-title {
+  padding-top: 2px;
 }
 .page-subtitle {
   font-size: 12px;

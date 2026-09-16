@@ -142,6 +142,9 @@ export const api = {
       binary?: boolean
       image?: boolean
       image_too_large?: boolean
+      document?: boolean
+      document_kind?: string
+      document_too_large?: boolean
       data_url?: string
       size?: number
       mtime?: number
@@ -175,6 +178,17 @@ export const api = {
       },
     )
   },
+
+  // 批量查询文件状态（mtime/size）。轮询它发现外部改动：来源无关，
+  // Agent 脚本、VSCode、WPS 等任何写盘行为都能覆盖。
+  statFiles: (agentId: string, paths: string[]) =>
+    fetchApi<{
+      files?: Array<{ path: string; exists: boolean; size?: number; mtime?: number; error?: string }>
+      error?: string
+    }>(`/tools/project/files/stat?agent_id=${encodeURIComponent(agentId)}`, {
+      method: 'POST',
+      body: JSON.stringify({ paths }),
+    }),
 
   // 在项目内新建文件或文件夹；parentPath 为父目录（相对项目根，空串表示根）
   createProjectEntry: (agentId: string, parentPath: string, name: string, entryType: 'file' | 'dir') => {

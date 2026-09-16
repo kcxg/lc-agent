@@ -230,24 +230,39 @@ onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocumentPointerDown)
   document.removeEventListener('keydown', onDocumentKeydown)
   window.removeEventListener('resize', onWindowResize)
+  tabBarObserver?.disconnect()
 })
 
 /** 激活标签变化时滚进可视区，避免激活的标签被挤在可视范围外 */
-watch(activeTabId, async () => {
-  await nextTick()
+function ensureActiveTabVisible() {
   const bar = barRef.value
   if (!bar) return
   const el = bar.querySelector<HTMLElement>('.session-tab.is-active')
   if (!el) return
-  const left = el.offsetLeft
-  const right = left + el.offsetWidth
-  const viewLeft = bar.scrollLeft
-  const viewRight = viewLeft + bar.clientWidth
-  if (left < viewLeft) {
-    bar.scrollLeft = left
-  } else if (right > viewRight) {
-    bar.scrollLeft = right - bar.clientWidth
+  // 用 rect 差值算偏移：标签栏自身有内边距，拿 offsetLeft 比会带上固定误差
+  const barRect = bar.getBoundingClientRect()
+  const tabRect = el.getBoundingClientRect()
+  if (tabRect.left < barRect.left) {
+    bar.scrollLeft -= barRect.left - tabRect.left
+  } else if (tabRect.right > barRect.right) {
+    bar.scrollLeft += tabRect.right - barRect.right
   }
+}
+
+watch(activeTabId, async () => {
+  await nextTick()
+  ensureActiveTabVisible()
+})
+
+// 会话标签栏宽度变化（拖动面板分隔条、窗口缩放）时激活标签可能被挤出视野，
+// 窗口 resize 事件抓不到拖分隔条，所以直接观察标签栏自身尺寸
+let tabBarObserver: ResizeObserver | null = null
+watch(barRef, (bar) => {
+  tabBarObserver?.disconnect()
+  tabBarObserver = null
+  if (!bar || typeof ResizeObserver === 'undefined') return
+  tabBarObserver = new ResizeObserver(() => ensureActiveTabVisible())
+  tabBarObserver.observe(bar)
 })
 </script>
 

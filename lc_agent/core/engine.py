@@ -5,7 +5,6 @@ from typing import Annotated, Any, AsyncIterator, Literal
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
-from langchain.agents.middleware.summarization import SummarizationMiddleware
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolCallId
@@ -18,6 +17,7 @@ from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, 
 from lc_agent.core.engine_helpers.project_context import _build_project_context_text
 from lc_agent.skills.skill_middleware import _LcAgentSkillMiddleware
 from lc_agent.middlewares.patch_tool_calls import PatchToolCallsMiddleware
+from lc_agent.middlewares.summarization_events import NotifyingSummarizationMiddleware
 from lc_agent.core.engine_helpers.subagent_helpers import SubAgentDescriptor, _extract_subagent_result
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
@@ -631,7 +631,7 @@ class AgentEngine:
         kwargs: dict[str, Any] = {"model": llm, "keep": keep, "trigger": trigger}
 
         try:
-            mw = SummarizationMiddleware(**kwargs)
+            mw = NotifyingSummarizationMiddleware(**kwargs)
             logger.info("SummarizationMiddleware enabled: trigger=%s, keep=%s", trigger, keep)
             return [mw]
         except Exception:

@@ -183,6 +183,21 @@
                   />
                 </div>
               </template>
+              <div
+                v-if="item.role === 'ai' && !item.isSystem && item.summarizations?.length"
+                class="summarization-notices"
+              >
+                <div
+                  v-for="(notice, nIdx) in item.summarizations"
+                  :key="`${item.messageId}-sum-${nIdx}`"
+                  class="summarization-notice"
+                  :class="`is-${notice.kind}`"
+                >
+                  <span v-if="notice.kind === 'running'" class="sum-dot"></span>
+                  <el-icon v-else><Cpu /></el-icon>
+                  <span class="sum-text">{{ formatSummarizationNotice(notice) }}</span>
+                </div>
+              </div>
               <RoundFileChangesCard
               v-if="item.role === 'ai' && !item.isSystem && roundFileCards[item.messageId]"
               :round="roundFileCards[item.messageId].round"
@@ -216,8 +231,23 @@
               <div
                 v-else
                 class="markdown-body answer-markdown"
-                v-html="renderMarkdown(stripThinkingMarkers(item.content || ''))"
+                v-html="renderMarkdown(stripUiMarkers(item.content || ''))"
               />
+              <div
+                v-if="item.role === 'ai' && !item.isSystem && item.summarizations?.length && !(item.segments && item.segments.length > 0)"
+                class="summarization-notices"
+              >
+                <div
+                  v-for="(notice, nIdx) in item.summarizations"
+                  :key="`${item.messageId}-sum-plain-${nIdx}`"
+                  class="summarization-notice"
+                  :class="`is-${notice.kind}`"
+                >
+                  <span v-if="notice.kind === 'running'" class="sum-dot"></span>
+                  <el-icon v-else><Cpu /></el-icon>
+                  <span class="sum-text">{{ formatSummarizationNotice(notice) }}</span>
+                </div>
+              </div>
             </template>
             <div
               v-if="!item.isSystem && shouldShowReasoningNotice(item)"
@@ -313,7 +343,7 @@ import { useSessionsStore } from '@/stores/sessions'
 import { useChatUiStateStore } from '@/stores/chat-ui-state'
 import { useSessionTabsStore } from '@/stores/session-tabs'
 import { useOpenedFilesStore } from '@/stores/opened-files'
-import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
+import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry, SummarizationNotice } from '@/stores/chat'
 import type { ContentBlock, Attachment } from '@/utils/fileUpload'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
@@ -354,6 +384,7 @@ type MessageBubbleItem = BubbleListItemProps & {
   hasAnswer?: boolean
   httpTraces?: HttpTrace[]
   httpTracesCount?: number
+  summarizations?: SummarizationNotice[]
   isStreamingMessage?: boolean
   timestamp?: number
   enterClass?: string
@@ -378,6 +409,7 @@ type LoadOlderBubbleItem = BubbleListItemProps & {
   content: string
   isMarkdown?: boolean
   isSystem?: boolean
+  summarizations?: SummarizationNotice[]
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
   usage?: MessageUsage
@@ -600,6 +632,7 @@ const bubbleList = computed((): ChatBubbleItem[] => {
       segments: segs,
       httpTraces: msg.role === 'assistant' ? msg.httpTraces : undefined,
       httpTracesCount: msg.role === 'assistant' ? (msg.httpTracesCount || 0) : 0,
+      summarizations: msg.role === 'assistant' ? msg.summarizations : undefined,
       hasThinking: segs?.some(s => s.type === 'thinking' && s.text?.trim()) ?? false,
       hasToolCalls: segs?.some(s => s.type === 'tool') ?? false,
       hasAnswer: segs?.some(s => s.type === 'text' && s.text?.trim()) ?? false,
@@ -865,12 +898,31 @@ function formatCompactTokens(n: number): string {
   return String(n)
 }
 
+function formatSummarizationNotice(notice: SummarizationNotice): string {
+  if (notice.kind === 'running') {
+    return notice.summarizedCount > 0
+      ? `正在压缩上下文（${notice.summarizedCount} 条历史）…`
+      : '正在压缩上下文…'
+  }
+  if (notice.kind === 'done') {
+    return `已压缩 ${notice.summarizedCount} 条历史，保留最近 ${notice.keptCount ?? 0} 条`
+  }
+  return notice.reason
+    ? `上下文压缩未完成（${notice.reason}），对话照常继续`
+    : '上下文压缩未完成，对话照常继续'
+}
+
 function stripThinkingMarkers(content: string): string {
   return content.replace(/<!--(?:THINK_START|THINK_END)-->/g, '').trim()
 }
 
 function stripUiMarkers(content: string): string {
-  return stripThinkingMarkers(content).replace(/<!--TOOL:\d+-->/g, '').replace(/<!--HTTP:\d+-->/g, '').trim()
+  return stripThinkingMarkers(content)
+    .replace(/<!--TOOL:\d+-->/g, '')
+    .replace(/<!--HTTP:\d+-->/g, '')
+    .replace(/<!--SUMMARIZE:\d+:\d+-->/g, '')
+    .replace(/<!--SUMMARIZE_FAIL:[^>]*-->/g, '')
+    .trim()
 }
 
 function getReplayHistory(beforeMessageId: string): ReplayMessage[] {
@@ -2149,6 +2201,85 @@ onBeforeUnmount(() => {
 .thinking-unavailable-text strong {
   color: var(--el-text-color-primary);
   font-size: 12px;
+}
+
+.summarization-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.summarization-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--el-text-color-secondary);
+  background: color-mix(in srgb, var(--el-fill-color-light) 82%, var(--el-color-primary) 8%);
+  border: 1px dashed color-mix(in srgb, var(--el-color-primary) 36%, var(--el-border-color));
+}
+
+.summarization-notice .el-icon {
+  color: var(--el-color-primary);
+  flex-shrink: 0;
+}
+
+.summarization-notice.is-done {
+  background: color-mix(in srgb, var(--el-fill-color-light) 86%, var(--el-color-success) 6%);
+  border-color: color-mix(in srgb, var(--el-color-success) 30%, var(--el-border-color));
+}
+
+.summarization-notice.is-done .el-icon {
+  color: var(--el-color-success);
+}
+
+.summarization-notice.is-failed {
+  background: color-mix(in srgb, var(--el-fill-color-light) 82%, var(--el-color-warning) 8%);
+  border-color: color-mix(in srgb, var(--el-color-warning) 36%, var(--el-border-color));
+}
+
+.summarization-notice.is-failed .el-icon {
+  color: var(--el-color-warning);
+}
+
+.summarization-notice.is-running {
+  border-style: solid;
+  animation: summarize-pulse 1.6s ease-in-out infinite;
+}
+
+.summarization-notice .sum-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  animation: summarize-blink 1s infinite;
+  flex-shrink: 0;
+}
+
+.summarization-notice .sum-text {
+  flex: 1;
+  min-width: 0;
+}
+
+@keyframes summarize-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes summarize-pulse {
+  0%, 100% { box-shadow: 0 0 0 color-mix(in srgb, var(--el-color-primary) 0%, transparent); }
+  50% { box-shadow: 0 0 14px color-mix(in srgb, var(--el-color-primary) 22%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .summarization-notice.is-running,
+  .summarization-notice .sum-dot {
+    animation: none;
+  }
 }
 
 .messages-container :deep([style*="pointer-events"]) .tool-call-inline,

@@ -194,7 +194,6 @@ import { useSessionsStore, type Session } from '@/stores/sessions'
 import { useAgentsStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
-import { useRouter } from 'vue-router'
 import FileTreePanel from '@/components/panels/FileTreePanel.vue'
 
 const props = defineProps<{ collapsed: boolean; panelWidth?: number }>()
@@ -212,10 +211,10 @@ const emit = defineEmits<{
   openSettings: []
   changePassword: []
   goAdmin: []
+  goUsageAdmin: []
+  goMyUsage: []
   logout: []
 }>()
-
-const router = useRouter()
 
 // 侧栏视图：会话列表 / 项目文件树
 const sidebarView = ref<'chats' | 'files'>('chats')
@@ -232,9 +231,9 @@ function handleSettingsCommand(command: string) {
   } else if (command === 'admin') {
     emit('goAdmin')
   } else if (command === 'my-usage') {
-    router.push('/me/usage')
+    emit('goMyUsage')
   } else if (command === 'usage-admin') {
-    router.push('/admin/usage')
+    emit('goUsageAdmin')
   } else if (command === 'cleanup') {
     emit('openSettings')
   } else if (command === 'logout') {

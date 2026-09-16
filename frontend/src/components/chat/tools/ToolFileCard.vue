@@ -54,8 +54,9 @@
               {{ diffCollapsed ? `展开全部 (${totalLines} 行)` : '折叠' }}
             </button>
             <div class="tf-actions">
-              <button class="tf-link-btn" @click.stop="openFileModal(filePath)">看全文</button>
-              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板看</button>
+              <button class="tf-link-btn" @click.stop="openFileModal(filePath)">在弹框看全文</button>
+              <button class="tf-link-btn" @click.stop="openInEditorPanel">在文件面板查看</button>
+              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板查看</button>
             </div>
           </div>
         </ToolField>
@@ -88,8 +89,9 @@
               </div>
             </div>
             <div class="tf-actions">
-              <button class="tf-link-btn" @click.stop="openFileModal(filePath)">看全文</button>
-              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板看</button>
+              <button class="tf-link-btn" @click.stop="openFileModal(filePath)">在弹框看全文</button>
+              <button class="tf-link-btn" @click.stop="openInEditorPanel">在文件面板查看</button>
+              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板查看</button>
             </div>
           </div>
         </ToolField>
@@ -115,6 +117,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { fetchApi } from '@/api/http'
+import { useOpenedFilesStore } from '@/stores/opened-files'
 import { useUiStore } from '@/stores/ui'
 import type { ToolCall } from '@/stores/chat'
 import CodeBlockModal from '../CodeBlockModal.vue'
@@ -315,6 +318,12 @@ async function openFileModal(path: string): Promise<void> {
 function openInChangesPanel(): void {
   if (!filePath.value) return
   uiStore.requestTab('changes', { filePath: filePath.value })
+}
+
+/** 打开右侧「文件」面板并定位到该文件，可编辑、可查看外部改动提示 */
+function openInEditorPanel(): void {
+  if (!filePath.value) return
+  useOpenedFilesStore().open(filePath.value)
 }
 </script>
 

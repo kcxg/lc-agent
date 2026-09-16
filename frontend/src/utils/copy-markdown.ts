@@ -27,14 +27,22 @@ interface MessageLike {
 }
 
 function contentToString(content: string | ContentBlock[]): string {
-  if (typeof content === 'string') return content
-  return content.find(b => b.type === 'text')?.text || ''
+  const raw = typeof content === 'string'
+    ? content
+    : content.find(b => b.type === 'text')?.text || ''
+  return stripSummarizationMarkersForCopy(raw)
 }
 
 const THINK_START = '<!--THINK_START-->'
 const THINK_END = '<!--THINK_END-->'
 const TOOL_RE = /<!--TOOL:(\d+)-->/
 const HTTP_RE = /<!--HTTP:(\d+)-->/
+const SUMMARIZE_RE = /<!--SUMMARIZE:\d+:\d+-->/g
+const SUMMARIZE_FAIL_RE = /<!--SUMMARIZE_FAIL:[^>]*-->/g
+
+function stripSummarizationMarkersForCopy(content: string): string {
+  return content.replace(SUMMARIZE_RE, '').replace(SUMMARIZE_FAIL_RE, '')
+}
 
 interface Segment {
   type: 'text' | 'thinking' | 'tool' | 'http'
