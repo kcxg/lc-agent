@@ -59,7 +59,7 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 - **主题切换**：暗色 / 亮色
 
 ### 文件与终端操作（内置工具）
-- **文件读写**：读取、写入、搜索、移动文件；精确字符串替换时前端渲染 **diff 预览**，整文件覆写时展示内容预览。前端支持excel word ppt pdf查看，通过lc_agent/skills/third_party_skills支持excel word ppt pdf的编辑。
+- **文件读写**：读取、写入、搜索、移动文件；精确字符串替换时前端渲染 **diff 预览**，整文件覆写时展示内容预览。前端支持excel word ppt pdf查看，通过lc_agent/skills/office支持excel word ppt pdf的编辑。
 - **命令执行**：运行 shell 命令，输出实时以"打字机"效果流式显示（ANSI 颜色支持）
 - **后台进程管理**：启动后台进程、查看输出、终止进程
 - **安全边界**：可配置 `allowed_directories` 限制文件读写范围；命令工具支持 `blocked_commands` 黑名单；写入可配置扩展名黑名单
