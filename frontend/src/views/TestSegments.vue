@@ -21,6 +21,14 @@ function done(over: Partial<ToolCall>): ToolCall {
   return { status: 'done', duration: 800, startTime: Date.now() - 800, ...over } as ToolCall
 }
 
+// 超长内容夹具：验证「已截断 · 共 N 字符」提示是否出现
+const LONG_RESULT = Array.from({ length: 120 }, (_, i) => `line ${i + 1}: ${'x'.repeat(60)}`).join('\n')
+const LONG_ERROR = [
+  'Traceback (most recent call last):',
+  ...Array.from({ length: 18 }, (_, i) => `  File "/src/module_${i}.py", line ${i * 10 + 3}, in handler_${i}\n    raise SomeError("frame ${i}")`),
+  'SomeError: boom',
+].join('\n')
+
 const samples: { label: string; toolCall: ToolCall; collapsed?: boolean }[] = [
   {
     label: '1. edit_block（有 diff）',
@@ -152,6 +160,44 @@ const samples: { label: string; toolCall: ToolCall; collapsed?: boolean }[] = [
       args: { placeholder: '{}' },
       result: '<nbrag_help status="success" />\n<execution>outcome = results</execution>',
     }),
+  },
+  {
+    label: '13. 通用兜底（超长结果 → 结果区出现「已截断 · 共 N 字符」）',
+    toolCall: done({
+      name: 'file_read__read_file',
+      args: { path: 'src/big_generated.py', offset: 0, length: 120 },
+      result: LONG_RESULT,
+    }),
+  },
+  {
+    label: '14. 通用兜底（超长错误 → 错误区出现「错误已截断」+ 看全文）',
+    toolCall: {
+      name: 'file_read__read_file',
+      args: { path: 'src/crash.py' },
+      status: 'error',
+      duration: 300,
+      startTime: Date.now() - 300,
+      result: LONG_ERROR,
+    },
+  },
+  {
+    label: '15. 通用兜底（超长入参 → 入参块出现「已截断 · 共 N 字符」）',
+    toolCall: done({
+      name: 'mcp__any__long_call',
+      args: { payload: LONG_RESULT },
+      result: 'ok',
+    }),
+  },
+  {
+    label: '16. edit_block 失败（超长错误 → 错误区出现「错误已截断」+ 看全文）',
+    toolCall: {
+      name: 'file_write__edit_block',
+      args: { file_path: 'src/app.py', old_string: 'a', new_string: 'b' },
+      status: 'error',
+      duration: 300,
+      startTime: Date.now() - 300,
+      result: LONG_ERROR,
+    },
   },
 ]
 </script>

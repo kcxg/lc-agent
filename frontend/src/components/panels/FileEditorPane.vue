@@ -3,6 +3,26 @@
     <!-- 文件标签栏 -->
     <template v-if="store.files.length > 0">
       <div class="editor-tabbar">
+        <!-- 下拉列表：横向被挤出去的文件标签在这里也能找到；顺序沿用 store.files（固定标签已置前） -->
+        <TabListMenu
+          label="文件"
+          tone="green"
+          :items="fileMenuItems"
+          @select="store.activate($event)"
+          @close="confirmClose($event)"
+        >
+          <template #mark="{ item }">
+            <FileTypeIcon :name="item.name" :compact="true" />
+          </template>
+          <template #extra="{ item }">
+            <span v-if="item.dirty" class="editor-tab-dot" title="有未保存的修改" />
+            <span v-if="item.externalChanged" class="editor-tab-external" title="文件已在别处被修改，内容可能已过期">⟳</span>
+            <svg v-if="item.pinned" class="editor-tab-pin" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" fill="currentColor" />
+            </svg>
+          </template>
+        </TabListMenu>
+
         <div
           ref="tabsBarRef"
           class="editor-tabs"
@@ -416,6 +436,7 @@ import type { OpenedFile } from '@/stores/opened-files'
 import { useProjectTreeStore } from '@/stores/project-tree'
 import FileTypeIcon from '@/components/common/FileTypeIcon.vue'
 import CodeEditor from '@/components/panels/CodeEditor.vue'
+import { documentErrorMessage } from '@/components/panels/documentPreviewError'
 
 const store = useOpenedFilesStore()
 const treeStore = useProjectTreeStore()
@@ -565,8 +586,9 @@ async function loadDocument() {
 }
 
 function onDocumentError(err: any) {
+  console.warn('[document-preview] render failed:', err)
   docComponent.value = null
-  docError.value = `文档渲染失败：${err?.message || err}`
+  docError.value = documentErrorMessage(err)
 }
 
 watch(
@@ -815,6 +837,19 @@ const tabsBarRef = ref<HTMLElement | null>(null)
 const tabsOverflow = ref(false)
 const canScrollLeft = ref(false)
 const canScrollRight = ref(false)
+
+// 下拉列表直接映射 store.files，保证列表顺序与标签栏视觉顺序一致（固定标签已由 store 置前）
+const fileMenuItems = computed(() => store.files.map(file => ({
+  key: file.path,
+  title: file.name,
+  // 文件名可能重名，提示里补全路径
+  hint: file.path,
+  active: store.activePath === file.path,
+  name: file.name,
+  pinned: file.pinned,
+  dirty: !!store.contentOf(file.path)?.dirty,
+  externalChanged: !!store.contentOf(file.path)?.externalChanged,
+})))
 
 function syncTabScrollState() {
   const bar = tabsBarRef.value

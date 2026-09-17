@@ -1,6 +1,7 @@
 # tests/test_engine.py
 import pytest
 
+from lc_agent.config import DEFAULT_RECURSION_LIMIT
 from lc_agent.core.models import AgentPreset, ModelInfo, SubAgentLink
 
 
@@ -303,7 +304,7 @@ class TestAgentEngine:
         }
         assert captured["config"] == {
             "configurable": {"thread_id": "thread-1"},
-            "recursion_limit": 100,
+            "recursion_limit": DEFAULT_RECURSION_LIMIT,
         }
         assert captured["context"].user_id == "anonymous"
         assert captured["version"] == "v2"

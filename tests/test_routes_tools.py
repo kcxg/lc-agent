@@ -157,3 +157,31 @@ async def test_refresh_single_mcp_server_returns_reloaded_schemas(app_with_tools
     assert response.json()["tool_schemas"] == [
         {"name": "new_tool", "description": "new description", "input_schema": {}}
     ]
+
+
+@pytest.mark.asyncio
+async def test_file_read_endpoint_normalizes_xlsx_for_preview(app_with_tools, tmp_path):
+    """接口下发的 xlsx 字节必须已归一化，前端才能直接交给预览组件渲染。"""
+    import base64
+    import zipfile
+    from io import BytesIO
+
+    from tests.test_xlsx_preview import DRAWING_DEFAULT_NS, build_xlsx
+
+    app, headers = app_with_tools
+    doc = tmp_path / "sample.xlsx"
+    doc.write_bytes(build_xlsx(drawing=DRAWING_DEFAULT_NS, comments=True))
+
+    transport = ASGITransport(app=app.fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/tools/file/read", params={"path": str(doc)}, headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["document"] is True
+    assert payload["document_kind"] == "xlsx"
+
+    decoded = base64.b64decode(payload["data_url"].split(",", 1)[1])
+    with zipfile.ZipFile(BytesIO(decoded)) as archive:
+        assert "<xdr:wsDr" in archive.read("xl/drawings/drawing1.xml").decode("utf-8")
+        assert "xl/comments1.xml" in archive.namelist()

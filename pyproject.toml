@@ -44,6 +44,25 @@ postgres = [
     "psycopg[binary,pool]>=3.1",
     "psycopg2>=2.9",
 ]
+# Optional: python deps for office skills (docx/xlsx/pptx/pdf).
+# System binaries still required separately: LibreOffice (soffice), pandoc,
+# poppler (pdftoppm/pdftotext/pdfimages), qpdf; npm pkgs: docx, pptxgenjs.
+office = [
+    "defusedxml",
+    "lxml",
+    "Pillow",
+    "openpyxl",
+    "pandas",
+    "python-docx",
+    "python-pptx",
+    "pypdf",
+    "pdfplumber",
+    "pypdfium2",
+    "reportlab",
+    "pdf2image",
+    "pytesseract",
+    "markitdown[docx,pdf,pptx,xls]",
+]
 
 [project.scripts]
 lc-agent = "lc_agent.main:main"
