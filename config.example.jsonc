@@ -70,8 +70,8 @@
         "default_model": "deepseek-chat",
         // 是否启用流式输出
         "streaming": true,
-        // LangGraph 最大递归步数（agent 调用工具的最大轮数），默认 100
-        "recursion_limit": 100,
+        // LangGraph 图超级步（super-step）上限，不是大模型调用次数：一次模型调用会展开为多个超级步，默认 9999
+        "recursion_limit": 9999,
         // 子Agent最大嵌套深度，0 表示禁用子Agent
         "max_subagent_depth": 2,
 

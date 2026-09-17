@@ -1,5 +1,22 @@
 <template>
   <div v-if="tabs.length > 0" class="session-tabs">
+    <!-- 下拉列表：横向被挤出去的标签在这里也能找到；顺序与标签栏完全一致 -->
+    <TabListMenu
+      label="会话"
+      tone="indigo"
+      :items="tabMenuItems"
+      @select="emit('activate', $event)"
+      @close="emit('close', $event)"
+    >
+      <template #mark="{ item }">
+        <span v-if="item.streaming" class="session-tab-spinner" title="正在生成中" />
+        <span v-else-if="item.unseen" class="session-tab-dot is-unseen" title="已完成，尚未查看" />
+        <svg v-else-if="item.pinned" class="session-tab-pin" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" fill="currentColor" />
+        </svg>
+      </template>
+    </TabListMenu>
+
     <div ref="barRef" class="session-tabs-bar" role="tablist" aria-label="已打开的会话">
       <div
         v-for="tab in tabs"
@@ -117,6 +134,16 @@ const tabs = computed<TabView[]>(() =>
     }
   }),
 )
+
+// 下拉列表直接映射 tabs，保证列表顺序、标题、状态标记与标签栏同源
+const tabMenuItems = computed(() => tabs.value.map(tab => ({
+  key: tab.id,
+  title: tab.title,
+  active: tab.id === activeTabId.value,
+  streaming: tab.streaming,
+  unseen: tab.unseen,
+  pinned: tab.pinned,
+})))
 
 // ---- 右键菜单 ----
 const menuVisible = ref(false)
@@ -270,6 +297,7 @@ watch(barRef, (bar) => {
 .session-tabs {
   display: flex;
   align-items: center;
+  gap: 6px;
   flex-shrink: 0;
   padding: 6px 10px;
   border-bottom: 1px solid var(--el-border-color-lighter);
@@ -280,7 +308,9 @@ watch(barRef, (bar) => {
   display: flex;
   align-items: center;
   gap: 4px;
-  width: 100%;
+  /* 左侧让位给下拉按钮：自身可收缩，滚动仍留在这一层 */
+  flex: 1;
+  min-width: 0;
   padding: 4px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 14px;

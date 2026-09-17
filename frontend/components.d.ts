@@ -75,6 +75,7 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     SessionTabs: typeof import('./src/components/layout/SessionTabs.vue')['default']
     SubAgentCard: typeof import('./src/components/chat/SubAgentCard.vue')['default']
+    TabListMenu: typeof import('./src/components/common/TabListMenu.vue')['default']
     TodoList: typeof import('./src/components/panels/TodoList.vue')['default']
     TodoProgressCard: typeof import('./src/components/chat/TodoProgressCard.vue')['default']
     TokenUsagePanel: typeof import('./src/components/chat/TokenUsagePanel.vue')['default']

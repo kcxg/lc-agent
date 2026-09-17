@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from lc_agent.config.utils import DEFAULT_MAX_SUBAGENT_DEPTH, DEFAULT_RECURSION_LIMIT
+
 
 class ModelConfig(BaseModel):
     model_id: str       # 前端用的全局唯一别名（标识/统计/显示用，从不进请求体）
@@ -83,8 +85,8 @@ class AppConfig(BaseModel):
         "system_prompt": "You are a helpful assistant.",
         "default_model": "",
         "streaming": True,
-        "recursion_limit": 100,
-        "max_subagent_depth": 2,
+        "recursion_limit": DEFAULT_RECURSION_LIMIT,
+        "max_subagent_depth": DEFAULT_MAX_SUBAGENT_DEPTH,
     })
     mcp: dict = Field(default_factory=dict)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)

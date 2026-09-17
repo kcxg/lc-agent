@@ -12,6 +12,7 @@ from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.server.auth_middleware import get_current_user
 from lc_agent.server.dependencies import get_db_session, get_engine, get_registry
 from lc_agent.tools.registry import ToolRegistry
+from lc_agent.utils.xlsx_preview import normalize_xlsx_for_preview
 
 router = APIRouter(tags=["tools"])
 
@@ -289,9 +290,13 @@ async def read_file_content(
         try:
             import base64
 
-            encoded = base64.b64encode(file_path.read_bytes()).decode("ascii")
+            raw = file_path.read_bytes()
         except OSError as e:
             return {"error": str(e)}
+        # xlsx 的绘图/批注部件需按预览组件能识别的形式归一化，见 lc_agent/utils/xlsx_preview.py
+        if suffix == ".xlsx":
+            raw = normalize_xlsx_for_preview(raw)
+        encoded = base64.b64encode(raw).decode("ascii")
         return {
             "file": str(file_path),
             "document": True,

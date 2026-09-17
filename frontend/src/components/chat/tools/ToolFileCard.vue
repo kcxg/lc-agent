@@ -28,6 +28,7 @@
 
       <ToolField v-if="errorText" label="错误" :offset="isCollapsed ? 0 : 8">
         <div class="tf-error">{{ errorText }}</div>
+        <button v-if="isErrorTruncated" class="tf-link-btn" @click.stop="openErrorModal">错误已截断 · 共 {{ errorTotal }} 字符 · 看全文</button>
       </ToolField>
 
       <template v-else-if="hasDiff">
@@ -107,7 +108,7 @@
       :code="fileModalCode"
       :language="fileModalLang"
       :title="fileModalPath"
-      kicker="文件内容"
+      :kicker="fileModalKicker"
       :source-path="fileModalPath"
       @close="showFileModal = false"
     />
@@ -123,7 +124,7 @@ import type { ToolCall } from '@/stores/chat'
 import CodeBlockModal from '../CodeBlockModal.vue'
 import ToolField from './ToolField.vue'
 import {
-  baseName, formatDuration, shortPath, statusLabel, statusTagType, useToolCard,
+  baseName, clipForModal, formatDuration, shortPath, statusLabel, statusTagType, useToolCard,
 } from './useToolCard'
 
 const EXT_LANG_MAP: Record<string, string> = {
@@ -161,6 +162,7 @@ const showFileModal = ref(false)
 const fileModalCode = ref('')
 const fileModalLang = ref('')
 const fileModalPath = ref('')
+const fileModalKicker = ref('文件内容')
 const uiStore = useUiStore()
 
 const statusType = computed(() => statusTagType(props.toolCall.status))
@@ -219,6 +221,25 @@ const errorText = computed(() => {
   const firstTwo = text.split('\n').slice(0, 2).join('\n')
   return firstTwo.length > 300 ? `${firstTwo.slice(0, 300)}…` : firstTwo
 })
+
+const errorTotal = computed(() => (props.toolCall.result || '').trim().length)
+// 错误预览只显示前两行（且 300 字符内），超过就算截断
+const isErrorTruncated = computed(() => {
+  const tc = props.toolCall
+  if (tc.status !== 'error') return false
+  const text = (tc.result || '').trim()
+  if (!text) return false
+  const lines = text.split('\n')
+  return lines.length > 2 || lines.slice(0, 2).join('\n').length > 300
+})
+
+function openErrorModal(): void {
+  fileModalPath.value = filePath.value || '错误信息'
+  fileModalLang.value = 'text'
+  fileModalCode.value = clipForModal((props.toolCall.result || '').trim())
+  fileModalKicker.value = '错误信息'
+  showFileModal.value = true
+}
 
 interface DiffLine {
   type: 'context' | 'removed' | 'added'
@@ -298,6 +319,7 @@ async function openFileModal(path: string): Promise<void> {
     )
     fileModalPath.value = path
     fileModalLang.value = langFromPath(path)
+    fileModalKicker.value = '文件内容'
     if (data.error) {
       fileModalCode.value = `Error: ${data.error}`
       fileModalLang.value = 'text'

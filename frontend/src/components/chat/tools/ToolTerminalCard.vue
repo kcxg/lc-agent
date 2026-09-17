@@ -82,7 +82,7 @@ import type { ToolCall } from '@/stores/chat'
 import CodeBlockModal from '../CodeBlockModal.vue'
 import ToolField from './ToolField.vue'
 import {
-  formatDuration, statusLabel, statusTagType, useToolCard,
+  clipForModal, formatDuration, statusLabel, statusTagType, useToolCard,
 } from './useToolCard'
 
 const ansiUp = new AnsiUp()
@@ -247,7 +247,8 @@ const stderrHtml = computed(() => {
   return `<span class="stderr-tag">[stderr]</span><br>${renderAnsiBlock(err)}`
 })
 
-const modalText = computed(() => mainText.value.slice(0, 200000))
+// 弹框超长内容用 clipForModal 截断并加可见标记
+const modalText = computed(() => clipForModal(mainText.value))
 
 const isLong = computed(() => mainText.value.length > 2000)
 

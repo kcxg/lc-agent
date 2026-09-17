@@ -59,7 +59,7 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 - **主题切换**：暗色 / 亮色
 
 ### 文件与终端操作（内置工具）
-- **文件读写**：读取、写入、搜索、移动文件；精确字符串替换时前端渲染 **diff 预览**，整文件覆写时展示内容预览
+- **文件读写**：读取、写入、搜索、移动文件；精确字符串替换时前端渲染 **diff 预览**，整文件覆写时展示内容预览。前端支持excel word ppt pdf查看，通过lc_agent/skills/office支持excel word ppt pdf的编辑。
 - **命令执行**：运行 shell 命令，输出实时以"打字机"效果流式显示（ANSI 颜色支持）
 - **后台进程管理**：启动后台进程、查看输出、终止进程
 - **安全边界**：可配置 `allowed_directories` 限制文件读写范围；命令工具支持 `blocked_commands` 黑名单；写入可配置扩展名黑名单
@@ -101,7 +101,7 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 - **专门的项目模式**：自动将绑定的项目文件夹作为agent的工作目录，自动读取项目下的AGNTES.md 和 .agents/skills 文件夹的skill。 专门的集中展示文件变动内容，专门划分git变化和当前会话agent修改文件导致的变动内容。
 - **文件变更审查**：双源对照（本会话 Agent 修改 vs Git Diff），Unified/Side-by-side 切换，按轮次筛选，按子 Agent 分组；Git 基准可切会话开始/HEAD/暂存区/指定提交；顶栏变更数徽标，每轮末尾变更卡片，点击跳转定位
 - **项目文件管理**：左栏 Chats/文件双视图（仅项目模式显示文件）；文件树支持文件名+内容双搜、新建/重命名/删除、复制绝对/相对路径、分支显示
-- **多标签编辑器**：标签 pin/恢复关闭/未保存圆点，面包屑，搜索计数，Markdown 预览，图片/二进制/超大文件降级，保存冲突提示，可复制 `路径#L行号` 引用
+- **多标签编辑器**：标签 pin/恢复关闭/未保存圆点，面包屑，搜索计数，Markdown 预览，Word/Excel/PPT/PDF 只读预览，图片全屏放大，二进制/超大文件降级，保存冲突提示，可复制 `路径#L行号` 引用
 
 ---
 
@@ -404,7 +404,7 @@ SQLite + SQLAlchemy 异步引擎，通过 Alembic 管理迁移。Checkpoint 默�
 ### 项目文件与变更
 - Chats/文件双视图（仅项目模式显示文件）
 - 文件树：文件名/内容双搜，新建/重命名/删除，复制绝对/相对路径，分支显示
-- 多标签编辑器：pin/恢复关闭/未保存圆点，面包屑，搜索计数，Markdown 预览，图片/二进制/超大文件降级，保存冲突提示，复制 `路径#L行号` 引用
+- 多标签编辑器：pin/恢复关闭/未保存圆点，面包屑，搜索计数，Markdown 预览，Word/Excel/PPT/PDF 只读预览，图片全屏放大，二进制/超大文件降级，保存冲突提示，复制 `路径#L行号` 引用
 - 文件变更审查：本会话修改 vs Git Diff 双源，Unified/Side-by-side，按轮次筛选，按子 Agent 分组；Git 基准可切会话开始/HEAD/暂存区/指定提交；顶栏变更徽标 + 每轮变更卡片
 
 ### 右侧面板

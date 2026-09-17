@@ -67,6 +67,9 @@
 **项目文件树，文件编辑功能，轻量ide** （说明：项目模式的agent，才会显示项目文件树）
 ![项目文件树](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/filetree.png)
 
+**ai办公截图,excel word ppt pdf ai编辑，和前端查看**
+![ai办公截图](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/ppt.png)
+
 **可观测性：HTTP 追踪 + Token 面板 + 工具调用**
 ![HTTP追踪与Token面板](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc02.png)
 

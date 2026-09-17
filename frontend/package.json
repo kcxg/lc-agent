@@ -28,6 +28,7 @@
     "test:subagent-reducers": "node scripts/check-subagent-reducers-contract.mjs",
     "test:agent-editor-general-purpose": "node scripts/check-agent-editor-general-purpose-contract.mjs",
     "test:tool-cards": "node scripts/check-tool-cards-contract.mjs",
+    "test:doc-preview": "node scripts/check-doc-preview-contract.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

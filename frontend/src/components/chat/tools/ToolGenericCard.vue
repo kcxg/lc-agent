@@ -45,7 +45,7 @@
             <span v-if="arg.inline" class="arg-value">{{ arg.display }}</span>
             <div v-else class="arg-block">
               <pre class="arg-block-body">{{ arg.display }}</pre>
-              <button class="tg-more" @click.stop="openArgModal(arg.key)">看全文</button>
+              <button v-if="arg.truncated" class="tg-more" @click.stop="openArgModal(arg.key)">已截断 · 共 {{ arg.fullLength }} 字符 · 看全文</button>
             </div>
           </div>
         </div>
@@ -53,6 +53,7 @@
 
       <ToolField v-if="errorText" label="错误" :offset="isCollapsed ? 0 : 8">
         <div class="tg-error">{{ errorText }}</div>
+        <button v-if="isErrorTruncated" class="tg-more" @click.stop="openErrorModal">错误已截断 · 共 {{ errorTotal }} 字符 · 看全文</button>
       </ToolField>
 
       <ToolField v-else-if="!isCollapsed && previewText" label="结果" :offset="8">
@@ -60,7 +61,7 @@
           <div class="tg-result">
             <div class="tg-rendered" v-html="renderedPreview" />
           </div>
-          <button v-if="isLong" class="tg-more is-right" @click.stop="openResultModal">看全文</button>
+          <button v-if="isLong" class="tg-more is-right" @click.stop="openResultModal">已截断 · 共 {{ resultTotal }} 字符 · 看全文</button>
         </div>
       </ToolField>
     </div>
@@ -87,7 +88,7 @@ import { visibleArgEntries } from '@/utils/tool-args'
 import CodeBlockModal from '../CodeBlockModal.vue'
 import ToolField from './ToolField.vue'
 import {
-  formatDuration, statusLabel, statusTagType, useToolCard,
+  clipForModal, formatDuration, statusLabel, statusTagType, useToolCard,
 } from './useToolCard'
 
 const props = defineProps<{
@@ -252,6 +253,9 @@ const errorText = computed(() => {
   return text.length > 300 ? `${text.slice(0, 300)}…` : text
 })
 
+const errorTotal = computed(() => (props.toolCall.result || '').trim().length)
+const isErrorTruncated = computed(() => errorTotal.value > 300)
+
 function formatArgValue(name: string, key: string, value: unknown): string {
   if (name.endsWith('ask_user') && key === 'questions' && Array.isArray(value)) {
     return (value as any[]).map((q: any, idx: number) => {
@@ -281,18 +285,21 @@ const argRows = computed(() => {
   return visibleArgEntries(props.toolCall.args).map(([key, value]) => {
     const full = formatArgValue(props.toolCall.name, key, value)
     const inline = !/[\r\n]/.test(full) && full.length <= ARG_INLINE_MAX
+    const truncated = full.length > ARG_RENDER_MAX
     return {
       key,
       full,
       inline,
-      display: full.length > ARG_RENDER_MAX ? `${full.slice(0, ARG_RENDER_MAX)}…` : full,
+      truncated,
+      fullLength: full.length,
+      display: truncated ? `${full.slice(0, ARG_RENDER_MAX)}…` : full,
     }
   })
 })
 
-// --- 全文弹层：结果和某个入参共用同一个 CodeBlockModal ---
+// --- 全文弹层：结果、入参、错误共用同一个 CodeBlockModal ---
 // 用带类型的 target 而不是字符串哨兵，避免某个入参正好叫 result 时串台
-type ModalTarget = { kind: 'result' } | { kind: 'arg'; key: string }
+type ModalTarget = { kind: 'result' } | { kind: 'arg'; key: string } | { kind: 'error' }
 
 const modalTarget = ref<ModalTarget | null>(null)
 
@@ -304,23 +311,31 @@ function openArgModal(key: string): void {
   modalTarget.value = { kind: 'arg', key }
 }
 
+function openErrorModal(): void {
+  modalTarget.value = { kind: 'error' }
+}
+
 const modalCode = computed(() => {
   const target = modalTarget.value
   if (!target) return ''
-  if (target.kind === 'result') return (props.toolCall.result || '').slice(0, 200000)
+  if (target.kind === 'result' || target.kind === 'error') return clipForModal(props.toolCall.result || '')
   const arg = argRows.value.find((item) => item.key === target.key)
-  return arg ? arg.full : ''
+  return arg ? clipForModal(arg.full) : ''
 })
 
 const modalTitle = computed(() => {
   const target = modalTarget.value
   if (!target || target.kind === 'result') return toolName.value
+  if (target.kind === 'error') return `${toolName.value} · 错误`
   return `${toolName.value} · ${target.key}`
 })
 
-const modalKicker = computed(() => (
-  modalTarget.value?.kind === 'result' ? '工具结果' : '工具入参'
-))
+const modalKicker = computed(() => {
+  const kind = modalTarget.value?.kind
+  if (kind === 'result') return '工具结果'
+  if (kind === 'error') return '错误信息'
+  return '工具入参'
+})
 
 const previewText = computed(() => {
   const text = (props.toolCall.result || '').replace(/\\u3000/g, '　').replace(/\\n/g, '\n')
@@ -329,6 +344,7 @@ const previewText = computed(() => {
 })
 
 const isLong = computed(() => (props.toolCall.result?.length || 0) > 2000)
+const resultTotal = computed(() => (props.toolCall.result?.length || 0))
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
