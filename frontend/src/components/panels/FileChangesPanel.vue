@@ -115,6 +115,15 @@
           <el-tooltip content="复制路径" placement="top" :show-after="300">
             <button class="copy-path-btn" @click="copyPath(file.file_path, $event)" aria-label="复制文件路径">📋</button>
           </el-tooltip>
+          <el-tooltip v-if="canOpenInEditor(file)" content="在文件中查看" placement="top" :show-after="300">
+            <button type="button" class="open-file-btn" aria-label="在文件中查看" @click.stop="openInEditor(file)">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 1.8h5.1L12.5 5.2v9H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                <path d="M9 1.8v3.4h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                <path d="M6.1 8.4h4.2M6.1 10.9h4.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              </svg>
+            </button>
+          </el-tooltip>
           <span v-if="file.edit_count > 1" class="edit-count">×{{ file.edit_count }}</span>
         </div>
 
@@ -178,6 +187,15 @@
               <el-tooltip content="复制路径" placement="top" :show-after="300">
                 <button class="copy-path-btn" @click.stop="copyPath(file.file_path, $event)" aria-label="复制文件路径">📋</button>
               </el-tooltip>
+              <el-tooltip v-if="canOpenInEditor(file)" content="在文件中查看" placement="top" :show-after="300">
+                <button type="button" class="open-file-btn" aria-label="在文件中查看" @click.stop="openInEditor(file)">
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M4 1.8h5.1L12.5 5.2v9H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                    <path d="M9 1.8v3.4h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                    <path d="M6.1 8.4h4.2M6.1 10.9h4.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </el-tooltip>
             </div>
             <div v-if="expandedFiles.has(`${sub.sub_session_id}:${file.file_path}`)" class="file-diff-container">
               <div v-if="loadingDiffs.has(`${sub.sub_session_id}:${file.file_path}`)" class="diff-loading">
@@ -237,6 +255,15 @@
                 <span v-if="file.additions" class="git-additions">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions">-{{ file.deletions }}</span>
               </span>
+              <el-tooltip v-if="canOpenInEditor(file)" content="在文件中查看" placement="top" :show-after="300">
+                <button type="button" class="open-file-btn" aria-label="在文件中查看" @click.stop="openInEditor(file)">
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M4 1.8h5.1L12.5 5.2v9H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                    <path d="M9 1.8v3.4h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                    <path d="M6.1 8.4h4.2M6.1 10.9h4.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </el-tooltip>
             </div>
             <div v-if="expandedGitFiles.has(file.file_path)" class="file-diff-container">
               <div v-if="loadingGitFiles.has(file.file_path)" class="diff-loading">
@@ -260,6 +287,7 @@
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import { useFileChangesStore } from '@/stores/file-changes'
+import { useOpenedFilesStore } from '@/stores/opened-files'
 import { useSessionsStore } from '@/stores/sessions'
 import { useUiStore } from '@/stores/ui'
 import { api } from '@/api/http'
@@ -270,6 +298,7 @@ import 'diff2html/bundles/css/diff2html.min.css'
 const store = useFileChangesStore()
 const sessionsStore = useSessionsStore()
 const uiStore = useUiStore()
+const openedFilesStore = useOpenedFilesStore()
 
 type ChangeSource = 'agent' | 'git'
 type GitBaseline = 'session' | 'head' | 'staged' | 'commit'
@@ -322,6 +351,22 @@ function getFileDir(path: string): string {
   if (parts.length <= 1) return ''
   parts.pop()
   return parts.join('/')
+}
+
+/** 「在文件中查看」的目标路径：移动过的文件原路径已不存在，打开它的新位置 */
+function editorPathOf(file: { file_path: string; change_type: string; move_destination?: string }): string {
+  if (file.change_type === 'move' && file.move_destination) return file.move_destination
+  return file.file_path
+}
+
+/** 删除的文件磁盘上已经没有了，给它留按钮只会点了报错 */
+function canOpenInEditor(file: { change_type: string }): boolean {
+  return file.change_type !== 'delete'
+}
+
+/** 切到右侧「文件」面板并在编辑器里打开：open() 内部会切 tab，并展开收起的面板 */
+function openInEditor(file: { file_path: string; change_type: string; move_destination?: string }) {
+  openedFilesStore.open(editorPathOf(file))
 }
 
 async function copyPath(path: string, event: Event) {
@@ -772,7 +817,8 @@ watch(changeSource, (source) => {
   min-width: 0;
 }
 
-.copy-path-btn {
+.copy-path-btn,
+.open-file-btn {
   display: none;
   align-items: center;
   justify-content: center;
@@ -789,18 +835,27 @@ watch(changeSource, (source) => {
   transition: opacity 0.15s, background 0.15s;
 }
 
-.copy-path-btn svg {
+.copy-path-btn svg,
+.open-file-btn svg {
   width: 12px;
   height: 12px;
 }
 
-.file-header:hover .copy-path-btn {
+.file-header:hover .copy-path-btn,
+.file-header:hover .open-file-btn,
+.git-diff-file-header:hover .open-file-btn {
   display: inline-flex;
 }
 
-.copy-path-btn:hover {
+.copy-path-btn:hover,
+.open-file-btn:hover {
   opacity: 1;
   background: var(--el-fill-color);
+}
+
+/* 「在文件中查看」是动作按钮，悬停时用主色强调，与「复制路径」的弱化处理区分开 */
+.open-file-btn:hover {
+  color: var(--el-color-primary);
 }
 
 .edit-count {

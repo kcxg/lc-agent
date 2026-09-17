@@ -176,6 +176,16 @@ watch(() => uiStore.rightPanelOpenRequest, () => {
   rightCollapsed.value = false
 })
 
+// 跨组件请求切到文件树（编辑器「定位」）：收起状态下自动展开左侧面板，移动端则打开左侧抽屉
+watch(() => uiStore.sidebarOpenRequest, () => {
+  if (window.innerWidth <= 900) {
+    mobileRightOpen.value = false
+    mobileLeftOpen.value = true
+    return
+  }
+  sidebarCollapsed.value = false
+})
+
 async function initApp() {
   if (appInitialized.value || isPublicRoute.value) return
   appInitialized.value = true

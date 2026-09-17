@@ -5,6 +5,7 @@
       label="会话"
       tone="indigo"
       :items="tabMenuItems"
+      :width="320"
       @select="emit('activate', $event)"
       @close="emit('close', $event)"
     >
@@ -14,6 +15,14 @@
         <svg v-else-if="item.pinned" class="session-tab-pin" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" fill="currentColor" />
         </svg>
+      </template>
+
+      <!-- 标签胶囊窄，放不下 Agent 名；下拉列表里空间够，补上来源便于区分不同 Agent 的会话 -->
+      <template #extra="{ item }">
+        <span v-if="item.agentName" class="session-tab-agent" :title="`Agent：${item.agentName}`">
+          <span class="session-tab-agent-icon" aria-hidden="true">{{ item.agentIcon }}</span>
+          <span class="session-tab-agent-name">{{ item.agentName }}</span>
+        </span>
       </template>
     </TabListMenu>
 
@@ -95,10 +104,15 @@ import { ElMessageBox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSessionTabsStore } from '@/stores/session-tabs'
+import { useAgentsStore } from '@/stores/agents'
+import { getAgentIcon } from '@/utils/agentIcon'
 
 interface TabView {
   id: string
   title: string
+  // 所属 Agent 的展示名与图标：标签胶囊里放不下，只在下拉列表里显示
+  agentName: string
+  agentIcon: string
   streaming: boolean
   unseen: boolean
   pinned: boolean
@@ -118,6 +132,7 @@ const emit = defineEmits<{
 const chatStore = useChatStore()
 const sessionsStore = useSessionsStore()
 const tabsStore = useSessionTabsStore()
+const agentsStore = useAgentsStore()
 
 const activeTabId = computed(() => tabsStore.activeTabId)
 const barRef = ref<HTMLElement | null>(null)
@@ -125,9 +140,12 @@ const barRef = ref<HTMLElement | null>(null)
 const tabs = computed<TabView[]>(() =>
   tabsStore.openTabIds.map((id) => {
     const session = sessionsStore.sessions.find(s => s.id === id)
+    const agent = session ? agentsStore.agents.find(a => a.id === session.agent_id) ?? null : null
     return {
       id,
       title: session?.title || '新对话',
+      agentName: session ? agentsStore.getAgentName(session.agent_id) : '',
+      agentIcon: getAgentIcon(agent),
       streaming: chatStore.isSessionStreaming(id),
       unseen: sessionsStore.isCompletedUnseen(id),
       pinned: !!session?.is_pinned,
@@ -140,6 +158,8 @@ const tabMenuItems = computed(() => tabs.value.map(tab => ({
   key: tab.id,
   title: tab.title,
   active: tab.id === activeTabId.value,
+  agentName: tab.agentName,
+  agentIcon: tab.agentIcon,
   streaming: tab.streaming,
   unseen: tab.unseen,
   pinned: tab.pinned,
@@ -441,6 +461,34 @@ watch(barRef, (bar) => {
 .session-tab-close svg {
   width: 11px;
   height: 11px;
+}
+
+/* 下拉列表里的 Agent：图标 + 名字的弱化胶囊，激活项里跟随靛蓝色相；
+   名字超长用省略号，不挤掉标题 */
+.session-tab-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 132px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 11%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  opacity: 0.85;
+}
+
+.session-tab-agent-icon {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.session-tab-agent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-tab-close:hover {

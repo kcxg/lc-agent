@@ -1494,6 +1494,11 @@ onBeforeUnmount(() => {
   min-height: 100%;
 }
 
+/* 库把自定义消息项（时间分隔线、加载更早）套在居中的容器里，改成靠左才能跟内容列对齐 */
+.messages-container :deep(.elx-bubble-list__item--custom) {
+  justify-content: flex-start;
+}
+
 .load-older-messages.is-inline {
   display: flex;
   justify-content: center;
@@ -1505,6 +1510,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* 撑到内容列的宽度上限为止，跟正文左右边界对齐 */
+  width: 100%;
+  max-width: var(--md-answer-width);
   padding: 12px 4% 8px;
   opacity: 0.85;
   pointer-events: none;
@@ -1593,7 +1601,6 @@ onBeforeUnmount(() => {
   padding-right: 5px !important;
 }
 
-.messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper),
 .messages-container :deep(.elx-bubble--start .elx-bubble__content) {
   width: 100%;
   max-width: 100% !important;
@@ -1606,6 +1613,10 @@ onBeforeUnmount(() => {
   background: var(--el-bg-color-overlay);
   border: none;
   box-shadow: 0 4px 16px color-mix(in srgb, var(--el-box-shadow) 35%, transparent);
+  /* 这层有背景色，之前是 width:100% 撑满整行，右边会拖出一大片空底。
+     收成跟内容列同宽：18 = 本层左右 padding 4*2 + 内层 content 左右 padding 5*2 */
+  width: fit-content;
+  max-width: calc(var(--md-answer-width) + 18px) !important;
 }
 
 .messages-container :deep(.elx-bubble--start .elx-bubble__content) {
@@ -1819,6 +1830,11 @@ onBeforeUnmount(() => {
   width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* AI 回复的内容列跟正文共用同一把尺：卡片、工具卡、Token 面板才有同一条左右边界 */
+.messages-container :deep(.elx-bubble--start .bubble-content-wrap) {
+  max-width: var(--md-answer-width);
 }
 
 .user-plain-text {
@@ -2545,6 +2561,16 @@ onBeforeUnmount(() => {
   .thinking-unavailable-text strong {
     font-size: 12px;
   }
+}
+
+/* 用户消息的右边界跟 AI 内容列取同一条线，不再顶到聊天区最右边。
+   9px 是 AI 侧内容列相对气泡的背景偏移（wrapper padding 4 + content padding 5），
+   减掉它两边右边界才严格重合。
+   窄屏下内容列比容器宽，max() 兜底成 0，气泡照旧贴右。
+   放在文件末尾：同特异性的 padding-inline: 0 在媒体查询里声明得更早，这里要压过它 */
+.messages-container :deep(.elx-bubble--end) {
+  box-sizing: border-box !important;
+  padding-right: max(0px, calc(100% - var(--md-answer-width) - 9px)) !important;
 }
 
 </style>

@@ -25,6 +25,8 @@ const sessionsStore = read('src/stores/sessions.ts')
 const chatView = read('src/views/ChatView.vue')
 const chatInput = read('src/components/chat/ChatInput.vue')
 const fileChanges = read('src/stores/file-changes.ts')
+const tabMenu = read('src/components/common/TabListMenu.vue')
+const agentIconUtil = read('src/utils/agentIcon.ts')
 
 // ---- R2-Q5 刷新后恢复：标签集合与激活项持久化 ----
 expect(
@@ -144,6 +146,42 @@ expect(
 expect(
   /isCompletedUnseen\(id\)/.test(tabsBar),
   'SessionTabs.vue 未显示「已完成未查看」标记',
+)
+
+// ---- 下拉列表显示所属 Agent 名 ----
+expect(
+  /getAgentName\(session\.agent_id\)/.test(tabsBar),
+  'SessionTabs.vue 的下拉列表未显示会话所属 Agent 名',
+)
+expect(
+  /<template #extra="{ item }">[\s\S]*?session-tab-agent/.test(tabsBar),
+  'SessionTabs.vue 未把 Agent 名放进下拉列表的 extra 插槽',
+)
+expect(
+  /:width="320"/.test(tabsBar),
+  'SessionTabs.vue 未放宽下拉面板宽度（标题 + Agent 名放不下）',
+)
+expect(
+  /getAgentIcon\(agent\)/.test(tabsBar) && /agentIcon: getAgentIcon/.test(tabsBar),
+  'SessionTabs.vue 未给 Agent 名配图标',
+)
+expect(
+  /export function getAgentIcon/.test(agentIconUtil),
+  '缺少 utils/agentIcon.ts（图标逻辑应三处共用）',
+)
+expect(
+  !/function getAgentIcon/.test(read('src/components/layout/AppHeader.vue')),
+  'AppHeader.vue 仍保留局部的 getAgentIcon（应改用 utils/agentIcon.ts）',
+)
+expect(
+  !/function getAgentIcon/.test(read('src/components/layout/LeftSidebar.vue')),
+  'LeftSidebar.vue 仍保留局部的 getAgentIcon（应改用 utils/agentIcon.ts）',
+)
+
+// ---- 下拉面板加高（会话 / 文件共用同一个组件） ----
+expect(
+  /max-height: min\(620px, 76vh\)/.test(tabMenu),
+  'TabListMenu.vue 的下拉面板未加高',
 )
 
 // ---- 每会话滚动位置 ----

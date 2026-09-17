@@ -490,6 +490,9 @@ onMounted(() => {
   document.addEventListener('pointerdown', onDocPointerDown)
   document.addEventListener('keydown', onDocKeydown)
   window.addEventListener('resize', closeMenu)
+  // 侧栏此前停在会话列表时本组件未挂载，消费 revealPath 的 watch 不会触发，定位请求被留在 store 里。
+  // 挂载时补消费一次，这样「定位」直接切过来也能滚到目标文件
+  if (store.revealPath) void handleReveal(store.revealPath)
 })
 
 onBeforeUnmount(() => {
@@ -717,39 +720,38 @@ function menuOpenInEditor() {
 const revealToken = ref(0)
 provide('revealToken', revealToken)
 
-watch(
-  () => store.revealPath,
-  async (path) => {
-    if (!path) return
-    const agentId = agentsStore.currentAgentId
-    if (!agentId) return
-    revealToken.value += 1
-    // 定位时先退出搜索态，否则树被搜索结果列表替换，目标节点不可见
-    if (keyword.value) keyword.value = ''
-    await nextTick()
+async function handleReveal(path: string) {
+  if (!path) return
+  const agentId = agentsStore.currentAgentId
+  if (!agentId) return
+  revealToken.value += 1
+  // 定位时先退出搜索态，否则树被搜索结果列表替换，目标节点不可见
+  if (keyword.value) keyword.value = ''
+  await nextTick()
 
-    if (!store.isLoaded('')) {
-      const root = await store.load(agentId, '')
-      if (root.error) {
-        ElMessage.error(root.error)
-        return
-      }
+  if (!store.isLoaded('')) {
+    const root = await store.load(agentId, '')
+    if (root.error) {
+      ElMessage.error(root.error)
+      return
     }
-    // 逐级加载目标的所有父目录，保证每一级节点都有数据可渲染（节点侧再自行展开）
-    const segments = path.split('/').filter(Boolean)
-    let prefix = ''
-    for (let i = 0; i < segments.length - 1; i += 1) {
-      prefix = prefix ? `${prefix}/${segments[i]}` : segments[i]
-      // 节点侧可能已并发发起同一目录的加载，此处跳过避免重复请求
-      if (store.isLoaded(prefix) || store.isLoading(prefix)) continue
-      const result = await store.load(agentId, prefix)
-      if (result.error) {
-        ElMessage.error(result.error)
-        return
-      }
+  }
+  // 逐级加载目标的所有父目录，保证每一级节点都有数据可渲染（节点侧再自行展开）
+  const segments = path.split('/').filter(Boolean)
+  let prefix = ''
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    prefix = prefix ? `${prefix}/${segments[i]}` : segments[i]
+    // 节点侧可能已并发发起同一目录的加载，此处跳过避免重复请求
+    if (store.isLoaded(prefix) || store.isLoading(prefix)) continue
+    const result = await store.load(agentId, prefix)
+    if (result.error) {
+      ElMessage.error(result.error)
+      return
     }
-  },
-)
+  }
+}
+
+watch(() => store.revealPath, handleReveal)
 </script>
 
 <style scoped>

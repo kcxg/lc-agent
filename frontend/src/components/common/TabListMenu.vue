@@ -300,10 +300,11 @@ onBeforeUnmount(() => {
   z-index: 10002;
   display: flex;
   flex-direction: column;
-  max-height: min(420px, 60vh);
-  padding: 5px;
+  /* 标签多时尽量一屏放完：窗口不高再退回按视口比例限高 */
+  max-height: min(620px, 76vh);
+  padding: 6px;
   border: 1px solid var(--el-border-color);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--el-bg-color-overlay);
   box-shadow: 0 8px 24px color-mix(in srgb, var(--el-bg-color-page) 55%, transparent);
 }
@@ -314,7 +315,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px;
   flex-shrink: 0;
-  padding: 3px 7px 6px;
+  padding: 4px 9px 8px;
   color: var(--el-text-color-placeholder);
   font-size: 11px;
 }
@@ -327,7 +328,7 @@ onBeforeUnmount(() => {
 .tab-menu-list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -347,9 +348,10 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 7px;
   flex-shrink: 0;
-  padding: 5px 5px 5px 7px;
+  /* 行高比标签胶囊略高，下拉里读起来更舒展 */
+  padding: 7px 6px 7px 9px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 9px;
   color: var(--el-text-color-regular);
   font-size: 12px;
   cursor: pointer;

@@ -8,6 +8,7 @@
           label="文件"
           tone="green"
           :items="fileMenuItems"
+          :width="320"
           @select="store.activate($event)"
           @close="confirmClose($event)"
         >
@@ -434,12 +435,14 @@ import { renderMarkdown } from '@/utils/markdown'
 import { useOpenedFilesStore } from '@/stores/opened-files'
 import type { OpenedFile } from '@/stores/opened-files'
 import { useProjectTreeStore } from '@/stores/project-tree'
+import { useUiStore } from '@/stores/ui'
 import FileTypeIcon from '@/components/common/FileTypeIcon.vue'
 import CodeEditor from '@/components/panels/CodeEditor.vue'
 import { documentErrorMessage } from '@/components/panels/documentPreviewError'
 
 const store = useOpenedFilesStore()
 const treeStore = useProjectTreeStore()
+const uiStore = useUiStore()
 
 const content = computed(() => store.activeContent)
 const codeEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
@@ -635,8 +638,10 @@ const breadcrumbSegments = computed<BreadcrumbSeg[]>(() => {
   })
 })
 
+// 面包屑点击：定位到该级并确保文件树可见（侧栏停在会话列表时会被切到「文件」）
 function revealInTree(seg: BreadcrumbSeg) {
   treeStore.reveal(seg.path)
+  uiStore.requestFileTree()
 }
 
 // 「在树中显示」：把当前激活文件在文件树里展开定位（应对自动定位被手动滚动打断）
@@ -644,10 +649,13 @@ function revealActiveInTree() {
   const file = store.activeFile
   if (!file) return
   const rel = toRevealPath(file.path)
-  if (rel) treeStore.reveal(rel)
+  if (!rel) return
+  treeStore.reveal(rel)
+  uiStore.requestFileTree()
 }
 
-// 切换标签时让文件树跟随定位（仅在激活项变化时触发，树内滚动不反向干扰编辑器）
+// 切换标签时让文件树跟随定位（仅在激活项变化时触发，树内滚动不反向干扰编辑器）。
+// 这里刻意不调 requestFileTree：自动跟随不该把正在看会话列表的用户拽到文件视图
 watch(() => store.activePath, (path) => {
   if (!path) return
   const rel = toRevealPath(path)
