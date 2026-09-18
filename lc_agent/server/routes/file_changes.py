@@ -389,6 +389,26 @@ def _parse_git_name_status(stdout: str, repo_root: Path) -> list[dict]:
     return files
 
 
+def _check_git_ignored(cwd: str, paths: list[str]) -> set[str]:
+    """批量查哪些绝对路径被 git 忽略。失败则返回空集(调用方不因此丢文件)。"""
+    if not paths:
+        return set()
+    try:
+        proc = subprocess.run(
+            ["git", "check-ignore", "--stdin", "-z"],
+            input="\0".join(paths) + "\0",
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=cwd,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return set()
+    if proc.returncode not in (0, 1):
+        return set()
+    return {p for p in proc.stdout.split("\0") if p}
+
+
 def _git_files_for_baseline(cwd: str, baseline: dict, changes: list) -> dict:
     repo_root = _find_repo_root(cwd)
     if repo_root is None:
@@ -414,11 +434,19 @@ def _git_files_for_baseline(cwd: str, baseline: dict, changes: list) -> dict:
                 str(Path(item["file_path"]).resolve()).lower(), (0, 0))
 
         if baseline["include_untracked_agent_files"]:
+            pending = []
             for change in _aggregate_file_changes(changes):
                 file_path = change["file_path"]
                 normalized_path = str(Path(file_path).resolve()).lower()
                 if normalized_path in tracked_paths or not Path(file_path).exists():
                     continue
+                pending.append(change)
+            # git 忽略的文件(如 .tmp/)不进 Git 列表:diff 点开必然是空的(一个 git 进程批量查)。
+            ignored = _check_git_ignored(cwd, [c["file_path"] for c in pending])
+            for change in pending:
+                if change["file_path"] in ignored:
+                    continue
+                file_path = change["file_path"]
                 # 未追踪文件不在 git diff 输出里:行数 = 全文行数,一次读文件即可。
                 try:
                     text = Path(file_path).read_text(encoding="utf-8", errors="strict")
