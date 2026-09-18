@@ -464,6 +464,9 @@ watch(() => uiStore.activeTab, async (tab) => {
 
 async function handlePendingOpenFile(path: string) {
   store.pendingOpenFile = null
+  // 工具卡片点进来时强制切回 Agent 视图：之前停在 Git Diff 上会定位不到
+  changeSource.value = 'agent'
+  await nextTick()
   if (!expandedFiles.has(path)) await toggleExpand(path)
   await nextTick()
   try {

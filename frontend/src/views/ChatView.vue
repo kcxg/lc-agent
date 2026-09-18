@@ -180,6 +180,7 @@
                     v-else
                     :tool-call="item.toolCalls[seg.toolIndex!]"
                     :collapsed="item.toolCalls[seg.toolIndex!]?.status === 'done'"
+                    :round="(item as MessageBubbleItem).round"
                   />
                 </div>
               </template>
@@ -386,6 +387,8 @@ type MessageBubbleItem = BubbleListItemProps & {
   httpTracesCount?: number
   summarizations?: SummarizationNotice[]
   isStreamingMessage?: boolean
+  /** 该气泡所属对话轮次（用户消息序号），透传给工具卡片做变更面板定位 */
+  round?: number | null
   timestamp?: number
   enterClass?: string
 }
@@ -595,6 +598,18 @@ const bubbleList = computed((): ChatBubbleItem[] => {
   const filtered = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
 
+  // 轮次号 = 用户消息序号（和后端 FileChange.round_number 同口径）：
+  // 每个 assistant 气泡记下它所属的轮次，透传给工具卡片做变更面板定位。
+  const roundOfMessage = new Map<string, number>()
+  {
+    let round = 0
+    for (const msg of filtered) {
+      if (msg.isSystem) continue
+      if (msg.role === 'user') { round++; continue }
+      roundOfMessage.set(msg.id, round)
+    }
+  }
+
   const out: ChatBubbleItem[] = []
   let prevTs: number | null = null
   for (let i = 0; i < filtered.length; i++) {
@@ -632,6 +647,7 @@ const bubbleList = computed((): ChatBubbleItem[] => {
       segments: segs,
       httpTraces: msg.role === 'assistant' ? msg.httpTraces : undefined,
       httpTracesCount: msg.role === 'assistant' ? (msg.httpTracesCount || 0) : 0,
+      round: msg.role === 'assistant' ? (roundOfMessage.get(msg.id) ?? null) : undefined,
       summarizations: msg.role === 'assistant' ? msg.summarizations : undefined,
       hasThinking: segs?.some(s => s.type === 'thinking' && s.text?.trim()) ?? false,
       hasToolCalls: segs?.some(s => s.type === 'tool') ?? false,

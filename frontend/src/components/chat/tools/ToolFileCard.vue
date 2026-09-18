@@ -143,6 +143,8 @@ const props = defineProps<{
   collapsed?: boolean
   /** 'edit' = edit_block（红绿 diff），'write' = write_file（只贴新增行） */
   variant: 'edit' | 'write'
+  /** 该工具调用所在的对话轮次（用户消息序号），跳变更面板时定位用；未知则不传 */
+  round?: number | null
 }>()
 
 const { isCollapsed, toggleCollapse, liveElapsed, copyLabel, copyText, resultSizeText, tokenText } = useToolCard({
@@ -339,7 +341,9 @@ async function openFileModal(path: string): Promise<void> {
 
 function openInChangesPanel(): void {
   if (!filePath.value) return
-  uiStore.requestTab('changes', { filePath: filePath.value })
+  // round 未知时传 null（全部轮次），保证文件行能渲染出来可定位；
+  // 传 undefined 则保持面板现有轮次过滤，文件可能不在列表里导致定位不到
+  uiStore.requestTab('changes', { round: props.round ?? null, filePath: filePath.value })
 }
 
 /** 打开右侧「文件」面板并定位到该文件，可编辑、可查看外部改动提示 */
