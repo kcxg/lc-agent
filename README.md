@@ -484,6 +484,8 @@ lc-agent既是产品又是框架， 是给希望开发agent人员用的，或者
 
 codex是给普通码农编程用的，如果你对开发自己的agent毫无兴需求和兴趣，对和llm交互毫无兴趣，对ai原理毫无兴趣，只是希望用ai来完成写普通业务项目代码，那当然直接用codex就可以了。
 
+lc-agent 是综合了openwebui openclaw trae-ide workbuddy 的功能，能bs方式部署，也能单机本机cs部署。
+
 ## License
 
 MIT

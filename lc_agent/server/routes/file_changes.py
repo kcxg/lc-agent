@@ -324,6 +324,45 @@ def _count_diff_lines(unified_diff: str | None) -> tuple[int, int]:
     return additions, deletions
 
 
+def _parse_git_numstat(stdout: str, repo_root: Path) -> dict[str, tuple[int, int]]:
+    """Parse `git diff --numstat -z` output into {resolved_absolute_path: (additions, deletions)}.
+
+    二进制文件行数是 `-`,记 0。改名输出是 `old \\0 new \\0` 两个路径,只取新路径归并,
+    与 _parse_git_name_status 取 parts[-1](新路径)的口径一致。
+    """
+    stats: dict[str, tuple[int, int]] = {}
+    chunks = stdout.split("\0")
+    i = 0
+    while i < len(chunks):
+        header = chunks[i]
+        if not header or "\t" not in header:
+            i += 1
+            continue
+        parts = header.split("\t")
+        if len(parts) < 3:
+            i += 1
+            continue
+        try:
+            additions = 0 if parts[0] == "-" else int(parts[0])
+            deletions = 0 if parts[1] == "-" else int(parts[1])
+        except ValueError:
+            i += 1
+            continue
+        # 改名时 header 路径为空,后面跟 old、新两个路径块(实测: '1\t0\t\0b.py\0c.py\0')。
+        # 取新路径归并,与 _parse_git_name_status 取 parts[-1](新路径)的口径一致。
+        if parts[-1]:
+            path_token = parts[-1]
+            i += 1
+        else:
+            path_token = chunks[i + 2] if i + 2 < len(chunks) else ""
+            i += 3
+        if not path_token:
+            continue
+        resolved = str((repo_root / path_token).resolve()).lower()
+        stats[resolved] = (additions, deletions)
+    return stats
+
+
 def _parse_git_name_status(stdout: str, repo_root: Path) -> list[dict]:
     files: list[dict] = []
     for line in stdout.splitlines():
@@ -356,6 +395,13 @@ def _git_files_for_baseline(cwd: str, baseline: dict, changes: list) -> dict:
         return {"available": False, "reason": "当前文件不在 Git 仓库中"}
 
     try:
+        # 行数一次拿全: --numstat 直接给出每个文件的增删行数,不必逐文件再 diff。
+        # 这是唯一起决定作用的调用;name-status 只负责拿改删移类型。
+        numstat_result = _run_git(cwd, ["diff", *baseline["diff_args"], "--numstat", "-z"], 30)
+        if numstat_result.returncode != 0:
+            return {"available": False, "reason": numstat_result.stderr.strip() or "git diff failed"}
+        numstats = _parse_git_numstat(numstat_result.stdout, repo_root)
+
         result = _run_git(cwd, ["diff", *baseline["diff_args"], "--name-status"], 30)
         if result.returncode != 0:
             return {"available": False, "reason": result.stderr.strip() or "git diff failed"}
@@ -364,8 +410,8 @@ def _git_files_for_baseline(cwd: str, baseline: dict, changes: list) -> dict:
         tracked_paths = {str(Path(item["file_path"]).resolve()).lower() for item in files}
 
         for item in files:
-            diff_text = _try_git_file_diff_with_baseline(baseline, item["file_path"])
-            item["additions"], item["deletions"] = _count_diff_lines(diff_text)
+            item["additions"], item["deletions"] = numstats.get(
+                str(Path(item["file_path"]).resolve()).lower(), (0, 0))
 
         if baseline["include_untracked_agent_files"]:
             for change in _aggregate_file_changes(changes):
@@ -373,13 +419,17 @@ def _git_files_for_baseline(cwd: str, baseline: dict, changes: list) -> dict:
                 normalized_path = str(Path(file_path).resolve()).lower()
                 if normalized_path in tracked_paths or not Path(file_path).exists():
                     continue
-                diff_text = _try_no_index_diff(file_path)
-                additions, deletions = _count_diff_lines(diff_text)
+                # 未追踪文件不在 git diff 输出里:行数 = 全文行数,一次读文件即可。
+                try:
+                    text = Path(file_path).read_text(encoding="utf-8", errors="strict")
+                    additions = text.count("\n") + (0 if text.endswith("\n") or not text else 1)
+                except (OSError, UnicodeDecodeError):
+                    additions = 0
                 files.append({
                     "file_path": file_path,
                     "change_type": change["change_type"],
                     "additions": additions,
-                    "deletions": deletions,
+                    "deletions": 0,
                 })
 
         if not files:

@@ -9,14 +9,14 @@ export const RIGHT_PANEL_TABS: RightPanelTab[] = ['model', 'abilities', 'changes
 
 export type SidebarView = 'chats' | 'files'
 
-const ACTIVE_TAB_KEY = 'lc-agent:right-panel:activeTab'
+const ACTIVE_TAB_KEY = 'lc-agent:right-panel:activeTab:v2'
 
 function loadActiveTab(): RightPanelTab {
   try {
     const raw = localStorage.getItem(ACTIVE_TAB_KEY)
     if (raw && (RIGHT_PANEL_TABS as string[]).includes(raw)) return raw as RightPanelTab
   } catch { /* ignore */ }
-  return 'model'
+  return 'editor'
 }
 
 export const useUiStore = defineStore('ui', () => {
@@ -36,7 +36,7 @@ export const useUiStore = defineStore('ui', () => {
 
   const agentsStore = useAgentsStore()
   watch(() => agentsStore.currentAgentId, () => {
-    activeTab.value = 'model'
+    activeTab.value = 'editor'
   })
 
   function setActiveTab(tab: RightPanelTab) {

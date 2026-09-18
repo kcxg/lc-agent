@@ -214,8 +214,9 @@
     </div>
 
     <div v-if="changeSource === 'git'" class="git-view">
-      <div v-if="gitDiffLoading" class="diff-loading">
+      <div v-if="gitDiffLoading" class="diff-loading git-loading">
         <el-icon class="is-loading"><Loading /></el-icon> 加载 Git 文件列表...
+        <span class="git-stopwatch is-running" title="本次加载已用时间"><span class="sw-dot"></span>⏱ {{ formatGitElapsed(gitDiffElapsedMs) }}</span>
       </div>
       <div v-else-if="gitDiffError" class="git-diff-error">{{ gitDiffError }}</div>
       <div v-else-if="gitDiffFiles.length === 0" class="diff-empty">当前基准下没有可显示的文件变更</div>
@@ -224,6 +225,7 @@
           <span>{{ gitDiffFiles.length }} 个文件</span>
           <span class="git-additions">+{{ gitTotalAdditions }}</span>
           <span class="git-deletions">-{{ gitTotalDeletions }}</span>
+          <span v-if="gitDiffElapsedMs > 0" class="git-stopwatch is-done" :title="`本次加载用时`">⏱ {{ formatGitElapsed(gitDiffElapsedMs) }}</span>
         </div>
         <div class="git-diff-file-list">
           <div
@@ -284,7 +286,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import { useFileChangesStore } from '@/stores/file-changes'
 import { useOpenedFilesStore } from '@/stores/opened-files'
@@ -312,6 +314,32 @@ const fileDiffs = reactive<Record<string, string>>({})
 
 const gitDiffLoading = ref(false)
 const gitDiffError = ref('')
+const gitDiffElapsedMs = ref(0)
+let gitDiffStartTs = 0
+let gitDiffTimer: ReturnType<typeof setInterval> | null = null
+
+function startGitStopwatch() {
+  stopGitStopwatch()
+  gitDiffStartTs = Date.now()
+  gitDiffElapsedMs.value = 0
+  gitDiffTimer = setInterval(() => {
+    gitDiffElapsedMs.value = Date.now() - gitDiffStartTs
+  }, 50)
+}
+
+function stopGitStopwatch() {
+  if (gitDiffTimer !== null) {
+    clearInterval(gitDiffTimer)
+    gitDiffTimer = null
+  }
+}
+
+/** 0.0s 起跳：不足 1s 显示一位小数，超过显示 x.xs */
+function formatGitElapsed(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+onBeforeUnmount(() => stopGitStopwatch())
 const gitBaseline = ref<GitBaseline>('session')
 const gitBaselineLabel = ref('')
 const selectedCommit = ref('')
@@ -582,6 +610,7 @@ async function loadGitDiff() {
   gitDiffLoading.value = true
   gitDiffError.value = ''
   gitDiffFiles.value = []
+  startGitStopwatch()
   expandedGitFiles.clear()
   Object.keys(gitFileDiffs).forEach(key => delete gitFileDiffs[key])
   Object.keys(gitRawFileDiffs).forEach(key => delete gitRawFileDiffs[key])
@@ -601,6 +630,8 @@ async function loadGitDiff() {
   } catch (e: any) {
     gitDiffError.value = e.message || '请求失败'
   } finally {
+    gitDiffElapsedMs.value = Date.now() - gitDiffStartTs
+    stopGitStopwatch()
     gitDiffLoading.value = false
   }
 }
@@ -828,11 +859,11 @@ watch(changeSource, (source) => {
   border: none;
   background: transparent;
   cursor: pointer;
-  color: var(--el-text-color-secondary);
+  color: var(--el-text-color-regular);
   border-radius: 4px;
   flex-shrink: 0;
-  opacity: 0.5;
-  transition: opacity 0.15s, background 0.15s;
+  opacity: 1;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
 
 .copy-path-btn svg,
@@ -878,6 +909,52 @@ watch(changeSource, (source) => {
   padding: 12px;
   color: var(--el-text-color-secondary);
   font-size: 13px;
+}
+
+/* Git 文件列表秒表：加载中是流光霓虹胶囊，加载完留在汇总行 */
+.git-stopwatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 2px 12px 2px 10px;
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: #fff;
+  background: linear-gradient(110deg, #8b5cf6, #ec4899, #f59e0b, #8b5cf6);
+  background-size: 220% 100%;
+  animation: git-sw-flow 1.6s linear infinite;
+  box-shadow: 0 1px 10px rgba(236, 72, 153, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.git-stopwatch .sw-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  animation: git-sw-blink 0.8s ease-in-out infinite;
+}
+.git-stopwatch.is-done {
+  animation: none;
+  background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 100%);
+  box-shadow: 0 1px 8px rgba(14, 165, 233, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.git-loading {
+  flex-wrap: wrap;
+}
+@keyframes git-sw-flow {
+  to { background-position: 220% 0; }
+}
+@keyframes git-sw-blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .git-stopwatch { animation: none; }
+  .git-stopwatch .sw-dot { animation: none; }
 }
 
 .diff-content {
