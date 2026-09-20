@@ -1341,6 +1341,15 @@ html[data-md-layout="joplin-notes"] {
   --md-answer-width: 850px;
 }
 
+/* 大屏自适应加宽：≥1600px 起内容列随视口拉伸（1600px→1000px，2560px→1288px），
+   上限 1400px 兜底超宽屏。选择器与上面各版式同权重且位置靠后，统一覆盖各版式的固定值 */
+@media (min-width: 1600px) {
+  :root,
+  html[data-md-layout] {
+    --md-answer-width: min(1400px, calc(520px + 30vw));
+  }
+}
+
 /* Notion Editorial is the default treatment for every final assistant answer. */
 .markdown-body.answer-markdown {
   max-width: var(--md-answer-width);

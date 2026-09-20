@@ -16,7 +16,7 @@ function loadActiveTab(): RightPanelTab {
     const raw = localStorage.getItem(ACTIVE_TAB_KEY)
     if (raw && (RIGHT_PANEL_TABS as string[]).includes(raw)) return raw as RightPanelTab
   } catch { /* ignore */ }
-  return 'editor'
+  return 'model'
 }
 
 export const useUiStore = defineStore('ui', () => {
@@ -36,7 +36,7 @@ export const useUiStore = defineStore('ui', () => {
 
   const agentsStore = useAgentsStore()
   watch(() => agentsStore.currentAgentId, () => {
-    activeTab.value = 'editor'
+    activeTab.value = 'model'
   })
 
   function setActiveTab(tab: RightPanelTab) {
