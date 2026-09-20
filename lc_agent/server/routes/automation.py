@@ -122,7 +122,10 @@ def _get_scheduler(request: Request) -> AutomationScheduler:
 
 
 def _check_task_access(task: AutomationTask, user: User) -> None:
-    if user.role != "admin" and task.user_id != user.id:
+    # 自动化任务按账号隔离：admin 也不例外。未配 auth 的单机模式（__anonymous__）保持原样。
+    if user.id == "__anonymous__":
+        return
+    if task.user_id != user.id:
         raise HTTPException(status_code=403, detail="权限不足")
 
 
@@ -174,8 +177,7 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db_session),
     engine: AgentEngine = Depends(get_engine),
 ):
-    user_id = None if user.role == "admin" else user.id
-    tasks = await AutomationTaskRepository(db).list_all(user_id=user_id)
+    tasks = await AutomationTaskRepository(db).list_all(user_id=user.id)
     return [serialize_task(task, engine) for task in tasks]
 
 
@@ -366,10 +368,9 @@ async def list_runs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    user_id = None if user.role == "admin" else user.id
     run_repo = AutomationRunRepository(db)
-    runs = await run_repo.list_all(user_id=user_id)
-    total = await run_repo.count_all(user_id=user_id)
+    runs = await run_repo.list_all(user_id=user.id)
+    total = await run_repo.count_all(user_id=user.id)
     return {"items": [serialize_run(run) for run in runs], "total": total}
 
 
@@ -383,7 +384,7 @@ async def rerun(
     run = await AutomationRunRepository(db).get_by_id(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="执行记录不存在")
-    if user.role != "admin" and run.user_id != user.id:
+    if user.id != "__anonymous__" and run.user_id != user.id:
         raise HTTPException(status_code=403, detail="权限不足")
     if run.status != "failed":
         raise HTTPException(status_code=409, detail="只有失败的执行记录可以重新执行")

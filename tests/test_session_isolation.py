@@ -30,7 +30,8 @@ async def setup(tmp_path):
     async with async_session() as session:
         alice = User(id="alice-id", username="alice", password_hash=auth_service.hash_password("pass"), role="user")
         bob = User(id="bob-id", username="bob", password_hash=auth_service.hash_password("pass"), role="user")
-        session.add_all([alice, bob])
+        boss = User(id="boss-id", username="boss", password_hash=auth_service.hash_password("pass"), role="admin")
+        session.add_all([alice, bob, boss])
         await session.commit()
 
     app = create_app(config={"database": {"url": db_url}})
@@ -39,14 +40,15 @@ async def setup(tmp_path):
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         alice_login = await ac.post("/api/auth/login", json={"username": "alice", "password": "pass"})
         bob_login = await ac.post("/api/auth/login", json={"username": "bob", "password": "pass"})
-        yield ac, alice_login.json()["token"], bob_login.json()["token"]
+        boss_login = await ac.post("/api/auth/login", json={"username": "boss", "password": "pass"})
+        yield ac, alice_login.json()["token"], bob_login.json()["token"], boss_login.json()["token"]
     await engine.dispose()
     reset_engine()
 
 
 @pytest.mark.asyncio
 async def test_session_isolation(setup):
-    client, alice_token, bob_token = setup
+    client, alice_token, bob_token, _ = setup
     alice_h = {"Authorization": f"Bearer {alice_token}"}
     bob_h = {"Authorization": f"Bearer {bob_token}"}
 
@@ -67,3 +69,32 @@ async def test_session_isolation(setup):
     bob_sessions = await client.get("/api/sessions", headers=bob_h)
     assert len(bob_sessions.json()) == 1
     assert bob_sessions.json()[0]["title"] == "Bob's chat"
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_see_others_sessions(setup):
+    """会话按账号隔离：admin 也只能看自己的，看别人会话 403，不能直接读消息。"""
+    client, alice_token, _, boss_token = setup
+    alice_h = {"Authorization": f"Bearer {alice_token}"}
+    boss_h = {"Authorization": f"Bearer {boss_token}"}
+
+    resp = await client.post("/api/sessions", json={"title": "Alice's secret"}, headers=alice_h)
+    assert resp.status_code == 201
+    sid = resp.json()["id"]
+
+    # admin 的列表里没有 alice 的会话
+    boss_sessions = await client.get("/api/sessions", headers=boss_h)
+    assert boss_sessions.status_code == 200
+    assert all(s["id"] != sid for s in boss_sessions.json())
+
+    # admin 直接读 alice 会话的消息 → 403
+    resp = await client.get(f"/api/sessions/{sid}/messages", headers=boss_h)
+    assert resp.status_code == 403
+
+    # admin 改 alice 会话标题 → 403
+    resp = await client.put(f"/api/sessions/{sid}", json={"title": "hacked"}, headers=boss_h)
+    assert resp.status_code == 403
+
+    # admin 删 alice 会话 → 403（返回 204 才算删掉）
+    resp = await client.delete(f"/api/sessions/{sid}", headers=boss_h)
+    assert resp.status_code == 403

@@ -146,11 +146,14 @@ async def _check_sse_auth(request: Request, thread_id: str) -> JSONResponse | No
             result = await _db.execute(sa_select(SessionMeta).where(SessionMeta.id == thread_id))
             session_meta = result.scalar_one_or_none()
             if session_meta:
-                # Deny if session has owner and it's not this user
-                if session_meta.user_id and session_meta.user_id != user.id and user.role != "admin":
+                # 会话按账号隔离：admin 也不例外。
+                # 未配 auth 的单机模式（__anonymous__）保持原样。
+                if user.id == "__anonymous__":
+                    pass
+                elif not session_meta.user_id:
+                    # 无主会话（user_id=""）：只有单机模式可进，登录用户一律拒绝
                     return JSONResponse(status_code=403, content={"detail": "权限不足"})
-                # For sessions with no owner (user_id=""), only admin can access
-                if not session_meta.user_id and user.role != "admin":
+                elif session_meta.user_id != user.id:
                     return JSONResponse(status_code=403, content={"detail": "权限不足"})
         finally:
             await _db.close()

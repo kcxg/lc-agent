@@ -28,7 +28,10 @@ _BASELINES = {
 
 
 def _check_session_access(sess, user: User) -> None:
-    if sess.user_id != user.id and user.role != "admin":
+    # 会话按账号隔离：admin 也不例外。未配 auth 的单机模式（__anonymous__）保持原样。
+    if user.id == "__anonymous__":
+        return
+    if sess.user_id != user.id:
         raise HTTPException(status_code=403, detail="权限不足")
 
 

@@ -10,7 +10,7 @@
     <div class="usage-admin-body">
     <div class="page-header">
       <div class="page-title">
-        <span class="page-subtitle">按人 / Agent / 模型统计 token 消耗与费用</span>
+        <span class="page-subtitle">按 Agent / 模型统计 token 消耗与费用（只统计自己的用量）</span>
       </div>
       <div class="page-actions">
         <el-button
@@ -47,7 +47,6 @@
         <el-option label="按月" value="month" />
       </el-select>
       <el-select v-model="groupBy" multiple collapse-tags class="f-group" placeholder="分组维度" @change="loadAll">
-        <el-option label="用户" value="user" />
         <el-option label="Agent" value="agent" />
         <el-option label="模型" value="model_id" />
       </el-select>
@@ -91,10 +90,6 @@
       <div class="stat-card stat-card--tokens">
         <div class="stat-label">总 Token</div>
         <div class="stat-value">{{ fmtNum(totalTokens) }}</div>
-      </div>
-      <div class="stat-card stat-card--users">
-        <div class="stat-label">活跃人数</div>
-        <div class="stat-value">{{ totals?.active_users ?? '—' }}</div>
       </div>
       <div class="stat-card stat-card--calls">
         <div class="stat-label">调用次数</div>
@@ -148,7 +143,6 @@
       <el-tab-pane label="消费最高的会话" name="sessions">
         <el-table v-loading="sessionsLoading" :data="topSessions" stripe border max-height="560">
           <el-table-column prop="title" label="会话" min-width="220" />
-          <el-table-column prop="username" label="用户" min-width="110" />
           <el-table-column prop="agent_name" label="Agent" min-width="110" />
           <el-table-column prop="model_id" label="模型" min-width="140" />
           <el-table-column label="输入" min-width="100" align="right">
@@ -367,8 +361,8 @@ const monthStart = today.slice(0, 8) + '01'
 
 const range = ref<[string, string]>([monthStart, today])
 const granularity = ref<'day' | 'month'>('day')
-// 时间列永远显示（粒度由 granularity 控制），分组维度：用户 / Agent / 模型
-const groupBy = ref<string[]>(['user'])
+// 时间列永远显示（粒度由 granularity 控制），分组维度：Agent / 模型（会话已按账号隔离，不再按用户分组）
+const groupBy = ref<string[]>(['agent'])
 const includeSub = ref(true)
 const allModels = ref<string[]>([])
 const activeTab = ref('summary')
