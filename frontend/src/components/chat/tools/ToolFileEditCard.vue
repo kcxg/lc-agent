@@ -1,5 +1,5 @@
 <template>
-  <ToolFileCard :tool-call="toolCall" :collapsed="collapsed" variant="edit" />
+  <ToolFileCard :tool-call="toolCall" :collapsed="collapsed" :round="round" variant="edit" />
 </template>
 
 <script setup lang="ts">
@@ -9,5 +9,6 @@ import ToolFileCard from './ToolFileCard.vue'
 defineProps<{
   toolCall: ToolCall
   collapsed?: boolean
+  round?: number | null
 }>()
 </script>

@@ -24,6 +24,11 @@ export interface SseMessage {
   duration?: number
   tool_count?: number
   token_count?: number
+  // summarization visibility events
+  summarized_count?: number
+  total_count?: number
+  kept_count?: number
+  reason?: string
   args?: Record<string, any>
   action_requests?: any[]
   review_configs?: any[]

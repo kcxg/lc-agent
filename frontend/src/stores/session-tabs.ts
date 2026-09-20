@@ -94,6 +94,44 @@ export const useSessionTabsStore = defineStore('sessionTabs', () => {
   }
 
   /**
+   * 关闭除 keepId 外的全部标签，返回被关闭的 id 列表。
+   * 只动标签不动会话数据；调用方需按返回列表释放各 store 的缓存。
+   */
+  function closeOthers(keepId: string): string[] {
+    if (!openTabIds.value.includes(keepId)) return []
+    const removed = openTabIds.value.filter(id => id !== keepId)
+    if (removed.length === 0) return []
+    openTabIds.value = [keepId]
+    for (const id of removed) delete navStacks.value[id]
+    activeTabId.value = keepId
+    return removed
+  }
+
+  /** 关闭 keepId 右侧的全部标签，返回被关闭的 id 列表；激活项若被关则落到 keepId */
+  function closeToRight(keepId: string): string[] {
+    const idx = openTabIds.value.indexOf(keepId)
+    if (idx < 0) return []
+    const removed = openTabIds.value.slice(idx + 1)
+    if (removed.length === 0) return []
+    openTabIds.value = openTabIds.value.slice(0, idx + 1)
+    for (const id of removed) delete navStacks.value[id]
+    if (activeTabId.value && removed.includes(activeTabId.value)) {
+      activeTabId.value = keepId
+    }
+    return removed
+  }
+
+  /** 关闭全部标签，返回被关闭的 id 列表；激活项置空（调用方负责回首页） */
+  function closeAll(): string[] {
+    const removed = [...openTabIds.value]
+    if (removed.length === 0) return []
+    openTabIds.value = []
+    navStacks.value = {}
+    activeTabId.value = null
+    return removed
+  }
+
+  /**
    * 「新对话」落库后本地 id 会换成真实 id，标签、激活项、导航栈必须一起搬迁，
    * 否则标签会指向一个不存在的会话。
    */
@@ -147,6 +185,9 @@ export const useSessionTabsStore = defineStore('sessionTabs', () => {
     openTab,
     closeTab,
     removeTab,
+    closeOthers,
+    closeToRight,
+    closeAll,
     renameTab,
     restoreTabs,
     setActiveNavStack,

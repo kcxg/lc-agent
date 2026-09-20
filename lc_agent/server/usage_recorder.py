@@ -100,6 +100,8 @@ async def record_usage(
             for seq, r in enumerate(rows):
                 role = r.get("role", "main")
                 model_id = r.get("model_id") or "unknown"
+                # 行内 source 优先（如摘要调用自带 source="summarize"），缺省用调用方传入的 source
+                row_source = r.get("source") or source
                 if role == "sub":
                     info = sub_info.get(r.get("sub_session_id", ""), {})
                     row_agent_id = info.get("agent_id", "subagent")
@@ -121,7 +123,7 @@ async def record_usage(
                     provider=r.get("provider") or "",
                     role=role,
                     sub_session_id=r.get("sub_session_id") or "",
-                    source=source,
+                    source=row_source,
                     input_tokens=int(r.get("input_tokens") or 0),
                     output_tokens=int(r.get("output_tokens") or 0),
                     cache_read_tokens=int(r.get("cache_read_tokens") or 0),

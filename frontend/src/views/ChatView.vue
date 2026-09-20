@@ -183,9 +183,25 @@
                     v-else
                     :tool-call="item.toolCalls[seg.toolIndex!]"
                     :collapsed="item.toolCalls[seg.toolIndex!]?.status === 'done'"
+                    :round="(item as MessageBubbleItem).round"
                   />
                 </div>
               </template>
+              <div
+                v-if="item.role === 'ai' && !item.isSystem && item.summarizations?.length"
+                class="summarization-notices"
+              >
+                <div
+                  v-for="(notice, nIdx) in item.summarizations"
+                  :key="`${item.messageId}-sum-${nIdx}`"
+                  class="summarization-notice"
+                  :class="`is-${notice.kind}`"
+                >
+                  <span v-if="notice.kind === 'running'" class="sum-dot"></span>
+                  <el-icon v-else><Cpu /></el-icon>
+                  <span class="sum-text">{{ formatSummarizationNotice(notice) }}</span>
+                </div>
+              </div>
               <RoundFileChangesCard
               v-if="item.role === 'ai' && !item.isSystem && roundFileCards[item.messageId]"
               :round="roundFileCards[item.messageId].round"
@@ -219,8 +235,23 @@
               <div
                 v-else
                 class="markdown-body answer-markdown"
-                v-html="renderMarkdown(stripThinkingMarkers(item.content || ''))"
+                v-html="renderMarkdown(stripUiMarkers(item.content || ''))"
               />
+              <div
+                v-if="item.role === 'ai' && !item.isSystem && item.summarizations?.length && !(item.segments && item.segments.length > 0)"
+                class="summarization-notices"
+              >
+                <div
+                  v-for="(notice, nIdx) in item.summarizations"
+                  :key="`${item.messageId}-sum-plain-${nIdx}`"
+                  class="summarization-notice"
+                  :class="`is-${notice.kind}`"
+                >
+                  <span v-if="notice.kind === 'running'" class="sum-dot"></span>
+                  <el-icon v-else><Cpu /></el-icon>
+                  <span class="sum-text">{{ formatSummarizationNotice(notice) }}</span>
+                </div>
+              </div>
             </template>
             <div
               v-if="!item.isSystem && shouldShowReasoningNotice(item)"
@@ -316,7 +347,7 @@ import { useSessionsStore } from '@/stores/sessions'
 import { useChatUiStateStore } from '@/stores/chat-ui-state'
 import { useSessionTabsStore } from '@/stores/session-tabs'
 import { useOpenedFilesStore } from '@/stores/opened-files'
-import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry } from '@/stores/chat'
+import type { ToolCall, MessageUsage, ReplayMessage, HttpTrace, ErrorInfo, SubAgentEntry, SummarizationNotice } from '@/stores/chat'
 import type { ContentBlock, Attachment } from '@/utils/fileUpload'
 import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
@@ -357,7 +388,10 @@ type MessageBubbleItem = BubbleListItemProps & {
   hasAnswer?: boolean
   httpTraces?: HttpTrace[]
   httpTracesCount?: number
+  summarizations?: SummarizationNotice[]
   isStreamingMessage?: boolean
+  /** 该气泡所属对话轮次（用户消息序号），透传给工具卡片做变更面板定位 */
+  round?: number | null
   timestamp?: number
   enterClass?: string
 }
@@ -381,6 +415,7 @@ type LoadOlderBubbleItem = BubbleListItemProps & {
   content: string
   isMarkdown?: boolean
   isSystem?: boolean
+  summarizations?: SummarizationNotice[]
   toolCalls?: ToolCall[]
   segments?: ContentSegment[]
   usage?: MessageUsage
@@ -566,6 +601,18 @@ const bubbleList = computed((): ChatBubbleItem[] => {
   const filtered = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
 
+  // 轮次号 = 用户消息序号（和后端 FileChange.round_number 同口径）：
+  // 每个 assistant 气泡记下它所属的轮次，透传给工具卡片做变更面板定位。
+  const roundOfMessage = new Map<string, number>()
+  {
+    let round = 0
+    for (const msg of filtered) {
+      if (msg.isSystem) continue
+      if (msg.role === 'user') { round++; continue }
+      roundOfMessage.set(msg.id, round)
+    }
+  }
+
   const out: ChatBubbleItem[] = []
   let prevTs: number | null = null
   for (let i = 0; i < filtered.length; i++) {
@@ -603,6 +650,8 @@ const bubbleList = computed((): ChatBubbleItem[] => {
       segments: segs,
       httpTraces: msg.role === 'assistant' ? msg.httpTraces : undefined,
       httpTracesCount: msg.role === 'assistant' ? (msg.httpTracesCount || 0) : 0,
+      round: msg.role === 'assistant' ? (roundOfMessage.get(msg.id) ?? null) : undefined,
+      summarizations: msg.role === 'assistant' ? msg.summarizations : undefined,
       hasThinking: segs?.some(s => s.type === 'thinking' && s.text?.trim()) ?? false,
       hasToolCalls: segs?.some(s => s.type === 'tool') ?? false,
       hasAnswer: segs?.some(s => s.type === 'text' && s.text?.trim()) ?? false,
@@ -868,12 +917,31 @@ function formatCompactTokens(n: number): string {
   return String(n)
 }
 
+function formatSummarizationNotice(notice: SummarizationNotice): string {
+  if (notice.kind === 'running') {
+    return notice.summarizedCount > 0
+      ? `正在压缩上下文（${notice.summarizedCount} 条历史）…`
+      : '正在压缩上下文…'
+  }
+  if (notice.kind === 'done') {
+    return `已压缩 ${notice.summarizedCount} 条历史，保留最近 ${notice.keptCount ?? 0} 条`
+  }
+  return notice.reason
+    ? `上下文压缩未完成（${notice.reason}），对话照常继续`
+    : '上下文压缩未完成，对话照常继续'
+}
+
 function stripThinkingMarkers(content: string): string {
   return content.replace(/<!--(?:THINK_START|THINK_END)-->/g, '').trim()
 }
 
 function stripUiMarkers(content: string): string {
-  return stripThinkingMarkers(content).replace(/<!--TOOL:\d+-->/g, '').replace(/<!--HTTP:\d+-->/g, '').trim()
+  return stripThinkingMarkers(content)
+    .replace(/<!--TOOL:\d+-->/g, '')
+    .replace(/<!--HTTP:\d+-->/g, '')
+    .replace(/<!--SUMMARIZE:\d+:\d+-->/g, '')
+    .replace(/<!--SUMMARIZE_FAIL:[^>]*-->/g, '')
+    .trim()
 }
 
 function getReplayHistory(beforeMessageId: string): ReplayMessage[] {
@@ -1445,6 +1513,11 @@ onBeforeUnmount(() => {
   min-height: 100%;
 }
 
+/* 库把自定义消息项（时间分隔线、加载更早）套在居中的容器里，改成靠左才能跟内容列对齐 */
+.messages-container :deep(.elx-bubble-list__item--custom) {
+  justify-content: flex-start;
+}
+
 .load-older-messages.is-inline {
   display: flex;
   justify-content: center;
@@ -1456,6 +1529,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* 撑到内容列的宽度上限为止，跟正文左右边界对齐 */
+  width: 100%;
+  max-width: var(--md-answer-width);
   padding: 12px 4% 8px;
   opacity: 0.85;
   pointer-events: none;
@@ -1544,7 +1620,6 @@ onBeforeUnmount(() => {
   padding-right: 5px !important;
 }
 
-.messages-container :deep(.elx-bubble--start .elx-bubble__content-wrapper),
 .messages-container :deep(.elx-bubble--start .elx-bubble__content) {
   width: 100%;
   max-width: 100% !important;
@@ -1557,6 +1632,10 @@ onBeforeUnmount(() => {
   background: var(--el-bg-color-overlay);
   border: none;
   box-shadow: 0 4px 16px color-mix(in srgb, var(--el-box-shadow) 35%, transparent);
+  /* 这层有背景色，之前是 width:100% 撑满整行，右边会拖出一大片空底。
+     收成跟内容列同宽：18 = 本层左右 padding 4*2 + 内层 content 左右 padding 5*2 */
+  width: fit-content;
+  max-width: calc(var(--md-answer-width) + 18px) !important;
 }
 
 .messages-container :deep(.elx-bubble--start .elx-bubble__content) {
@@ -1770,6 +1849,11 @@ onBeforeUnmount(() => {
   width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* AI 回复的内容列跟正文共用同一把尺：卡片、工具卡、Token 面板才有同一条左右边界 */
+.messages-container :deep(.elx-bubble--start .bubble-content-wrap) {
+  max-width: var(--md-answer-width);
 }
 
 .user-plain-text {
@@ -2154,6 +2238,85 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+.summarization-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.summarization-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--el-text-color-secondary);
+  background: color-mix(in srgb, var(--el-fill-color-light) 82%, var(--el-color-primary) 8%);
+  border: 1px dashed color-mix(in srgb, var(--el-color-primary) 36%, var(--el-border-color));
+}
+
+.summarization-notice .el-icon {
+  color: var(--el-color-primary);
+  flex-shrink: 0;
+}
+
+.summarization-notice.is-done {
+  background: color-mix(in srgb, var(--el-fill-color-light) 86%, var(--el-color-success) 6%);
+  border-color: color-mix(in srgb, var(--el-color-success) 30%, var(--el-border-color));
+}
+
+.summarization-notice.is-done .el-icon {
+  color: var(--el-color-success);
+}
+
+.summarization-notice.is-failed {
+  background: color-mix(in srgb, var(--el-fill-color-light) 82%, var(--el-color-warning) 8%);
+  border-color: color-mix(in srgb, var(--el-color-warning) 36%, var(--el-border-color));
+}
+
+.summarization-notice.is-failed .el-icon {
+  color: var(--el-color-warning);
+}
+
+.summarization-notice.is-running {
+  border-style: solid;
+  animation: summarize-pulse 1.6s ease-in-out infinite;
+}
+
+.summarization-notice .sum-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  animation: summarize-blink 1s infinite;
+  flex-shrink: 0;
+}
+
+.summarization-notice .sum-text {
+  flex: 1;
+  min-width: 0;
+}
+
+@keyframes summarize-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes summarize-pulse {
+  0%, 100% { box-shadow: 0 0 0 color-mix(in srgb, var(--el-color-primary) 0%, transparent); }
+  50% { box-shadow: 0 0 14px color-mix(in srgb, var(--el-color-primary) 22%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .summarization-notice.is-running,
+  .summarization-notice .sum-dot {
+    animation: none;
+  }
+}
+
 .messages-container :deep([style*="pointer-events"]) .tool-call-inline,
 .messages-container :deep(.tool-call-card) {
   pointer-events: auto !important;
@@ -2499,6 +2662,16 @@ onBeforeUnmount(() => {
   .thinking-unavailable-text strong {
     font-size: 12px;
   }
+}
+
+/* 用户消息的右边界跟 AI 内容列取同一条线，不再顶到聊天区最右边。
+   9px 是 AI 侧内容列相对气泡的背景偏移（wrapper padding 4 + content padding 5），
+   减掉它两边右边界才严格重合。
+   窄屏下内容列比容器宽，max() 兜底成 0，气泡照旧贴右。
+   放在文件末尾：同特异性的 padding-inline: 0 在媒体查询里声明得更早，这里要压过它 */
+.messages-container :deep(.elx-bubble--end) {
+  box-sizing: border-box !important;
+  padding-right: max(0px, calc(100% - var(--md-answer-width) - 9px)) !important;
 }
 
 </style>

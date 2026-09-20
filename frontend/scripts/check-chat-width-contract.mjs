@@ -57,6 +57,32 @@ expectIncludes('.elx-bubble--start .elx-bubble__content-wrapper')
 expectIncludes('.elx-bubble--start .elx-bubble__content')
 expectMatch(/\.elx-bubble--end[\s\S]*align-self:\s*flex-end/, 'user 气泡缺少右侧紧凑对齐')
 expectMatch(/@media\s*\(max-width:\s*960px\)[\s\S]*\.elx-bubble--start[\s\S]*width:\s*100%\s*!important[\s\S]*max-width:\s*100%\s*!important/, '移动端 assistant 气泡应占满可用宽度')
+expectIncludes('.elx-bubble--start .bubble-content-wrap')
+expectMatch(
+  /\.elx-bubble--start \.elx-bubble__content-wrapper\)[\s\S]*max-width:\s*calc\(var\(--md-answer-width\)\s*\+\s*18px\)/,
+  'AI 气泡背景块仍是整行宽，卡片右边会拖出一大片空底',
+)
+expectMatch(
+  /\.elx-bubble--start \.bubble-content-wrap[\s\S]*max-width:\s*var\(--md-answer-width\)/,
+  'AI 内容列缺少宽度上限，卡片会撑得比正文宽',
+)
+expectMatch(
+  /\.chat-time-separator[\s\S]*max-width:\s*var\(--md-answer-width\)/,
+  '时间分隔线缺少宽度上限',
+)
+expectMatch(
+  /\.elx-bubble-list__item--custom[\s\S]*justify-content:\s*flex-start/,
+  '自定义消息项仍是居中，时间分隔线不会跟内容列对齐',
+)
+expectMatch(
+  /\.elx-bubble--end[\s\S]*padding-right:\s*max\(0px,\s*calc\(100%\s*-\s*var\(--md-answer-width\)\s*-\s*9px\)\)/,
+  'user 气泡右边界没有跟 AI 内容列对齐，会顶到聊天区最右边',
+)
+expectNotMatch(
+  /\.elx-bubble--end\)\s*\{[^}]*padding-right:\s*\d+px/,
+  'user 气泡右边界写成了固定像素，切版式主题后会跟内容列错位',
+)
+
 for (const card of toolCards) {
   expectToolIncludes(card, 'flex-wrap: wrap')
   expectToolMatch(card, new RegExp(`${card.title.replace('.', '\\.')}[\\s\\S]*min-width:\\s*0`), '工具名缺少 min-width: 0，移动端会把长工具名压成竖排')

@@ -38,7 +38,10 @@ def serialize_session(s):
 
 
 def _check_session_access(sess, user: User) -> None:
-    if sess.user_id != user.id and user.role != "admin":
+    # 会话按账号隔离：admin 也不例外。未配 auth 的单机模式（__anonymous__）保持原样。
+    if user.id == "__anonymous__":
+        return
+    if sess.user_id != user.id:
         raise HTTPException(status_code=403, detail="权限不足")
 
 
@@ -50,12 +53,11 @@ async def list_sessions(
     include_session_id: str | None = Query(default=None, max_length=200),
 ):
     repo = SessionRepository(db)
-    user_id = None if user.role == "admin" else user.id
     if days is None:
-        sessions = await repo.list_all(user_id=user_id)
+        sessions = await repo.list_all(user_id=user.id)
     else:
         sessions = await repo.list_recent_for_sidebar(
-            user_id=user_id,
+            user_id=user.id,
             days=days,
             include_session_id=include_session_id,
         )

@@ -33,7 +33,12 @@ expect(chatView.includes('<ToolCardRouter'), 'ChatView.vue 缺少 <ToolCardRoute
 // 文件卡：复用 fileDiff / filePreview，标题说人话
 expect(fileCard.includes('fileDiff'), 'ToolFileCard.vue 未使用 fileDiff')
 expect(fileCard.includes('filePreview'), 'ToolFileCard.vue 未使用 filePreview')
-expect(fileCard.includes('在变更面板看'), 'ToolFileCard.vue 缺少变更面板入口')
+expect(fileCard.includes('在变更面板查看'), 'ToolFileCard.vue 缺少变更面板入口')
+// 文件卡三个入口：弹框看全文 / 右侧文件面板 / 变更面板
+expect(fileCard.includes('在弹框看全文'), 'ToolFileCard.vue 缺少弹框看全文入口')
+expect(fileCard.includes('在文件面板查看'), 'ToolFileCard.vue 缺少文件面板入口')
+expect(fileCard.includes('openInEditorPanel'), 'ToolFileCard.vue 未接线文件面板打开逻辑')
+expect(fileCard.includes('useOpenedFilesStore'), 'ToolFileCard.vue 未用 openedFiles store 打开文件')
 // 编辑/写入文件卡不自动折叠：跑完也保持展开，用户手动才收
 expect(fileCard.includes('keepExpanded: true'), 'ToolFileCard.vue 未传 keepExpanded（文件卡仍会自动折叠）')
 expect(useToolCard.includes('keepExpanded'), 'useToolCard.ts 缺少 keepExpanded 支持')

@@ -100,6 +100,7 @@ import { useAgentsStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useToolsStore } from '@/stores/tools'
 import { useTheme } from '@/composables/useTheme'
+import { getAgentIcon } from '@/utils/agentIcon'
 import { Sunny, Moon, Menu, Setting, RefreshRight, Plus, Briefcase } from '@element-plus/icons-vue'
 import CopyRoundsButton from '@/components/chat/CopyRoundsButton.vue'
 import FileChangesBadge from '@/components/chat/FileChangesBadge.vue'
@@ -111,15 +112,6 @@ const { isDark, toggleDark } = useTheme()
 
 function reloadPage() {
   window.location.reload()
-}
-
-function getAgentIcon(agent: any): string {
-  if (agent.project_mode) return '📁'
-  if (agent.source === 'code') return '⚙️'
-  if (agent.id === 'chat') return '💬'
-  if (agent.id === 'empty') return '🧩'
-  if (agent.source === 'builtin') return '✨'
-  return '🤖'
 }
 
 const hasMessages = computed(() => chatStore.messages.length > 0)

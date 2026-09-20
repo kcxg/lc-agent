@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <aside
     class="right-panel"
     :class="{ collapsed }"
@@ -41,12 +41,6 @@
             <span class="panel-tab-label">{{ tab.label }}</span>
             <span v-if="tab.badge > 0" class="panel-tab-badge">{{ tab.badge }}</span>
           </button>
-        </div>
-      </div>
-
-      <div v-if="chatStore.todos.length > 0" class="right-panel-pinned">
-        <div class="panel-section todo-section">
-          <TodoList :todos="chatStore.todos" />
         </div>
       </div>
 
@@ -419,6 +413,10 @@
           </template>
 
           <template v-if="activeTab === 'tasks'">
+            <div v-if="chatStore.todos.length > 0" class="panel-section todo-section">
+              <TodoList :todos="chatStore.todos" />
+            </div>
+
             <div class="panel-section automation-section">
               <div class="section-header compact-section-header">
                 <h4>自动化任务</h4>
@@ -861,14 +859,6 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
   line-height: 15px;
   text-align: center;
   box-shadow: 0 0 0 2px var(--el-bg-color);
-}
-
-.right-panel-pinned {
-  flex-shrink: 0;
-  padding: 10px 16px 0;
-}
-.right-panel-pinned .panel-section {
-  margin-bottom: 0;
 }
 
 .right-panel-scroll {
@@ -1595,10 +1585,6 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 
   .right-panel-scroll {
     padding: 10px 12px 14px;
-  }
-
-  .right-panel-pinned {
-    padding: 8px 12px 0;
   }
 
   /* 窄栏下图标文字并排会挤，退化为图标 + 更小字号 */

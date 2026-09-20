@@ -35,6 +35,13 @@
 
     <!-- Body: always 200px scrollable window -->
     <div ref="bodyRef" class="sa-body">
+      <!-- Summarization notice inside sub-agent -->
+      <div v-if="entry.summarization" class="sa-summarize" :class="`is-${entry.summarization.kind}`">
+        <span v-if="entry.summarization.kind === 'running'" class="sa-sum-dot"></span>
+        <span v-else>🗜️</span>
+        <span>{{ summarizeText }}</span>
+      </div>
+
       <!-- Thinking block (only while running) -->
       <div v-if="entry.status === 'running' && entry.thinking?.trim()" class="sa-thinking-block">
         <div class="sa-thinking-header">
@@ -107,8 +114,24 @@ const statusClass = computed(() => {
 /** Text shown in done state: prefer full in-memory tokens, fallback to DB tokenPreview */
 const bodyText = computed(() => props.entry.tokens || props.entry.tokenPreview || '')
 
+const summarizeText = computed(() => {
+  const notice = props.entry.summarization
+  if (!notice) return ''
+  if (notice.kind === 'running') {
+    return notice.summarizedCount > 0
+      ? `正在压缩上下文（${notice.summarizedCount} 条历史）…`
+      : '正在压缩上下文…'
+  }
+  if (notice.kind === 'done') {
+    return `已压缩 ${notice.summarizedCount} 条历史，保留最近 ${notice.keptCount ?? 0} 条`
+  }
+  return notice.reason
+    ? `上下文压缩未完成（${notice.reason}），对话照常继续`
+    : '上下文压缩未完成，对话照常继续'
+})
+
 const hasContent = computed(() =>
-  !!(props.entry.thinking?.trim() || props.entry.innerToolCalls.length || props.entry.tokens),
+  !!(props.entry.thinking?.trim() || props.entry.innerToolCalls.length || props.entry.tokens || props.entry.summarization),
 )
 
 function formatDuration(ms: number) {
@@ -125,6 +148,7 @@ function scrollToBottom() {
 watch(() => props.entry.tokens, scrollToBottom)
 watch(() => props.entry.innerToolCalls.length, scrollToBottom)
 watch(() => props.entry.thinkCount, scrollToBottom)
+watch(() => props.entry.summarization, scrollToBottom)
 watch(() => props.entry.status, (newStatus) => {
   if (newStatus !== 'running') scrollToBottom()
 })
@@ -237,6 +261,51 @@ watch(() => props.entry.status, (newStatus) => {
   flex-shrink: 0;
 }
 .sa-enter-btn:hover { background: var(--el-color-primary-light-9); }
+
+/* Summarization notice inside sub-agent */
+.sa-summarize {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+  background: color-mix(in srgb, var(--el-fill-color-light) 82%, var(--el-color-primary) 8%);
+  border: 1px dashed color-mix(in srgb, var(--el-color-primary) 36%, var(--el-border-color));
+}
+.sa-summarize.is-done {
+  background: color-mix(in srgb, var(--el-fill-color-light) 86%, var(--el-color-success) 6%);
+  border-color: color-mix(in srgb, var(--el-color-success) 30%, var(--el-border-color));
+}
+.sa-summarize.is-failed {
+  background: color-mix(in srgb, var(--el-fill-color-light) 82%, var(--el-color-warning) 8%);
+  border-color: color-mix(in srgb, var(--el-color-warning) 36%, var(--el-border-color));
+}
+.sa-summarize.is-running {
+  border-style: solid;
+  animation: summarize-pulse 1.6s ease-in-out infinite;
+}
+.sa-sum-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--el-color-primary);
+  border-radius: 50%;
+  animation: pulse 1s infinite;
+  flex-shrink: 0;
+}
+@keyframes summarize-pulse {
+  0%, 100% { box-shadow: 0 0 0 transparent; }
+  50% { box-shadow: 0 0 10px color-mix(in srgb, var(--el-color-primary) 25%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sa-summarize.is-running,
+  .sa-sum-dot {
+    animation: none;
+  }
+}
 
 /* Body: always 200px fixed scrollable window */
 .sa-body {

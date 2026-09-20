@@ -3,7 +3,7 @@ import mimetypes
 from collections import deque
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -12,6 +12,7 @@ from lc_agent.db.models_auth import User, UserAgentAccess
 from lc_agent.server.auth_middleware import get_current_user
 from lc_agent.server.dependencies import get_db_session, get_engine, get_registry
 from lc_agent.tools.registry import ToolRegistry
+from lc_agent.utils.xlsx_preview import normalize_xlsx_for_preview
 
 router = APIRouter(tags=["tools"])
 
@@ -177,6 +178,16 @@ _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", "
 # 图片预览体积上限，超过则只提示不传输
 _IMAGE_READ_MAX_SIZE = 8 * 1024 * 1024  # 8 MB
 
+# 文档后缀 → MIME：前端按只读文档渲染，绕过二进制嗅探
+_DOCUMENT_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+# 文档预览体积上限，超过则只提示不传输；比文本上限宽松，因为只是透传字节不做解析
+_DOCUMENT_READ_MAX_SIZE = 32 * 1024 * 1024  # 32 MB
+
 # 文件管理操作中被忽略的目录名：新建/重命名时不允许落进这些目录
 _FORBIDDEN_ENTRY_NAMES = {"", ".", ".."}
 
@@ -255,22 +266,61 @@ async def read_file_content(
         return {"error": f"Not a file: {path}"}
 
     try:
-        size = file_path.stat().st_size
+        stat = file_path.stat()
     except OSError:
         return {"error": "Cannot stat file"}
+
+    # 所有分支都回传 mtime：前端靠轮询它发现文件被外部改动（Agent/VSCode/WPS 等一切写盘来源）
+    size = stat.st_size
+    mtime = stat.st_mtime
+
+    suffix = file_path.suffix.lower()
+
+    # 文档文件：返回 base64 data URL 供前端只读渲染，需在体积校验前分流，
+    # 否则会被通用文本上限（10MB）拦下
+    if suffix in _DOCUMENT_MIME_TYPES:
+        if size > _DOCUMENT_READ_MAX_SIZE:
+            return {
+                "file": str(file_path),
+                "document": True,
+                "document_too_large": True,
+                "size": size,
+                "mtime": mtime,
+            }
+        try:
+            import base64
+
+            raw = file_path.read_bytes()
+        except OSError as e:
+            return {"error": str(e)}
+        # xlsx 的绘图/批注部件需按预览组件能识别的形式归一化，见 lc_agent/utils/xlsx_preview.py
+        if suffix == ".xlsx":
+            raw = normalize_xlsx_for_preview(raw)
+        encoded = base64.b64encode(raw).decode("ascii")
+        return {
+            "file": str(file_path),
+            "document": True,
+            "document_kind": suffix.lstrip("."),
+            "document_too_large": False,
+            "size": size,
+            "mtime": mtime,
+            "data_url": f"data:{_DOCUMENT_MIME_TYPES[suffix]};base64,{encoded}",
+        }
+
     if size > _FILE_READ_MAX_SIZE:
         return {"error": f"File too large ({size} bytes, max {_FILE_READ_MAX_SIZE})"}
 
     max_lines = min(max_lines, _FILE_READ_MAX_LINES)
 
     # 图片文件：返回 base64 data URL 供前端直接渲染
-    if file_path.suffix.lower() in _IMAGE_EXTENSIONS:
+    if suffix in _IMAGE_EXTENSIONS:
         if size > _IMAGE_READ_MAX_SIZE:
             return {
                 "file": str(file_path),
                 "image": True,
                 "image_too_large": True,
                 "size": size,
+                "mtime": mtime,
             }
         try:
             import base64
@@ -285,6 +335,7 @@ async def read_file_content(
             "image": True,
             "image_too_large": False,
             "size": size,
+            "mtime": mtime,
             "data_url": f"data:{mime};base64,{encoded}",
         }
 
@@ -293,10 +344,10 @@ async def read_file_content(
         with file_path.open("rb") as fh:
             probe = fh.read(8192)
         if b"\x00" in probe:
-            return {"file": str(file_path), "binary": True}
+            return {"file": str(file_path), "binary": True, "size": size, "mtime": mtime}
         printable = sum(1 for b in probe if b == 9 or b == 10 or b == 13 or 32 <= b < 127 or b >= 128)
         if probe and printable / len(probe) < 0.7:
-            return {"file": str(file_path), "binary": True}
+            return {"file": str(file_path), "binary": True, "size": size, "mtime": mtime}
     except OSError as e:
         return {"error": str(e)}
 
@@ -320,10 +371,6 @@ async def read_file_content(
     newline = "crlf" if crlf_count and crlf_count >= lf_only else "lf"
 
     lines = text.split("\n")
-    try:
-        mtime = file_path.stat().st_mtime
-    except OSError:
-        mtime = 0.0
 
     return {
         "file": str(file_path),
@@ -343,6 +390,63 @@ async def read_file_content(
                   else f"文件超过 {max_lines} 行未全部加载，编辑会丢失后续内容")
         ),
     }
+
+
+class BatchStatPayload(BaseModel):
+    """批量查询文件状态的请求体：前端一次轮询多个文件的 mtime。"""
+
+    paths: list[str]
+
+
+@router.post("/tools/project/files/stat")
+async def stat_project_files(
+    payload: BatchStatPayload,
+    agent_id: str | None = None,
+    user: User = Depends(get_current_user),
+    engine: AgentEngine = Depends(get_engine),
+    db=Depends(get_db_session),
+):
+    """Return lightweight stat info (existence/size/mtime) for multiple files.
+
+    前端一次轮询多个已打开文件的 mtime，用最小的传输量发现外部改动。
+    路径解析与 /tools/file/read 完全一致：传 agent_id 时按项目根解析相对路径，
+    否则按系统工具白名单校验（聊天区的文件链接传的是绝对路径）。
+    """
+    from lc_agent.tools.system_tools._config import validate_read_path
+
+    project_root: Path | None = None
+    if agent_id:
+        try:
+            project_root = await _get_project_preview_root(agent_id, engine, user, db)
+        except PermissionError as e:
+            return {"error": str(e)}
+
+    results = []
+    for path in payload.paths:
+        try:
+            if project_root is not None:
+                resolved = _resolve_project_file_path(path, project_root)
+            else:
+                resolved = validate_read_path(path)
+        except PermissionError as e:
+            results.append({"path": path, "exists": False, "error": str(e)})
+            continue
+
+        file_path = Path(resolved)
+        try:
+            stat = file_path.stat()
+        except OSError:
+            results.append({"path": path, "exists": False})
+            continue
+
+        results.append({
+            "path": path,
+            "exists": True,
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+        })
+
+    return {"files": results}
 
 
 def _git_branch_info(project_root: Path) -> str | None:

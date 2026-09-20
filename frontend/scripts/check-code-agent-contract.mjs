@@ -42,10 +42,14 @@ assertContains(
   "currentModel.value = ''",
   "tools store must clear UI model for code agents",
 )
-assertNotContains(
+// default_model=custom 不许被当成运行时模型直接采纳：断言「守卫」本身存在。
+// 原先用「currentModel.value = defaultModel 后紧跟 return」的裸字符串做否定断言，
+// 但那段赋值在 defaultModel !== 'custom' 的 if 里是合法的，裸字符串会把带缩进的
+// 合法写法一起命中，导致误报。
+assertContains(
   "src/stores/tools.ts",
-  "currentModel.value = defaultModel\n      return",
-  "tools store must not blindly set default_model=custom as runtime model",
+  "if (defaultModel && defaultModel !== 'custom') {",
+  "tools store must guard default_model=custom before adopting it as runtime model",
 )
 assertContains(
   "src/components/layout/RightPanel.vue",
@@ -132,9 +136,18 @@ assertContains(
   "if (agentsStore.isCodeAgent) return '\u4ee3\u7801\u5185\u5b9a\u4e49'",
   "chat message model label must show graph-defined text for code agents",
 )
+// 会话恢复时不许把会话里存的模型套到代码智能体上。原先断言 App.vue 里
+// `if (sessionAgent?.source === 'code') {` 这一行字面量，但该逻辑已重构成
+// getSessionModelForAgent() / applySessionContext() 两处，变量名也换了，
+// 所以改成断言这两处「按 agent.source 判断」的守卫本身。
 assertContains(
   "src/App.vue",
-  "if (sessionAgent?.source === 'code') {",
+  "if (agent?.source === 'code') return ''",
+  "session restore must not adopt a stored model for code agents",
+)
+assertContains(
+  "src/App.vue",
+  "if (agentsStore.currentAgent?.source === 'code') {",
   "session restore must special-case code-agent stored model",
 )
 assertContains(

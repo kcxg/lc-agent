@@ -28,6 +28,7 @@
 
       <ToolField v-if="errorText" label="错误" :offset="isCollapsed ? 0 : 8">
         <div class="tf-error">{{ errorText }}</div>
+        <button v-if="isErrorTruncated" class="tf-link-btn" @click.stop="openErrorModal">错误已截断 · 共 {{ errorTotal }} 字符 · 看全文</button>
       </ToolField>
 
       <template v-else-if="hasDiff">
@@ -54,8 +55,9 @@
               {{ diffCollapsed ? `展开全部 (${totalLines} 行)` : '折叠' }}
             </button>
             <div class="tf-actions">
-              <button class="tf-link-btn" @click.stop="openFileModal(filePath)">看全文</button>
-              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板看</button>
+              <button class="tf-link-btn" @click.stop="openFileModal(filePath)">在弹框看全文</button>
+              <button class="tf-link-btn" @click.stop="openInEditorPanel">在文件面板查看</button>
+              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板查看</button>
             </div>
           </div>
         </ToolField>
@@ -88,8 +90,9 @@
               </div>
             </div>
             <div class="tf-actions">
-              <button class="tf-link-btn" @click.stop="openFileModal(filePath)">看全文</button>
-              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板看</button>
+              <button class="tf-link-btn" @click.stop="openFileModal(filePath)">在弹框看全文</button>
+              <button class="tf-link-btn" @click.stop="openInEditorPanel">在文件面板查看</button>
+              <button class="tf-link-btn" @click.stop="openInChangesPanel">在变更面板查看</button>
             </div>
           </div>
         </ToolField>
@@ -105,7 +108,7 @@
       :code="fileModalCode"
       :language="fileModalLang"
       :title="fileModalPath"
-      kicker="文件内容"
+      :kicker="fileModalKicker"
       :source-path="fileModalPath"
       @close="showFileModal = false"
     />
@@ -115,12 +118,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { fetchApi } from '@/api/http'
+import { useOpenedFilesStore } from '@/stores/opened-files'
 import { useUiStore } from '@/stores/ui'
 import type { ToolCall } from '@/stores/chat'
 import CodeBlockModal from '../CodeBlockModal.vue'
 import ToolField from './ToolField.vue'
 import {
-  baseName, formatDuration, shortPath, statusLabel, statusTagType, useToolCard,
+  baseName, clipForModal, formatDuration, shortPath, statusLabel, statusTagType, useToolCard,
 } from './useToolCard'
 
 const EXT_LANG_MAP: Record<string, string> = {
@@ -139,6 +143,8 @@ const props = defineProps<{
   collapsed?: boolean
   /** 'edit' = edit_block（红绿 diff），'write' = write_file（只贴新增行） */
   variant: 'edit' | 'write'
+  /** 该工具调用所在的对话轮次（用户消息序号），跳变更面板时定位用；未知则不传 */
+  round?: number | null
 }>()
 
 const { isCollapsed, toggleCollapse, liveElapsed, copyLabel, copyText, resultSizeText, tokenText } = useToolCard({
@@ -158,6 +164,7 @@ const showFileModal = ref(false)
 const fileModalCode = ref('')
 const fileModalLang = ref('')
 const fileModalPath = ref('')
+const fileModalKicker = ref('文件内容')
 const uiStore = useUiStore()
 
 const statusType = computed(() => statusTagType(props.toolCall.status))
@@ -216,6 +223,25 @@ const errorText = computed(() => {
   const firstTwo = text.split('\n').slice(0, 2).join('\n')
   return firstTwo.length > 300 ? `${firstTwo.slice(0, 300)}…` : firstTwo
 })
+
+const errorTotal = computed(() => (props.toolCall.result || '').trim().length)
+// 错误预览只显示前两行（且 300 字符内），超过就算截断
+const isErrorTruncated = computed(() => {
+  const tc = props.toolCall
+  if (tc.status !== 'error') return false
+  const text = (tc.result || '').trim()
+  if (!text) return false
+  const lines = text.split('\n')
+  return lines.length > 2 || lines.slice(0, 2).join('\n').length > 300
+})
+
+function openErrorModal(): void {
+  fileModalPath.value = filePath.value || '错误信息'
+  fileModalLang.value = 'text'
+  fileModalCode.value = clipForModal((props.toolCall.result || '').trim())
+  fileModalKicker.value = '错误信息'
+  showFileModal.value = true
+}
 
 interface DiffLine {
   type: 'context' | 'removed' | 'added'
@@ -295,6 +321,7 @@ async function openFileModal(path: string): Promise<void> {
     )
     fileModalPath.value = path
     fileModalLang.value = langFromPath(path)
+    fileModalKicker.value = '文件内容'
     if (data.error) {
       fileModalCode.value = `Error: ${data.error}`
       fileModalLang.value = 'text'
@@ -314,7 +341,15 @@ async function openFileModal(path: string): Promise<void> {
 
 function openInChangesPanel(): void {
   if (!filePath.value) return
-  uiStore.requestTab('changes', { filePath: filePath.value })
+  // round 未知时传 null（全部轮次），保证文件行能渲染出来可定位；
+  // 传 undefined 则保持面板现有轮次过滤，文件可能不在列表里导致定位不到
+  uiStore.requestTab('changes', { round: props.round ?? null, filePath: filePath.value })
+}
+
+/** 打开右侧「文件」面板并定位到该文件，可编辑、可查看外部改动提示 */
+function openInEditorPanel(): void {
+  if (!filePath.value) return
+  useOpenedFilesStore().open(filePath.value)
 }
 </script>
 

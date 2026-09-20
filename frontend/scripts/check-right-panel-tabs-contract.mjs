@@ -13,6 +13,7 @@ const badge = read('src/components/chat/FileChangesBadge.vue')
 const roundCard = read('src/components/chat/RoundFileChangesCard.vue')
 const fileCard = read('src/components/chat/tools/ToolFileCard.vue')
 const fileChangesPanel = read('src/components/panels/FileChangesPanel.vue')
+const fileEditorPane = read('src/components/panels/FileEditorPane.vue')
 
 const failures = []
 
@@ -25,10 +26,12 @@ function expectMatch(content, pattern, message) {
 }
 
 // 1. tab 按钮存在且顺序为 模型/能力/变更/(文件)/任务
-const tabOrder = ["'model'", "'abilities'", "'changes'", "'editor'", "'tasks'"]
+// 只按 tabs 列表的定义（id: 'xxx'）比顺序：文件别处也会出现这些裸字符串
+// （例如滚动容器的 :class="{ 'is-editor': activeTab === 'editor' }"），按裸字符串比对会误判
+const tabOrder = ['model', 'abilities', 'changes', 'editor', 'tasks']
 let cursor = -1
 for (const id of tabOrder) {
-  const at = rightPanel.indexOf(id)
+  const at = rightPanel.indexOf(`id: '${id}'`)
   expect(at >= 0, `RightPanel.vue 缺少 tab ${id}`)
   expect(at > cursor, `RightPanel.vue tab 顺序错误：${id} 位置不对`)
   cursor = at
@@ -117,6 +120,14 @@ expectMatch(
   /function loadActiveTab\(\)[\s\S]*return 'model'/,
   'ui store 默认 tab 必须回落到 model',
 )
+// 任务进度只属于任务 tab：不得放在跨 tab 置顶区，也不得残留置顶样式
+expect(!rightPanel.includes('right-panel-pinned'), 'RightPanel.vue 仍残留跨 tab 的待办置顶区（任务进度只能在任务 tab 内）')
+expect(
+  /<template v-if="activeTab === 'tasks'">[\s\S]*<TodoList :todos="chatStore\.todos"/.test(rightPanel),
+  '任务进度未收进任务 tab 内部',
+)
+expect(rightPanel.includes('<TodoList'), 'RightPanel.vue 未渲染任务进度 TodoList')
+expect(rightPanel.includes("import TodoList from '@/components/panels/TodoList.vue'"), 'RightPanel.vue 未导入 TodoList')
 expect(
   /const activeTab = ref<RightPanelTab>\(loadActiveTab\(\)\)/.test(uiStore),
   'ui store 初始化未读取记忆的 tab',
@@ -207,6 +218,11 @@ expect(rightPanel.includes('prefers-reduced-motion'), 'RightPanel.vue 缺少 red
 expect(fileChangesPanel.includes("changeSource === 'agent'"), 'FileChangesPanel.vue 缺少 Agent 修改源')
 expect(fileChangesPanel.includes("changeSource === 'git'"), 'FileChangesPanel.vue 缺少 Git Diff 源')
 expect(fileChangesPanel.includes('selectedRound'), 'FileChangesPanel.vue 缺少轮次筛选')
+
+// 「在文件中查看」：变更面板的文件行直接跳到文件编辑器看全文
+expect(fileChangesPanel.includes('open-file-btn'), 'FileChangesPanel.vue 缺少「在文件中查看」按钮')
+expect(fileChangesPanel.includes('openedFilesStore.open('), 'FileChangesPanel.vue 未通过 opened-files store 打开文件')
+expect(fileChangesPanel.includes('canOpenInEditor'), 'FileChangesPanel.vue 未排除已删除的文件（点了必然报错）')
 expect(fileChangesPanel.includes("'side-by-side'"), 'FileChangesPanel.vue 缺少 side-by-side diff 模式')
 expect(!fileChangesPanel.includes('el-drawer'), 'FileChangesPanel.vue 仍残留 el-drawer 外壳')
 expect(
@@ -319,6 +335,9 @@ expect(
   /async def _get_git_context\(session_id: str, user: User, db: AsyncSession, engine=None\)/.test(backendChanges),
   '后端 _get_git_context 未接收 engine 参数',
 )
+
+// 文件下拉与会话下拉同样放宽宽度，长文件名 + 状态标记放得下
+expect(/:width="320"/.test(fileEditorPane), 'FileEditorPane.vue 的文件下拉未放宽宽度')
 
 if (failures.length > 0) {
   console.error('右侧面板 Tab 契约测试失败:')

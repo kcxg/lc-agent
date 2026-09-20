@@ -5,19 +5,19 @@ from typing import Annotated, Any, AsyncIterator, Literal
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import TodoListMiddleware
-from langchain.agents.middleware.summarization import SummarizationMiddleware
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolCallId
 from langchain_core.tools import tool as lc_tool
 from pydantic import Field as _PydanticField
 
-from lc_agent.config import get_config_value
+from lc_agent.config import DEFAULT_MAX_SUBAGENT_DEPTH, DEFAULT_RECURSION_LIMIT, get_config_value
 from lc_agent.core.model_resolve import find_model, parse_models, resolve_request_model
 from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, _convert_text_file_blocks
 from lc_agent.core.engine_helpers.project_context import _build_project_context_text
 from lc_agent.skills.skill_middleware import _LcAgentSkillMiddleware
 from lc_agent.middlewares.patch_tool_calls import PatchToolCallsMiddleware
+from lc_agent.middlewares.summarization_events import NotifyingSummarizationMiddleware
 from lc_agent.core.engine_helpers.subagent_helpers import SubAgentDescriptor, _extract_subagent_result
 from lc_agent.core.http_trace import (
     HttpTraceCollector,
@@ -57,7 +57,7 @@ class AgentEngine:
         ] = {}
         self._agent_mcp_gen: dict[str, int] = {}
         self._mcp_generation: int = 0
-        self.recursion_limit: int = get_config_value(config, "agent.recursion_limit", 100)
+        self.recursion_limit: int = get_config_value(config, "agent.recursion_limit", DEFAULT_RECURSION_LIMIT)
         # Cache for project git/OS context text, keyed by resolved project_root.
         # Populated asynchronously in chat_stream; cleared on agent cache invalidation.
         self._project_ctx_text_cache: dict[str, str] = {}
@@ -158,7 +158,7 @@ class AgentEngine:
         depth: int,
         building_set: frozenset[str],
     ) -> dict[str, SubAgentDescriptor]:
-        max_depth = get_config_value(self.config, "agent.max_subagent_depth", 2)
+        max_depth = get_config_value(self.config, "agent.max_subagent_depth", DEFAULT_MAX_SUBAGENT_DEPTH)
         if depth >= max_depth:
             return {}
 
@@ -631,7 +631,7 @@ class AgentEngine:
         kwargs: dict[str, Any] = {"model": llm, "keep": keep, "trigger": trigger}
 
         try:
-            mw = SummarizationMiddleware(**kwargs)
+            mw = NotifyingSummarizationMiddleware(**kwargs)
             logger.info("SummarizationMiddleware enabled: trigger=%s, keep=%s", trigger, keep)
             return [mw]
         except Exception:

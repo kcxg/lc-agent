@@ -29,6 +29,12 @@ interface FileContent {
   image: boolean
   imageDataUrl: string
   imageTooLarge: boolean
+  // 文档文件（pdf/docx/xlsx/pptx）：渲染 documentDataUrl，只读
+  document: boolean
+  documentDataUrl: string
+  // 文档格式：pdf/docx/xlsx/pptx，决定前端用哪个预览组件
+  documentKind: string
+  documentTooLarge: boolean
   // ---- 编辑支持 ----
   // 相对未保存修改
   dirty: boolean
@@ -46,9 +52,17 @@ interface FileContent {
   saveError: string
   // 最近一次保存/加载时的内容基线，与 code 比较判断脏状态
   savedCode: string
+  // 磁盘上的内容已被外部改过（Agent 工具、脚本、VSCode、WPS 等）：编辑器里是旧内容，提示用户重新加载
+  externalChanged: boolean
+  // 触发 externalChanged 的那个磁盘版本 mtime：用来判断是否又变了，以及配合 dismissedMtime 去重
+  externalMtime: number
+  // 用户点过「保留我的内容」时已确认的磁盘 mtime：同一版本不再重复提示
+  dismissedMtime: number
 }
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif']
+// 只读文档预览：与后端 _DOCUMENT_MIME_TYPES 保持一致
+const DOCUMENT_EXTENSIONS = ['pdf', 'docx', 'xlsx', 'pptx']
 
 const EXT_LANG_MAP: Record<string, string> = {
   py: 'python', ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
@@ -71,6 +85,10 @@ function nameOf(path: string): string {
 
 function isImagePath(path: string): boolean {
   return IMAGE_EXTENSIONS.includes(extOf(path))
+}
+
+function isDocumentPath(path: string): boolean {
+  return DOCUMENT_EXTENSIONS.includes(extOf(path))
 }
 
 // 项目根 + 相对路径 → 绝对路径（分隔符跟随项目根风格）
@@ -139,8 +157,10 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
     return {
       code: '', truncated: false, loading: false, error: '', loaded: false,
       binary: false, image: false, imageDataUrl: '', imageTooLarge: false,
+      document: false, documentDataUrl: '', documentKind: '', documentTooLarge: false,
       dirty: false, saving: false, mtime: 0, newline: 'lf', hasBom: false,
       editable: false, readonlyReason: '', saveError: '', savedCode: '',
+      externalChanged: false, externalMtime: 0, dismissedMtime: 0,
       ...overrides,
     }
   }
@@ -179,11 +199,23 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
           image: true,
           imageDataUrl: data.data_url || '',
           imageTooLarge: !!data.image_too_large,
+          mtime: data.mtime ?? 0,
         })
         return
       }
       if (data.binary) {
-        contents.value[file.path] = emptyContent({ loaded: true, binary: true })
+        contents.value[file.path] = emptyContent({ loaded: true, binary: true, mtime: data.mtime ?? 0 })
+        return
+      }
+      if (data.document) {
+        contents.value[file.path] = emptyContent({
+          loaded: true,
+          document: true,
+          documentDataUrl: data.data_url || '',
+          documentKind: data.document_kind || extOf(file.path),
+          documentTooLarge: !!data.document_too_large,
+          mtime: data.mtime ?? 0,
+        })
         return
       }
       contents.value[file.path] = emptyContent({
@@ -396,6 +428,175 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
     c.dirty = nextCode !== c.savedCode
   }
 
+  /** 归一化成可比较的绝对路径形态（统一分隔符、去盘符大小写差异） */
+  function normalizePath(p: string): string {
+    const unified = (p || '').replace(/\\/g, '/').replace(/\/+$/, '')
+    return /^[a-zA-Z]:/.test(unified) ? unified.toLowerCase() : unified
+  }
+
+  /**
+   * Agent 写盘后调用：把磁盘上已变的文件标记为「外部改动」。
+   * 事件里的路径是绝对路径，标签里存的可能是项目相对路径，两种形态都比。
+   */
+  function markExternalChanged(absolutePath: string) {
+    if (!absolutePath) return
+    const target = normalizePath(absolutePath)
+    for (const file of files.value) {
+      const candidates = [
+        normalizePath(file.sourcePath),
+        normalizePath(toAbsolute(file.path)),
+        normalizePath(file.path),
+      ]
+      if (!candidates.includes(target)) continue
+      const c = contents.value[file.path]
+      // 内容还没加载或已卸载，无从比较，等下次加载自然拿到新内容
+      if (!c?.loaded) continue
+      c.externalChanged = true
+    }
+  }
+
+  /** 用户选择保留本地编辑：清标记并把当前磁盘版本记为「已确认」，同一版本不再重复提示 */
+  function dismissExternalChanged(path: string) {
+    const c = contents.value[path]
+    if (!c) return
+    c.externalChanged = false
+    // -1 表示事件埋点先于轮询触发、此刻还不知道磁盘版本，由下次轮询吸收
+    c.dismissedMtime = c.externalMtime > 0 ? c.externalMtime : -1
+  }
+
+  // ---- 外部改动轮询 ----
+  // 事件埋点只能覆盖 Agent 走写入工具的情况（脚本生成、VSCode/WPS 编辑都不发事件），
+  // 轮询 mtime 与来源无关，因此叠加这层兜底。空转时指数退避，发现改动后回到高频。
+  const POLL_MIN_MS = 1000
+  const POLL_MAX_MS = 30000
+  // mtime 容差：文件系统精度差异会造成无意义的判定
+  const MTIME_EPSILON = 0.001
+
+  let pollTimer: ReturnType<typeof setTimeout> | null = null
+  let pollDelay = POLL_MIN_MS
+  let polling = false
+  // 上一轮参与轮询的文件集合：集合变化说明用户又打开了文件，应当立刻回到高频
+  let lastTargetsKey = ''
+
+  function sameMtime(a: number, b: number): boolean {
+    return Math.abs(a - b) < MTIME_EPSILON
+  }
+
+  /** 只有真正展示了内容的文件才值得轮询：二进制占位、超限提示都没有可过期的旧内容 */
+  function hasPollableContent(c: FileContent | undefined): boolean {
+    if (!c || !c.loaded || c.error) return false
+    if (c.binary || c.imageTooLarge || c.documentTooLarge) return false
+    if (c.image) return !!c.imageDataUrl
+    if (c.document) return !!c.documentDataUrl
+    return true
+  }
+
+  function stopPolling() {
+    polling = false
+    if (pollTimer !== null) {
+      clearTimeout(pollTimer)
+      pollTimer = null
+    }
+  }
+
+  function schedulePoll() {
+    if (!polling) return
+    if (pollTimer !== null) clearTimeout(pollTimer)
+    pollTimer = setTimeout(() => { void pollOnce() }, pollDelay)
+  }
+
+  async function pollOnce() {
+    pollTimer = null
+    if (!polling) return
+    // 页面不可见时停摆，由 visibilitychange 唤醒，避免后台标签白白发请求
+    if (document.hidden) return
+
+    const agentId = agentsStore.currentAgentId
+    if (!agentId) { schedulePoll(); return }
+
+    // 一次轮询所有已打开且展示了内容的文件，而不是只查 active 那一个
+    const targets = files.value.filter(f => {
+      const c = contents.value[f.path]
+      return hasPollableContent(c) && c!.mtime > 0
+    })
+    if (targets.length === 0) {
+      // 没有可比对的目标：不消耗退避额度，等有内容后再开始计时
+      lastTargetsKey = ''
+      schedulePoll()
+      return
+    }
+
+    // 文件集合变了（新开了标签）：立刻回到高频，别让新文件等满一个退避周期
+    const targetsKey = targets.map(f => f.path).join('\n')
+    if (targetsKey !== lastTargetsKey) {
+      lastTargetsKey = targetsKey
+      pollDelay = POLL_MIN_MS
+    }
+
+    let newlyFlagged = false
+    try {
+      const res = await api.statFiles(agentId, targets.map(f => f.path))
+      for (const info of res.files ?? []) {
+        const c = contents.value[info.path]
+        if (!c?.loaded) continue
+
+        // 文件被删除或移走：磁盘上没有可比对的版本，内容必然已过期
+        if (!info.exists) {
+          if (!c.externalChanged) {
+            c.externalChanged = true
+            c.externalMtime = 0
+            newlyFlagged = true
+          }
+          continue
+        }
+
+        const diskMtime = info.mtime ?? 0
+        if (diskMtime <= 0) continue
+        if (sameMtime(diskMtime, c.mtime)) continue
+        // 用户刚点过「保留我的内容」但当时还不知道磁盘版本：把这一版吸收为已确认
+        if (c.dismissedMtime === -1) { c.dismissedMtime = diskMtime; continue }
+        if (c.dismissedMtime > 0 && sameMtime(diskMtime, c.dismissedMtime)) continue
+        if (c.externalMtime > 0 && sameMtime(diskMtime, c.externalMtime)) continue
+
+        if (!c.externalChanged) newlyFlagged = true
+        c.externalChanged = true
+        c.externalMtime = diskMtime
+      }
+      // 发现改动后回到高频，便于捕捉 Agent 的连续写入；否则逐步退避
+      pollDelay = newlyFlagged ? POLL_MIN_MS : Math.min(pollDelay * 2, POLL_MAX_MS)
+    } catch {
+      // 网络或权限异常不打断轮询，按退避继续，避免错误下的请求风暴
+      pollDelay = Math.min(pollDelay * 2, POLL_MAX_MS)
+    }
+    schedulePoll()
+  }
+
+  function startPolling() {
+    if (polling) return
+    polling = true
+    pollDelay = POLL_MIN_MS
+    schedulePoll()
+  }
+
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      stopPolling()
+      return
+    }
+    if (files.value.length === 0) return
+    startPolling()
+    // 回到前台立刻补查一次，而不是等下一个退避周期
+    void pollOnce()
+  }
+
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+
+  // 有打开的文件才轮询；标签全部关掉就停下
+  watch([files, () => agentsStore.currentAgentId], () => {
+    if (files.value.length > 0 && agentsStore.currentAgentId) startPolling()
+    else stopPolling()
+  }, { immediate: true })
+
   /** 保存当前文件；成功后更新 mtime 并清除脏标记 */
   async function save(path: string): Promise<{ ok?: boolean; error?: string; conflict?: boolean }> {
     const c = contents.value[path]
@@ -421,6 +622,10 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
       c.mtime = result.mtime ?? c.mtime
       c.dirty = false
       c.savedCode = c.code
+      // 写入后编辑器内容就是磁盘内容，过期提示与已确认版本都失效
+      c.externalChanged = false
+      c.externalMtime = 0
+      c.dismissedMtime = 0
       return { ok: true }
     } catch (e: any) {
       c.saveError = e.message || '保存失败'
@@ -438,6 +643,7 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
     jumpLine,
     contentOf,
     isImagePath,
+    isDocumentPath,
     open,
     activate,
     close,
@@ -454,6 +660,8 @@ export const useOpenedFilesStore = defineStore('openedFiles', () => {
     consumeJumpLine,
     refresh,
     markDirty,
+    markExternalChanged,
+    dismissExternalChanged,
     save,
   }
 })

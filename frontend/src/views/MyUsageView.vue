@@ -1,9 +1,13 @@
 <template>
-  <div class="my-usage usage-page">
-    <div class="page-header">
-      <h2>我的用量</h2>
-    </div>
-
+  <el-dialog
+    v-model="visible"
+    title="我的用量"
+    width="min(1180px, 94vw)"
+    top="5vh"
+    class="usage-page app-usage-dialog"
+    :close-on-click-modal="false"
+  >
+    <div class="my-usage">
     <div class="filter-bar">
       <el-date-picker
         v-model="range"
@@ -74,13 +78,16 @@
         </template>
       </el-table-column>
     </el-table>
-  </div>
+    </div>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, type UsageSummaryRow, type UsageTotals } from '@/api/http'
+
+const visible = ref(false)
 
 const today = new Date().toISOString().slice(0, 10)
 const monthStart = today.slice(0, 8) + '01'
@@ -155,17 +162,19 @@ async function load() {
   }
 }
 
-onMounted(load)
+async function open() {
+  visible.value = true
+  await load()
+}
+
+defineExpose({ open })
 </script>
 
 <style scoped>
 .my-usage {
-  padding: 20px 28px;
+  padding: 4px 4px 0;
   max-width: 1080px;
   margin: 0 auto;
-}
-.page-header h2 {
-  margin: 0 0 16px;
 }
 .filter-bar {
   display: flex;

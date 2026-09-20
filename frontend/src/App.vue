@@ -38,6 +38,8 @@
         @open-settings="openCleanupDialog"
         @change-password="openChangePassword"
         @go-admin="goAdmin"
+        @go-usage-admin="openUsageAdmin"
+        @go-my-usage="openMyUsage"
         @logout="handleLogout"
       />
 
@@ -52,6 +54,10 @@
           v-if="isChatRoute"
           @activate="handleTabActivate"
           @close="handleTabClose"
+          @close-others="handleTabCloseOthers"
+          @close-to-right="handleTabCloseToRight"
+          @close-all="handleTabCloseAll"
+          @delete="handleSessionDeleted"
         />
         <router-view />
       </main>
@@ -76,6 +82,9 @@
     <CleanupDialog ref="cleanupDialogRef" @cleaned="handleCleanupDone" />
     <ChangePasswordDialog ref="changePasswordRef" />
     <AutomationDrawer ref="automationDrawerRef" />
+    <AdminView ref="adminViewRef" />
+    <UsageAdminView ref="usageAdminViewRef" />
+    <MyUsageView ref="myUsageViewRef" />
     </div>
   </ConfigProvider>
 </template>
@@ -104,6 +113,9 @@ import AgentManagerDialog from '@/components/dialogs/AgentManagerDialog.vue'
 import CleanupDialog from '@/components/dialogs/CleanupDialog.vue'
 import ChangePasswordDialog from '@/components/dialogs/ChangePasswordDialog.vue'
 import AutomationDrawer from '@/components/automation/AutomationDrawer.vue'
+import AdminView from '@/views/AdminView.vue'
+import UsageAdminView from '@/views/UsageAdminView.vue'
+import MyUsageView from '@/views/MyUsageView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 
@@ -127,6 +139,9 @@ const agentManagerRef = ref<InstanceType<typeof AgentManagerDialog>>()
 const cleanupDialogRef = ref<InstanceType<typeof CleanupDialog>>()
 const changePasswordRef = ref<InstanceType<typeof ChangePasswordDialog>>()
 const automationDrawerRef = ref<InstanceType<typeof AutomationDrawer>>()
+const adminViewRef = ref<InstanceType<typeof AdminView>>()
+const usageAdminViewRef = ref<InstanceType<typeof UsageAdminView>>()
+const myUsageViewRef = ref<InstanceType<typeof MyUsageView>>()
 const sidebarCollapsed = ref(false)
 const rightCollapsed = ref(false)
 const mobileLeftOpen = ref(false)
@@ -159,6 +174,16 @@ watch(() => uiStore.rightPanelOpenRequest, () => {
     return
   }
   rightCollapsed.value = false
+})
+
+// 跨组件请求切到文件树（编辑器「定位」）：收起状态下自动展开左侧面板，移动端则打开左侧抽屉
+watch(() => uiStore.sidebarOpenRequest, () => {
+  if (window.innerWidth <= 900) {
+    mobileRightOpen.value = false
+    mobileLeftOpen.value = true
+    return
+  }
+  sidebarCollapsed.value = false
 })
 
 async function initApp() {
@@ -388,6 +413,51 @@ async function handleSessionDeleted(sessionId: string) {
   await handleSwitchSession(nextId)
 }
 
+/** 释放一批已关闭标签占用的缓存（chat 管线 + UI 状态 + 文件变更桶） */
+function releaseClosedTabs(ids: string[]) {
+  for (const id of ids) {
+    chatStore.releaseSession(id)
+    chatUiStateStore.clearSession(id)
+    useFileChangesStore().dropSession(id)
+  }
+}
+
+/**
+ * 关闭其他/关闭右侧/关闭全部后统一善后主区：
+ * 被关掉的会话若正是当前 thread，则切到新激活标签或回首页。
+ */
+async function settleAfterBatchClose() {
+  const currentThread = chatStore.threadId
+  const activeId = sessionTabsStore.activeTabId
+  if (currentThread && currentThread === activeId) return
+  if (!activeId) {
+    await router.push({ name: 'home' })
+    return
+  }
+  await handleSwitchSession(activeId)
+}
+
+/** 关闭右键标签之外的全部标签 */
+async function handleTabCloseOthers(sessionId: string) {
+  const removed = sessionTabsStore.closeOthers(sessionId)
+  releaseClosedTabs(removed)
+  await settleAfterBatchClose()
+}
+
+/** 关闭右键标签右侧的全部标签 */
+async function handleTabCloseToRight(sessionId: string) {
+  const removed = sessionTabsStore.closeToRight(sessionId)
+  releaseClosedTabs(removed)
+  await settleAfterBatchClose()
+}
+
+/** 关闭全部标签，回首页空态（会话本身仍留在侧边栏，未被删除） */
+async function handleTabCloseAll() {
+  const removed = sessionTabsStore.closeAll()
+  releaseClosedTabs(removed)
+  await router.push({ name: 'home' })
+}
+
 async function handleAgentChange(agentId: string) {
   await agentsStore.selectAgent(agentId)
   const sessionModel = getSessionModelForAgent(agentId)
@@ -416,7 +486,15 @@ function openChangePassword() {
 }
 
 function goAdmin() {
-  router.push('/admin')
+  adminViewRef.value?.open()
+}
+
+function openUsageAdmin() {
+  usageAdminViewRef.value?.open()
+}
+
+function openMyUsage() {
+  myUsageViewRef.value?.open()
 }
 
 function handleLogout() {

@@ -146,11 +146,14 @@ async def _check_sse_auth(request: Request, thread_id: str) -> JSONResponse | No
             result = await _db.execute(sa_select(SessionMeta).where(SessionMeta.id == thread_id))
             session_meta = result.scalar_one_or_none()
             if session_meta:
-                # Deny if session has owner and it's not this user
-                if session_meta.user_id and session_meta.user_id != user.id and user.role != "admin":
+                # 会话按账号隔离：admin 也不例外。
+                # 未配 auth 的单机模式（__anonymous__）保持原样。
+                if user.id == "__anonymous__":
+                    pass
+                elif not session_meta.user_id:
+                    # 无主会话（user_id=""）：只有单机模式可进，登录用户一律拒绝
                     return JSONResponse(status_code=403, content={"detail": "权限不足"})
-                # For sessions with no owner (user_id=""), only admin can access
-                if not session_meta.user_id and user.role != "admin":
+                elif session_meta.user_id != user.id:
                     return JSONResponse(status_code=403, content={"detail": "权限不足"})
         finally:
             await _db.close()
@@ -522,7 +525,8 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                     if len(usage_rounds) > prev_len:
                         usage_rounds[-1]["duration_ms"] = int((time.time() - round_start_time) * 1000)
                         round_start_time = time.time()
-                        yield stream_utils.format_sse_event("llm_usage", usage_rounds[-1])
+                        if not stream_utils.is_summarize_usage_row(usage_rounds[-1]):
+                            yield stream_utils.format_sse_event("llm_usage", usage_rounds[-1])
 
                     if time.time() - last_event_time > 15:
                         yield stream_utils.SSE_HEARTBEAT
@@ -573,8 +577,9 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                     yield stream_utils.format_sse_event("content", {"content": marker})
 
             done_payload: dict[str, Any] = {}
-            if usage_rounds:
-                done_payload["usage"] = usage_rounds
+            chat_usage = stream_utils.split_chat_usage_rounds(usage_rounds)
+            if chat_usage:
+                done_payload["usage"] = chat_usage
             if http_traces:
                 done_payload["http_traces"] = http_traces
 
@@ -594,7 +599,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                     [{"type": "text", "text": "".join(content_parts)}],
                     tool_calls=tool_calls or None,
                     usage={
-                        "rounds": usage_rounds,
+                        "rounds": chat_usage,
                         "tool_call_count": len(tool_calls),
                         "total_duration_ms": int((time.time() - stream_start_time) * 1000),
                     },
@@ -847,7 +852,8 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                     if len(usage_rounds) > prev_len:
                         usage_rounds[-1]["duration_ms"] = int((time.time() - round_start_time) * 1000)
                         round_start_time = time.time()
-                        yield stream_utils.format_sse_event("llm_usage", usage_rounds[-1])
+                        if not stream_utils.is_summarize_usage_row(usage_rounds[-1]):
+                            yield stream_utils.format_sse_event("llm_usage", usage_rounds[-1])
 
                     if time.time() - last_event_time > 15:
                         yield stream_utils.SSE_HEARTBEAT
@@ -906,8 +912,9 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                     content_parts.append(marker)
                     yield stream_utils.format_sse_event("content", {"content": marker})
             done_payload: dict[str, Any] = {"is_resume": True}
-            if usage_rounds:
-                done_payload["usage"] = usage_rounds
+            resume_chat_usage = stream_utils.split_chat_usage_rounds(usage_rounds)
+            if resume_chat_usage:
+                done_payload["usage"] = resume_chat_usage
             if http_traces:
                 done_payload["http_traces"] = http_traces
 
@@ -926,7 +933,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 await persistence.append_to_last_assistant_message(
                     thread_id, new_content,
                     all_tool_calls=tool_calls or None,
-                    usage_rounds=usage_rounds or None,
+                    usage_rounds=resume_chat_usage or None,
                     http_traces=http_traces or None,
                     resume_duration_ms=int((time.time() - stream_start_time) * 1000),
                 )

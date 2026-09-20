@@ -84,6 +84,60 @@ def _is_subagent_tool_end(
     return bool(active_subagent_tool_call_ids and tool_call_id in active_subagent_tool_call_ids)
 
 
+def _is_summarization_llm_event(event: dict) -> bool:
+    """识别 SummarizationMiddleware 内部摘要 LLM 调用的流事件。
+
+    摘要调用的 checkpoint_ns 形如
+    ``NotifyingSummarizationMiddleware.before_model:<uuid>``，
+    metadata 带 ``lc_source=summarization``。这类事件不属于正文：
+    token 不渲染、用量另行标记，压缩本身走 summarization_* 自定义事件。
+    """
+    kind = event.get("event", "")
+    if kind not in ("on_chat_model_stream", "on_chat_model_end", "on_chat_model_start"):
+        return False
+    metadata = event.get("metadata") or {}
+    if metadata.get("lc_source") == "summarization":
+        return True
+    checkpoint_ns = metadata.get("langgraph_checkpoint_ns", "") or ""
+    for seg in checkpoint_ns.split("|"):
+        seg_name = seg.split(":", 1)[0]
+        if "SummarizationMiddleware" in seg_name:
+            return True
+    return False
+
+
+def _sanitize_summarize_reason(reason: Any) -> str:
+    """消毒压缩失败原因，保证能安全塞进 HTML 注释 marker。"""
+    text = str(reason or "")
+    # 注释终结符与起始符必须破坏掉，否则会切开 <!-- --> 导致解析错乱
+    text = text.replace("-->", "--〉").replace("<!--", "〈!--")
+    # marker 是单行注释，换行全部压成空格
+    text = " ".join(text.split())
+    return text[:100]
+
+
+def _sanitize_summarize_count(value: Any) -> int:
+    """压缩计数只接受非负整数，其他一律归零，避免 marker 格式被污染。"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0
+
+
+def is_summarize_usage_row(row: dict) -> bool:
+    """判断一行 usage 是否为摘要调用（不进正文轮次、不进前端面板）。"""
+    return row.get("source") == "summarize"
+
+
+def split_chat_usage_rounds(usage_rounds: list[dict]) -> list[dict]:
+    """从混合 usage 里摘出正文轮次（过滤摘要行），供 SSE/前端/历史回放用。
+
+    DB 落库（record_usage）用全量，展示侧用这个过滤后的。
+    """
+    return [r for r in usage_rounds if not is_summarize_usage_row(r)]
+
+
 def format_sse_event(event_type: str, data: dict) -> str:
     """Format a single SSE event frame.
 
@@ -116,6 +170,11 @@ def convert_stream_event(
     sa_tool_call_id = _extract_subagent_tool_call_id(checkpoint_ns)
     is_in_subagent = sa_tool_call_id is not None
     kind = event.get("event", "")
+
+    if _is_summarization_llm_event(event):
+        # SummarizationMiddleware 内部的摘要 LLM 调用：不属于正文，不转 token，
+        # 不计用量（用量侧同样跳过）。压缩本身通过 summarization_* 自定义事件通知。
+        return results
 
     if kind == "on_chat_model_stream":
         chunk = event.get("data", {}).get("chunk")
@@ -336,6 +395,23 @@ def convert_stream_event(
                 "session_id": data.get("session_id", ""),
                 "git_base_hash": data.get("git_base_hash", ""),
             }))
+        elif custom_name == "summarization_start":
+            results.append(("summarization_start", {
+                "tool_call_id": sa_tool_call_id or "",
+                "summarized_count": _sanitize_summarize_count(data.get("summarized_count", 0)),
+                "total_count": _sanitize_summarize_count(data.get("total_count", 0)),
+            }))
+        elif custom_name == "summarization_done":
+            results.append(("summarization_done", {
+                "tool_call_id": sa_tool_call_id or "",
+                "summarized_count": _sanitize_summarize_count(data.get("summarized_count", 0)),
+                "kept_count": _sanitize_summarize_count(data.get("kept_count", 0)),
+            }))
+        elif custom_name == "summarization_failed":
+            results.append(("summarization_failed", {
+                "tool_call_id": sa_tool_call_id or "",
+                "reason": _sanitize_summarize_reason(data.get("reason", "")),
+            }))
 
     return results
 
@@ -358,6 +434,10 @@ def accumulate_display_state(
     checkpoint_ns = _get_checkpoint_ns(event)
     sa_tool_call_id = _extract_subagent_tool_call_id(checkpoint_ns)
     is_in_subagent = sa_tool_call_id is not None
+
+    if _is_summarization_llm_event(event):
+        # 摘要 LLM 自己的输出：不进正文 content_parts，不留痕
+        return in_thinking
 
     if kind == "on_chat_model_stream":
         chunk = event.get("data", {}).get("chunk")
@@ -527,6 +607,24 @@ def accumulate_display_state(
         data = event.get("data", {})
         if not isinstance(data, dict):
             return in_thinking
+        if custom_name in ("summarization_done", "summarization_failed"):
+            # 子 Agent 内部压缩走子会话留痕（subagent_tracker），这里跳过，
+            # 避免写进主会话 content_parts 造成串会话。
+            if is_in_subagent:
+                return in_thinking
+            # 压缩留痕：写一条 marker 进正文，随消息一起入库，历史回放可渲染。
+            summarized = _sanitize_summarize_count(data.get("summarized_count", 0))
+            if custom_name == "summarization_done":
+                kept = _sanitize_summarize_count(data.get("kept_count", 0))
+                content_parts.append(
+                    f"\n<!--SUMMARIZE:{summarized}:{kept}-->\n"
+                )
+            else:
+                reason = _sanitize_summarize_reason(data.get("reason", ""))
+                content_parts.append(
+                    f"\n<!--SUMMARIZE_FAIL:{reason}-->\n"
+                )
+            return in_thinking
         if custom_name not in ("file_edit_diff", "file_write_preview"):
             return in_thinking
         if is_in_subagent:
@@ -611,6 +709,15 @@ def accumulate_usage(
     if kind != "on_chat_model_end":
         return
 
+    if _is_summarization_llm_event(event):
+        # 摘要调用单独记 source="summarize"，不混入正文轮次
+        _append_summarization_usage(
+            event, usage_rounds,
+            default_model_id=default_model_id,
+            model_map=model_map,
+        )
+        return
+
     checkpoint_ns = _get_checkpoint_ns(event)
     sub_id = _extract_subagent_tool_call_id(checkpoint_ns)
 
@@ -690,6 +797,60 @@ def accumulate_usage(
             "raw_model_id": getattr(info, "raw_model_id", "") if info else "",
             "provider": getattr(info, "provider", "") if info else "",
         })
+
+
+def _append_summarization_usage(
+    event: dict,
+    usage_rounds: list[dict],
+    *,
+    default_model_id: str = "",
+    model_map: dict | None = None,
+) -> None:
+    """摘要 LLM 调用的用量：单独记一行，带 source 标记，不混入正文轮次。
+
+    下游 record_usage 按行内 source 分流落库（chat/title/summarize/automation），
+    统计页可单独展示或过滤。子会话内的压缩按 role=sub 归属子会话，
+    与普通调用的归属规则一致（token_stats.md §9 第 12 条）。
+    """
+    checkpoint_ns = _get_checkpoint_ns(event)
+    sub_id = _extract_subagent_tool_call_id(checkpoint_ns)
+    output = event.get("data", {}).get("output")
+    model_id = resolve_model_identity(event, default_model_id, model_map)
+    info = (model_map or {}).get(model_id) if model_map else None
+
+    def _get(obj: Any, key: str, default: int = 0) -> int:
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    meta = getattr(output, "usage_metadata", None) if output else None
+    input_t = output_t = total_t = cache_read = cache_write = reasoning = 0
+    if meta:
+        input_t = _get(meta, "input_tokens", 0) or _get(meta, "prompt_tokens", 0)
+        output_t = _get(meta, "output_tokens", 0) or _get(meta, "completion_tokens", 0)
+        total_t = _get(meta, "total_tokens", 0) or (input_t + output_t)
+        details = _get(meta, "input_token_details", None) or {}
+        cache_read = _get(details, "cache_read", 0)
+        cache_write = _get(details, "cache_creation", 0)
+        out_details = _get(meta, "output_token_details", None) or {}
+        reasoning = _get(out_details, "reasoning", 0)
+
+    usage_rounds.append({
+        "input_tokens": input_t or 0,
+        "output_tokens": output_t or 0,
+        "total_tokens": total_t or 0,
+        "cache_read_tokens": cache_read or 0,
+        "cache_write_tokens": cache_write or 0,
+        "reasoning_tokens": reasoning or 0,
+        "role": "sub" if sub_id else "main",
+        "sub_session_id": sub_id or "",
+        "model_id": model_id,
+        "raw_model_id": getattr(info, "raw_model_id", "") if info else "",
+        "provider": getattr(info, "provider", "") if info else "",
+        "source": "summarize",
+    })
 
 
 def categorize_error(error: Exception) -> dict:

@@ -1,6 +1,7 @@
 """Token 用量统计 API（docs/tasks/token_stats.md §5）。
 
-/admin/usage/* 全部 require_admin；/me/usage 走普通登录态且 user_id 服务端强制锁定。
+会话按账号隔离：/admin/usage/* 也只能查自己的（require_admin 只管能不能进管理页，
+不管能看谁的数据）；/me/usage 走普通登录态且 user_id 服务端强制锁定。
 金额在查询时按当时生效价计算（§3.2），未配价显示 null（前端渲染 `—`，绝不用 0）。
 """
 
@@ -150,13 +151,19 @@ async def admin_usage_summary(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """通用聚合，group_by 支持多值组合（user,agent,model_id,raw_model_id,bucket）。"""
+    """通用聚合。admin 也只能看自己的（会话隔离）。
+
+    user 维度强制锁为当前用户：防横向看别人；不接受 group_by=user 传参。
+    """
     date_from, date_to = _parse_range(from_d, to_d)
     dims = _parse_group_by(group_by)
+    if "user" in dims:
+        raise HTTPException(status_code=422, detail="管理页用量不支持按用户分组（会话已按账号隔离）")
     repo = UsageRepository(db)
     rows = await repo.summary(
         date_from=date_from, date_to=date_to,
         group_by=dims, granularity=granularity, include_sub=include_sub,
+        user_id=user.id,
     )
     rows = await _annotate_cost(db, rows, granularity, dims)
     return {
@@ -195,12 +202,13 @@ async def admin_usage_totals(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """全局总量（看板顶部卡片：token 合计 / 活跃人数 / 调用次数）。"""
+    """全局总量（看板顶部卡片：token 合计 / 调用次数）。会话隔离：只统计当前用户。"""
     date_from, date_to = _parse_range(from_d, to_d)
     repo = UsageRepository(db)
-    totals = await repo.totals(date_from=date_from, date_to=date_to, include_sub=include_sub)
+    totals = await repo.totals(date_from=date_from, date_to=date_to, include_sub=include_sub, user_id=user.id)
     totals["cost"], totals["unpriced_models"] = await _compute_total_cost(
         repo, db, date_from=date_from, date_to=date_to, include_sub=include_sub,
+        user_id=user.id,
     )
     return totals
 
@@ -213,12 +221,13 @@ async def admin_usage_by_user(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """按人小计（token 求和 + 调用次数 + 金额）。"""
+    """当前用户小计（会话隔离：只返回自己一行，按用户分组已无意义，保留端点防旧前端 404）。"""
     date_from, date_to = _parse_range(from_d, to_d)
     repo = UsageRepository(db)
     rows = await repo.summary(
         date_from=date_from, date_to=date_to,
         group_by=["user"], granularity="month", include_sub=include_sub,
+        user_id=user.id,
     )
     rows = await _annotate_cost(db, rows, "month", ["user"])
     rows.sort(key=lambda x: x["input_tokens"] + x["output_tokens"], reverse=True)
@@ -233,12 +242,13 @@ async def admin_usage_by_agent(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """按 agent 小计，支持含/仅主 agent 开关。"""
+    """按 agent 小计（会话隔离：只统计当前用户），支持含/仅主 agent 开关。"""
     date_from, date_to = _parse_range(from_d, to_d)
     repo = UsageRepository(db)
     rows = await repo.summary(
         date_from=date_from, date_to=date_to,
         group_by=["agent"], granularity="month", include_sub=include_sub,
+        user_id=user.id,
     )
     rows = await _annotate_cost(db, rows, "month", ["agent"])
     rows.sort(key=lambda x: x["input_tokens"] + x["output_tokens"], reverse=True)
@@ -254,13 +264,14 @@ async def admin_usage_top_sessions(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """消费最高的会话（按金额降序）。"""
+    """消费最高的会话（会话隔离：只列当前用户的）。"""
     date_from, date_to = _parse_range(from_d, to_d)
     repo = UsageRepository(db)
     return {
         "rows": await repo.top_sessions(
             date_from=date_from, date_to=date_to,
             limit=limit, include_sub=include_sub,
+            user_id=user.id,
         )
     }
 
@@ -271,7 +282,14 @@ async def admin_usage_session_detail(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """下钻：该会话每次调用明细。"""
+    """下钻：该会话每次调用明细。会话隔离：只能看自己的会话。"""
+    from lc_agent.db.models import SessionMeta
+
+    sess = await db.get(SessionMeta, session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if sess.user_id != user.id:
+        raise HTTPException(status_code=403, detail="权限不足")
     repo = UsageRepository(db)
     return {"rows": await repo.session_detail(session_id)}
 
@@ -286,13 +304,16 @@ async def admin_usage_export_csv(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """CSV 导出，参数同 summary，含用户名/agent 名/金额。"""
+    """CSV 导出（会话隔离：只导出当前用户的），参数同 summary，含用户名/agent 名/金额。"""
     date_from, date_to = _parse_range(from_d, to_d)
     dims = _parse_group_by(group_by)
+    if "user" in dims:
+        raise HTTPException(status_code=422, detail="管理页用量不支持按用户分组（会话已按账号隔离）")
     repo = UsageRepository(db)
     rows = await repo.summary(
         date_from=date_from, date_to=date_to,
         group_by=dims, granularity=granularity, include_sub=include_sub,
+        user_id=user.id,
     )
     rows = await _annotate_cost(db, rows, granularity, dims)
     for r in rows:

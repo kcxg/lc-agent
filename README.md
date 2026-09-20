@@ -64,8 +64,13 @@
 
 ![桌面端对话界面](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc01.png)
 
-**可观测性：HTTP 追踪 + Token 面板 + 工具调用**
+**项目文件树，文件编辑功能，轻量ide** （说明：项目模式的agent，才会显示项目文件树）
+![项目文件树](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/filetree.png)
 
+**ai办公截图,excel word ppt pdf ai编辑，和前端查看**
+![ai办公截图](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/ppt.png)
+
+**可观测性：HTTP 追踪 + Token 面板 + 工具调用**
 ![HTTP追踪与Token面板](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/pc02.png)
 
 **智能体管理**
@@ -478,6 +483,8 @@ lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以�
 lc-agent既是产品又是框架， 是给希望开发agent人员用的，或者对agent开发感兴趣，或者对ai为什么能编程写代码有兴趣的人员用的。是给希望自定义开发agent的，尤其是使用langchain开发agent的人 用的。 里面的很多功能都是对观测llm行为有巨大帮助的，看下lc-agent的前端界面就知道了，里面有大量的功能是帮助看清和llm交互的详细过程，而不是简单的像`openwebui`那样给普通非码农用的普通聊天网页。从lc-agent前端就能很清楚知道到底和llm是怎么交互的，codex traework qoder是黑盒的，不方便你看到底层交互原理。
 
 codex是给普通码农编程用的，如果你对开发自己的agent毫无兴需求和兴趣，对和llm交互毫无兴趣，对ai原理毫无兴趣，只是希望用ai来完成写普通业务项目代码，那当然直接用codex就可以了。
+
+lc-agent 是综合了openwebui openclaw trae-ide workbuddy 的功能，能bs方式部署，也能单机本机cs部署。
 
 ## License
 

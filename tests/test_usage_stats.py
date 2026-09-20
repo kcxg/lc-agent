@@ -488,23 +488,44 @@ async def test_summary_merges_models_when_not_grouped(db_env):
 
 @pytest.mark.asyncio
 async def test_admin_summary_api(app_with_usage):
+    """admin 视图也只能看自己的：_seed_usage 的 alice/bob 行对 testadmin 不可见。"""
+    from lc_agent.db.engine import get_async_session
+    from lc_agent.db.models_usage import LlmUsage as U
+
     app, headers = app_with_usage
+    # 给当前登录用户（test-admin）种一行用量
+    session = get_async_session(app.config["database"]["url"])
+    try:
+        session.add(U(run_id="r-admin-1", seq=0, user_id="test-admin", session_id="s-admin",
+                      model_id="m-a", raw_model_id="base-a", provider="p", role="main",
+                      input_tokens=1000, output_tokens=100))
+        await session.commit()
+    finally:
+        await session.close()
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(
             "/api/admin/usage/summary",
-            params={"from": "2000-01-01", "to": "2099-12-31", "group_by": "user,bucket,model_id", "granularity": "month"},
+            params={"from": "2000-01-01", "to": "2099-12-31", "group_by": "bucket,model_id", "granularity": "month"},
             headers=headers,
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data["rows"]) >= 2
+        # 只有 test-admin 自己的一行，alice/bob 的不可见
+        assert len(data["rows"]) == 1
         for row in data["rows"]:
             assert "cost" in row
-        # m-a 配了价 → 金额算得出；m-b 没配 → None
+        # m-a 配了价 → 金额算得出
         costs = {r["model_id"]: r["cost"] for r in data["rows"]}
         assert costs["m-a"] is not None
-        assert costs["m-b"] is None
+
+        # 按用户分组已被隔离机制拒绝
+        resp = await client.get(
+            "/api/admin/usage/summary",
+            params={"from": "2000-01-01", "to": "2099-12-31", "group_by": "user", "granularity": "month"},
+            headers=headers,
+        )
+        assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -537,8 +558,22 @@ async def test_admin_endpoints_require_admin(app_with_usage):
 
 @pytest.mark.asyncio
 async def test_pricing_post_then_summary_shows_cost(app_with_usage):
-    """录价后金额从 — 变为有值；有消耗的维度缺价则整体仍为 —。单行制 upsert 可覆盖。"""
+    """录价后金额从 — 变为有值；有消耗的维度缺价则整体仍为 —。单行制 upsert 可覆盖。
+
+    隔离后 admin 视图只查自己：先给 test-admin 种一行 m-b 用量，再验证录价前后变化。
+    """
+    from lc_agent.db.engine import get_async_session
+    from lc_agent.db.models_usage import LlmUsage as U
+
     app, headers = app_with_usage
+    session = get_async_session(app.config["database"]["url"])
+    try:
+        session.add(U(run_id="r-admin-b", seq=0, user_id="test-admin", session_id="s-admin-b",
+                      model_id="m-b", raw_model_id="base-b", provider="p", role="main",
+                      input_tokens=2_000_000, output_tokens=200_000))
+        await session.commit()
+    finally:
+        await session.close()
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # 只配 input：m-b 的 output 有消耗但没价 → 金额仍是 —
@@ -553,6 +588,7 @@ async def test_pricing_post_then_summary_shows_cost(app_with_usage):
             params={"from": "2000-01-01", "to": "2099-12-31", "group_by": "model_id", "granularity": "month"},
             headers=headers,
         )
+        assert resp.status_code == 200
         costs = {r["model_id"]: r["cost"] for r in resp.json()["rows"]}
         assert costs["m-b"] is None
 
@@ -585,26 +621,41 @@ async def test_merged_rows_report_unpriced_models(app_with_usage):
 
     此前归并只回 cost=None，前端拿不到模型名 → 页面显示 — 却没有提示；
     现在每行（含归并行）都带 unpriced_models，summary / totals 响应顶层再带一份汇总。
+
+    会话隔离后 admin 视图只查自己：给 test-admin 种 m-a（配价）+ m-b（未配价）两行，
+    验证归并行仍带未配价名单。
     """
+    from lc_agent.db.engine import get_async_session
+    from lc_agent.db.models_usage import LlmUsage as U
+
     app, headers = app_with_usage
+    session = get_async_session(app.config["database"]["url"])
+    try:
+        session.add(U(run_id="r-admin-a", seq=0, user_id="test-admin", session_id="s-admin-a",
+                      model_id="m-a", raw_model_id="base-a", provider="p", role="main",
+                      input_tokens=1_000_000, output_tokens=100_000))
+        session.add(U(run_id="r-admin-b2", seq=0, user_id="test-admin", session_id="s-admin-b2",
+                      model_id="m-b", raw_model_id="base-b", provider="p", role="main",
+                      input_tokens=2_000_000, output_tokens=200_000))
+        await session.commit()
+    finally:
+        await session.close()
     transport = ASGITransport(app=app.fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(
             "/api/admin/usage/summary",
-            params={"from": "2000-01-01", "to": "2099-12-31", "group_by": "user", "granularity": "month"},
+            params={"from": "2000-01-01", "to": "2099-12-31", "group_by": "bucket", "granularity": "month"},
             headers=headers,
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data["rows"]) == 2  # alice / bob 各一行（已归并）
-        for row in data["rows"]:
-            assert "model_id" not in row  # 归并行不带模型列
-            assert "unpriced_models" in row
-        by_user = {r["user"]: r for r in data["rows"]}
-        assert by_user["alice"]["cost"] is not None
-        assert by_user["alice"]["unpriced_models"] == []
-        assert by_user["bob"]["cost"] is None
-        assert by_user["bob"]["unpriced_models"] == ["m-b"]
+        # 同月同用户归并成一行（隔离后只有 test-admin 自己的行）
+        assert len(data["rows"]) == 1
+        row = data["rows"][0]
+        assert "model_id" not in row  # 归并行不带模型列
+        assert "unpriced_models" in row
+        assert row["cost"] is None  # m-b 没配价 → 整行 —
+        assert row["unpriced_models"] == ["m-b"]
         assert data["unpriced_models"] == ["m-b"]
 
         resp = await client.get(

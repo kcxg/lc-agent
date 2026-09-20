@@ -1,5 +1,31 @@
 <template>
   <div v-if="tabs.length > 0" class="session-tabs">
+    <!-- 下拉列表：横向被挤出去的标签在这里也能找到；顺序与标签栏完全一致 -->
+    <TabListMenu
+      label="会话"
+      tone="indigo"
+      :items="tabMenuItems"
+      :width="320"
+      @select="emit('activate', $event)"
+      @close="emit('close', $event)"
+    >
+      <template #mark="{ item }">
+        <span v-if="item.streaming" class="session-tab-spinner" title="正在生成中" />
+        <span v-else-if="item.unseen" class="session-tab-dot is-unseen" title="已完成，尚未查看" />
+        <svg v-else-if="item.pinned" class="session-tab-pin" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" fill="currentColor" />
+        </svg>
+      </template>
+
+      <!-- 标签胶囊窄，放不下 Agent 名；下拉列表里空间够，补上来源便于区分不同 Agent 的会话 -->
+      <template #extra="{ item }">
+        <span v-if="item.agentName" class="session-tab-agent" :title="`Agent：${item.agentName}`">
+          <span class="session-tab-agent-icon" aria-hidden="true">{{ item.agentIcon }}</span>
+          <span class="session-tab-agent-name">{{ item.agentName }}</span>
+        </span>
+      </template>
+    </TabListMenu>
+
     <div ref="barRef" class="session-tabs-bar" role="tablist" aria-label="已打开的会话">
       <div
         v-for="tab in tabs"
@@ -11,6 +37,7 @@
         :title="tab.title"
         @click="emit('activate', tab.id)"
         @auxclick.middle.prevent="emit('close', tab.id)"
+        @contextmenu.prevent="openTabMenu($event, tab.id)"
       >
         <span
           v-if="tab.streaming"
@@ -22,6 +49,10 @@
           class="session-tab-dot is-unseen"
           title="已完成，尚未查看"
         />
+        <!-- 置顶标识：与侧边栏的置顶状态同源，便于在标签栏直接看出哪些已置顶 -->
+        <svg v-if="tab.pinned" class="session-tab-pin" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" fill="currentColor" />
+        </svg>
         <span class="session-tab-title">{{ tab.title }}</span>
         <button
           type="button"
@@ -42,30 +73,66 @@
         </button>
       </div>
     </div>
+
+    <!-- 标签右键菜单：teleport 到 body，复用全局 .code-ctx-menu 样式 -->
+    <teleport to="body">
+      <div
+        v-if="menuVisible"
+        ref="menuEl"
+        class="code-ctx-menu"
+        :style="menuStyle"
+        role="menu"
+        @contextmenu.prevent
+      >
+        <button class="code-ctx-item" role="menuitem" @click="menuClose">关闭</button>
+        <button class="code-ctx-item" role="menuitem" @click="menuCloseOthers">关闭其他</button>
+        <button class="code-ctx-item" role="menuitem" @click="menuCloseToRight">关闭右侧</button>
+        <button class="code-ctx-item" role="menuitem" @click="menuCloseAll">关闭全部</button>
+        <button class="code-ctx-item" role="menuitem" @click="menuTogglePin">
+          {{ menuTab?.pinned ? '取消置顶' : '置顶' }}
+        </button>
+        <button class="code-ctx-item" role="menuitem" @click="menuRename">重命名</button>
+        <button class="code-ctx-item is-danger" role="menuitem" @click="menuDelete">删除</button>
+      </div>
+    </teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSessionTabsStore } from '@/stores/session-tabs'
+import { useAgentsStore } from '@/stores/agents'
+import { getAgentIcon } from '@/utils/agentIcon'
 
 interface TabView {
   id: string
   title: string
+  // 所属 Agent 的展示名与图标：标签胶囊里放不下，只在下拉列表里显示
+  agentName: string
+  agentIcon: string
   streaming: boolean
   unseen: boolean
+  pinned: boolean
 }
 
 const emit = defineEmits<{
   activate: [id: string]
   close: [id: string]
+  // 批量关闭只上报意图，由 App 统一做标签与资源释放，避免绕过缓存清理
+  closeOthers: [id: string]
+  closeToRight: [id: string]
+  closeAll: []
+  // 会话已删除，交由 App 善后主区（与侧边栏删除同一入口）
+  delete: [id: string]
 }>()
 
 const chatStore = useChatStore()
 const sessionsStore = useSessionsStore()
 const tabsStore = useSessionTabsStore()
+const agentsStore = useAgentsStore()
 
 const activeTabId = computed(() => tabsStore.activeTabId)
 const barRef = ref<HTMLElement | null>(null)
@@ -73,31 +140,176 @@ const barRef = ref<HTMLElement | null>(null)
 const tabs = computed<TabView[]>(() =>
   tabsStore.openTabIds.map((id) => {
     const session = sessionsStore.sessions.find(s => s.id === id)
+    const agent = session ? agentsStore.agents.find(a => a.id === session.agent_id) ?? null : null
     return {
       id,
       title: session?.title || '新对话',
+      agentName: session ? agentsStore.getAgentName(session.agent_id) : '',
+      agentIcon: getAgentIcon(agent),
       streaming: chatStore.isSessionStreaming(id),
       unseen: sessionsStore.isCompletedUnseen(id),
+      pinned: !!session?.is_pinned,
     }
   }),
 )
 
+// 下拉列表直接映射 tabs，保证列表顺序、标题、状态标记与标签栏同源
+const tabMenuItems = computed(() => tabs.value.map(tab => ({
+  key: tab.id,
+  title: tab.title,
+  active: tab.id === activeTabId.value,
+  agentName: tab.agentName,
+  agentIcon: tab.agentIcon,
+  streaming: tab.streaming,
+  unseen: tab.unseen,
+  pinned: tab.pinned,
+})))
+
+// ---- 右键菜单 ----
+const menuVisible = ref(false)
+const menuX = ref(0)
+const menuY = ref(0)
+// 用 id 而非对象快照，菜单项始终读最新会话状态（置顶文案要跟着变）
+const menuTabId = ref('')
+const menuEl = ref<HTMLElement | null>(null)
+
+const menuTab = computed(() => tabs.value.find(t => t.id === menuTabId.value) ?? null)
+const menuStyle = computed(() => ({ left: `${menuX.value}px`, top: `${menuY.value}px` }))
+
+function openTabMenu(e: MouseEvent, id: string) {
+  const MENU_W = 176
+  // 7 个菜单项，与 .code-ctx-item 的行高一致
+  const MENU_H = 7 * 31 + 8
+  menuTabId.value = id
+  menuX.value = Math.min(e.clientX, window.innerWidth - MENU_W - 8)
+  menuY.value = Math.min(e.clientY, window.innerHeight - MENU_H - 8)
+  menuVisible.value = true
+}
+
+function closeTabMenu() {
+  menuVisible.value = false
+}
+
+// 动作统一先取走 id 并关菜单，避免异步确认框期间菜单残留
+function menuClose() {
+  const id = menuTabId.value
+  closeTabMenu()
+  if (id) emit('close', id)
+}
+
+function menuCloseOthers() {
+  const id = menuTabId.value
+  closeTabMenu()
+  if (id) emit('closeOthers', id)
+}
+
+function menuCloseToRight() {
+  const id = menuTabId.value
+  closeTabMenu()
+  if (id) emit('closeToRight', id)
+}
+
+function menuCloseAll() {
+  closeTabMenu()
+  emit('closeAll')
+}
+
+/** 置顶/取消置顶：复用侧边栏同一入口，状态两边同源 */
+async function menuTogglePin() {
+  const tab = menuTab.value
+  closeTabMenu()
+  if (!tab) return
+  await sessionsStore.setPinned(tab.id, !tab.pinned)
+}
+
+async function menuRename() {
+  const tab = menuTab.value
+  closeTabMenu()
+  if (!tab) return
+  const result = await ElMessageBox.prompt('输入新的会话标题', '重命名会话', {
+    inputValue: tab.title,
+    confirmButtonText: '保存',
+    cancelButtonText: '取消',
+  }).catch(() => null)
+  if (!result) return
+  const nextTitle = result.value.trim()
+  if (!nextTitle) return
+  await sessionsStore.updateTitle(tab.id, nextTitle)
+}
+
+/** 删除会话：与侧边栏一致，warning 二次确认后删除 */
+async function menuDelete() {
+  const tab = menuTab.value
+  closeTabMenu()
+  if (!tab) return
+  const confirmed = await ElMessageBox.confirm('确认删除该会话吗？', '删除会话', {
+    type: 'warning',
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+  }).catch(() => null)
+  if (!confirmed) return
+  // deleteSession 内部已摘除标签，随后上报让 App 释放缓存并切换主区
+  await sessionsStore.deleteSession(tab.id)
+  emit('delete', tab.id)
+}
+
+function onDocumentPointerDown(e: MouseEvent) {
+  const target = e.target
+  if (menuEl.value && target instanceof Node && menuEl.value.contains(target)) return
+  closeTabMenu()
+}
+
+function onDocumentKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeTabMenu()
+}
+
+function onWindowResize() {
+  closeTabMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+  document.addEventListener('keydown', onDocumentKeydown)
+  window.addEventListener('resize', onWindowResize)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+  document.removeEventListener('keydown', onDocumentKeydown)
+  window.removeEventListener('resize', onWindowResize)
+  tabBarObserver?.disconnect()
+})
+
 /** 激活标签变化时滚进可视区，避免激活的标签被挤在可视范围外 */
-watch(activeTabId, async () => {
-  await nextTick()
+function ensureActiveTabVisible() {
   const bar = barRef.value
   if (!bar) return
   const el = bar.querySelector<HTMLElement>('.session-tab.is-active')
   if (!el) return
-  const left = el.offsetLeft
-  const right = left + el.offsetWidth
-  const viewLeft = bar.scrollLeft
-  const viewRight = viewLeft + bar.clientWidth
-  if (left < viewLeft) {
-    bar.scrollLeft = left
-  } else if (right > viewRight) {
-    bar.scrollLeft = right - bar.clientWidth
+  // 用 rect 差值算偏移：标签栏自身有内边距，拿 offsetLeft 比会带上固定误差
+  const barRect = bar.getBoundingClientRect()
+  const tabRect = el.getBoundingClientRect()
+  if (tabRect.left < barRect.left) {
+    bar.scrollLeft -= barRect.left - tabRect.left
+  } else if (tabRect.right > barRect.right) {
+    bar.scrollLeft += tabRect.right - barRect.right
   }
+}
+
+watch(activeTabId, async () => {
+  await nextTick()
+  ensureActiveTabVisible()
+})
+
+// 会话标签栏宽度变化（拖动面板分隔条、窗口缩放）时激活标签可能被挤出视野，
+// 窗口 resize 事件抓不到拖分隔条，所以直接观察标签栏自身尺寸
+let tabBarObserver: ResizeObserver | null = null
+watch(barRef, (bar) => {
+  tabBarObserver?.disconnect()
+  tabBarObserver = null
+  if (!bar || typeof ResizeObserver === 'undefined') return
+  tabBarObserver = new ResizeObserver(() => ensureActiveTabVisible())
+  tabBarObserver.observe(bar)
 })
 </script>
 
@@ -105,6 +317,7 @@ watch(activeTabId, async () => {
 .session-tabs {
   display: flex;
   align-items: center;
+  gap: 6px;
   flex-shrink: 0;
   padding: 6px 10px;
   border-bottom: 1px solid var(--el-border-color-lighter);
@@ -115,7 +328,9 @@ watch(activeTabId, async () => {
   display: flex;
   align-items: center;
   gap: 4px;
-  width: 100%;
+  /* 左侧让位给下拉按钮：自身可收缩，滚动仍留在这一层 */
+  flex: 1;
+  min-width: 0;
   padding: 4px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 14px;
@@ -175,6 +390,14 @@ watch(activeTabId, async () => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+}
+
+/* 置顶标识：与文件标签的图钉同一造型，激活态继承白色 */
+.session-tab-pin {
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  opacity: 0.85;
 }
 
 /* 与侧边栏一致：带彗尾的旋转弧。固定用 success 绿，
@@ -240,8 +463,49 @@ watch(activeTabId, async () => {
   height: 11px;
 }
 
+/* 下拉列表里的 Agent：图标 + 名字的弱化胶囊，激活项里跟随靛蓝色相；
+   名字超长用省略号，不挤掉标题 */
+.session-tab-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 132px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 11%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  opacity: 0.85;
+}
+
+.session-tab-agent-icon {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.session-tab-agent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-tab-close:hover {
   background: color-mix(in srgb, currentColor 22%, transparent);
   opacity: 1;
+}
+</style>
+
+<style>
+/* 右键菜单 teleport 到 body，菜单容器样式来自 FileEditorPane 的全局 .code-ctx-*；
+   这里只补「删除」这类危险项的颜色变体 */
+.code-ctx-item.is-danger {
+  color: var(--el-color-danger);
+}
+
+.code-ctx-item.is-danger:hover {
+  background: color-mix(in srgb, var(--el-color-danger) 12%, transparent);
+  color: var(--el-color-danger);
 }
 </style>

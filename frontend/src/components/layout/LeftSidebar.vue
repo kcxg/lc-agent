@@ -10,7 +10,7 @@
               class="view-switch-btn"
               :class="{ active: sidebarView === 'chats' }"
               :aria-selected="sidebarView === 'chats'"
-              @click="sidebarView = 'chats'"
+              @click="uiStore.setSidebarView('chats')"
             >
               <svg class="view-switch-icon" viewBox="0 0 16 16" aria-hidden="true">
                 <path
@@ -29,7 +29,7 @@
               class="view-switch-btn"
               :class="{ active: sidebarView === 'files' }"
               :aria-selected="sidebarView === 'files'"
-              @click="sidebarView = 'files'"
+              @click="uiStore.setSidebarView('files')"
             >
               <svg class="view-switch-icon" viewBox="0 0 16 16" aria-hidden="true">
                 <path
@@ -205,15 +205,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { InputInstance } from 'element-plus'
+import { storeToRefs } from 'pinia'
 import { ArrowUp } from '@element-plus/icons-vue'
 import { useSessionsStore, type Session } from '@/stores/sessions'
 import { useAgentsStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
-import { useRouter } from 'vue-router'
+import { useUiStore } from '@/stores/ui'
+import { getAgentIcon } from '@/utils/agentIcon'
 import FileTreePanel from '@/components/panels/FileTreePanel.vue'
 
 const props = defineProps<{ collapsed: boolean; panelWidth?: number }>()
+
+const uiStore = useUiStore()
 
 const sessionsStore = useSessionsStore()
 const agentsStore = useAgentsStore()
@@ -238,13 +242,13 @@ const emit = defineEmits<{
   openSettings: []
   changePassword: []
   goAdmin: []
+  goUsageAdmin: []
+  goMyUsage: []
   logout: []
 }>()
 
-const router = useRouter()
-
-// 侧栏视图：会话列表 / 项目文件树
-const sidebarView = ref<'chats' | 'files'>('chats')
+// 侧栏视图：会话列表 / 项目文件树。状态放 ui store，编辑器「定位」「面包屑」等外部入口也要切它
+const { sidebarView } = storeToRefs(uiStore)
 const isProjectMode = computed(() => agentsStore.currentAgent?.project_mode ?? false)
 
 // 切到非项目模式 agent 时文件视图没有意义，自动回到会话列表
@@ -258,9 +262,9 @@ function handleSettingsCommand(command: string) {
   } else if (command === 'admin') {
     emit('goAdmin')
   } else if (command === 'my-usage') {
-    router.push('/me/usage')
+    emit('goMyUsage')
   } else if (command === 'usage-admin') {
-    router.push('/admin/usage')
+    emit('goUsageAdmin')
   } else if (command === 'cleanup') {
     emit('openSettings')
   } else if (command === 'logout') {
@@ -289,16 +293,6 @@ interface SidebarGroup {
   badgeText: string
   visibleSessions: Session[]
   hiddenCount: number
-}
-
-function getAgentIcon(agent: { id: string; source: string; project_mode?: boolean } | null): string {
-  if (!agent) return '🤖'
-  if (agent.project_mode) return '📁'
-  if (agent.source === 'code') return '⚙️'
-  if (agent.id === 'chat') return '💬'
-  if (agent.id === 'empty') return '🧩'
-  if (agent.source === 'builtin') return '✨'
-  return '🤖'
 }
 
 function loadCollapsedGroups() {

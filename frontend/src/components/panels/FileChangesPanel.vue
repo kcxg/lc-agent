@@ -115,6 +115,15 @@
           <el-tooltip content="复制路径" placement="top" :show-after="300">
             <button class="copy-path-btn" @click="copyPath(file.file_path, $event)" aria-label="复制文件路径">📋</button>
           </el-tooltip>
+          <el-tooltip v-if="canOpenInEditor(file)" content="在文件中查看" placement="top" :show-after="300">
+            <button type="button" class="open-file-btn" aria-label="在文件中查看" @click.stop="openInEditor(file)">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 1.8h5.1L12.5 5.2v9H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                <path d="M9 1.8v3.4h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                <path d="M6.1 8.4h4.2M6.1 10.9h4.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              </svg>
+            </button>
+          </el-tooltip>
           <span v-if="file.edit_count > 1" class="edit-count">×{{ file.edit_count }}</span>
         </div>
 
@@ -178,6 +187,15 @@
               <el-tooltip content="复制路径" placement="top" :show-after="300">
                 <button class="copy-path-btn" @click.stop="copyPath(file.file_path, $event)" aria-label="复制文件路径">📋</button>
               </el-tooltip>
+              <el-tooltip v-if="canOpenInEditor(file)" content="在文件中查看" placement="top" :show-after="300">
+                <button type="button" class="open-file-btn" aria-label="在文件中查看" @click.stop="openInEditor(file)">
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M4 1.8h5.1L12.5 5.2v9H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                    <path d="M9 1.8v3.4h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                    <path d="M6.1 8.4h4.2M6.1 10.9h4.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </el-tooltip>
             </div>
             <div v-if="expandedFiles.has(`${sub.sub_session_id}:${file.file_path}`)" class="file-diff-container">
               <div v-if="loadingDiffs.has(`${sub.sub_session_id}:${file.file_path}`)" class="diff-loading">
@@ -196,8 +214,9 @@
     </div>
 
     <div v-if="changeSource === 'git'" class="git-view">
-      <div v-if="gitDiffLoading" class="diff-loading">
+      <div v-if="gitDiffLoading" class="diff-loading git-loading">
         <el-icon class="is-loading"><Loading /></el-icon> 加载 Git 文件列表...
+        <span class="git-stopwatch is-running" title="本次加载已用时间"><span class="sw-dot"></span>⏱ {{ formatGitElapsed(gitDiffElapsedMs) }}</span>
       </div>
       <div v-else-if="gitDiffError" class="git-diff-error">{{ gitDiffError }}</div>
       <div v-else-if="gitDiffFiles.length === 0" class="diff-empty">当前基准下没有可显示的文件变更</div>
@@ -206,6 +225,7 @@
           <span>{{ gitDiffFiles.length }} 个文件</span>
           <span class="git-additions">+{{ gitTotalAdditions }}</span>
           <span class="git-deletions">-{{ gitTotalDeletions }}</span>
+          <span v-if="gitDiffElapsedMs > 0" class="git-stopwatch is-done" :title="`本次加载用时`">⏱ {{ formatGitElapsed(gitDiffElapsedMs) }}</span>
         </div>
         <div class="git-diff-file-list">
           <div
@@ -237,6 +257,15 @@
                 <span v-if="file.additions" class="git-additions">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions">-{{ file.deletions }}</span>
               </span>
+              <el-tooltip v-if="canOpenInEditor(file)" content="在文件中查看" placement="top" :show-after="300">
+                <button type="button" class="open-file-btn" aria-label="在文件中查看" @click.stop="openInEditor(file)">
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M4 1.8h5.1L12.5 5.2v9H4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                    <path d="M9 1.8v3.4h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+                    <path d="M6.1 8.4h4.2M6.1 10.9h4.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </el-tooltip>
             </div>
             <div v-if="expandedGitFiles.has(file.file_path)" class="file-diff-container">
               <div v-if="loadingGitFiles.has(file.file_path)" class="diff-loading">
@@ -257,9 +286,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import { useFileChangesStore } from '@/stores/file-changes'
+import { useOpenedFilesStore } from '@/stores/opened-files'
 import { useSessionsStore } from '@/stores/sessions'
 import { useUiStore } from '@/stores/ui'
 import { api } from '@/api/http'
@@ -270,6 +300,7 @@ import 'diff2html/bundles/css/diff2html.min.css'
 const store = useFileChangesStore()
 const sessionsStore = useSessionsStore()
 const uiStore = useUiStore()
+const openedFilesStore = useOpenedFilesStore()
 
 type ChangeSource = 'agent' | 'git'
 type GitBaseline = 'session' | 'head' | 'staged' | 'commit'
@@ -283,6 +314,32 @@ const fileDiffs = reactive<Record<string, string>>({})
 
 const gitDiffLoading = ref(false)
 const gitDiffError = ref('')
+const gitDiffElapsedMs = ref(0)
+let gitDiffStartTs = 0
+let gitDiffTimer: ReturnType<typeof setInterval> | null = null
+
+function startGitStopwatch() {
+  stopGitStopwatch()
+  gitDiffStartTs = Date.now()
+  gitDiffElapsedMs.value = 0
+  gitDiffTimer = setInterval(() => {
+    gitDiffElapsedMs.value = Date.now() - gitDiffStartTs
+  }, 50)
+}
+
+function stopGitStopwatch() {
+  if (gitDiffTimer !== null) {
+    clearInterval(gitDiffTimer)
+    gitDiffTimer = null
+  }
+}
+
+/** 0.0s 起跳：不足 1s 显示一位小数，超过显示 x.xs */
+function formatGitElapsed(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+onBeforeUnmount(() => stopGitStopwatch())
 const gitBaseline = ref<GitBaseline>('session')
 const gitBaselineLabel = ref('')
 const selectedCommit = ref('')
@@ -322,6 +379,22 @@ function getFileDir(path: string): string {
   if (parts.length <= 1) return ''
   parts.pop()
   return parts.join('/')
+}
+
+/** 「在文件中查看」的目标路径：移动过的文件原路径已不存在，打开它的新位置 */
+function editorPathOf(file: { file_path: string; change_type: string; move_destination?: string }): string {
+  if (file.change_type === 'move' && file.move_destination) return file.move_destination
+  return file.file_path
+}
+
+/** 删除的文件磁盘上已经没有了，给它留按钮只会点了报错 */
+function canOpenInEditor(file: { change_type: string }): boolean {
+  return file.change_type !== 'delete'
+}
+
+/** 切到右侧「文件」面板并在编辑器里打开：open() 内部会切 tab，并展开收起的面板 */
+function openInEditor(file: { file_path: string; change_type: string; move_destination?: string }) {
+  openedFilesStore.open(editorPathOf(file))
 }
 
 async function copyPath(path: string, event: Event) {
@@ -391,6 +464,9 @@ watch(() => uiStore.activeTab, async (tab) => {
 
 async function handlePendingOpenFile(path: string) {
   store.pendingOpenFile = null
+  // 工具卡片点进来时强制切回 Agent 视图：之前停在 Git Diff 上会定位不到
+  changeSource.value = 'agent'
+  await nextTick()
   if (!expandedFiles.has(path)) await toggleExpand(path)
   await nextTick()
   try {
@@ -537,6 +613,7 @@ async function loadGitDiff() {
   gitDiffLoading.value = true
   gitDiffError.value = ''
   gitDiffFiles.value = []
+  startGitStopwatch()
   expandedGitFiles.clear()
   Object.keys(gitFileDiffs).forEach(key => delete gitFileDiffs[key])
   Object.keys(gitRawFileDiffs).forEach(key => delete gitRawFileDiffs[key])
@@ -556,6 +633,8 @@ async function loadGitDiff() {
   } catch (e: any) {
     gitDiffError.value = e.message || '请求失败'
   } finally {
+    gitDiffElapsedMs.value = Date.now() - gitDiffStartTs
+    stopGitStopwatch()
     gitDiffLoading.value = false
   }
 }
@@ -772,7 +851,8 @@ watch(changeSource, (source) => {
   min-width: 0;
 }
 
-.copy-path-btn {
+.copy-path-btn,
+.open-file-btn {
   display: none;
   align-items: center;
   justify-content: center;
@@ -782,25 +862,34 @@ watch(changeSource, (source) => {
   border: none;
   background: transparent;
   cursor: pointer;
-  color: var(--el-text-color-secondary);
+  color: var(--el-text-color-regular);
   border-radius: 4px;
   flex-shrink: 0;
-  opacity: 0.5;
-  transition: opacity 0.15s, background 0.15s;
+  opacity: 1;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
 
-.copy-path-btn svg {
+.copy-path-btn svg,
+.open-file-btn svg {
   width: 12px;
   height: 12px;
 }
 
-.file-header:hover .copy-path-btn {
+.file-header:hover .copy-path-btn,
+.file-header:hover .open-file-btn,
+.git-diff-file-header:hover .open-file-btn {
   display: inline-flex;
 }
 
-.copy-path-btn:hover {
+.copy-path-btn:hover,
+.open-file-btn:hover {
   opacity: 1;
   background: var(--el-fill-color);
+}
+
+/* 「在文件中查看」是动作按钮，悬停时用主色强调，与「复制路径」的弱化处理区分开 */
+.open-file-btn:hover {
+  color: var(--el-color-primary);
 }
 
 .edit-count {
@@ -823,6 +912,52 @@ watch(changeSource, (source) => {
   padding: 12px;
   color: var(--el-text-color-secondary);
   font-size: 13px;
+}
+
+/* Git 文件列表秒表：加载中是流光霓虹胶囊，加载完留在汇总行 */
+.git-stopwatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 2px 12px 2px 10px;
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: #fff;
+  background: linear-gradient(110deg, #8b5cf6, #ec4899, #f59e0b, #8b5cf6);
+  background-size: 220% 100%;
+  animation: git-sw-flow 1.6s linear infinite;
+  box-shadow: 0 1px 10px rgba(236, 72, 153, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.git-stopwatch .sw-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  animation: git-sw-blink 0.8s ease-in-out infinite;
+}
+.git-stopwatch.is-done {
+  animation: none;
+  background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 100%);
+  box-shadow: 0 1px 8px rgba(14, 165, 233, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.git-loading {
+  flex-wrap: wrap;
+}
+@keyframes git-sw-flow {
+  to { background-position: 220% 0; }
+}
+@keyframes git-sw-blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .git-stopwatch { animation: none; }
+  .git-stopwatch .sw-dot { animation: none; }
 }
 
 .diff-content {

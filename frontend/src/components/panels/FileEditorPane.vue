@@ -3,6 +3,27 @@
     <!-- 文件标签栏 -->
     <template v-if="store.files.length > 0">
       <div class="editor-tabbar">
+        <!-- 下拉列表：横向被挤出去的文件标签在这里也能找到；顺序沿用 store.files（固定标签已置前） -->
+        <TabListMenu
+          label="文件"
+          tone="green"
+          :items="fileMenuItems"
+          :width="320"
+          @select="store.activate($event)"
+          @close="confirmClose($event)"
+        >
+          <template #mark="{ item }">
+            <FileTypeIcon :name="item.name" :compact="true" />
+          </template>
+          <template #extra="{ item }">
+            <span v-if="item.dirty" class="editor-tab-dot" title="有未保存的修改" />
+            <span v-if="item.externalChanged" class="editor-tab-external" title="文件已在别处被修改，内容可能已过期">⟳</span>
+            <svg v-if="item.pinned" class="editor-tab-pin" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" fill="currentColor" />
+            </svg>
+          </template>
+        </TabListMenu>
+
         <div
           ref="tabsBarRef"
           class="editor-tabs"
@@ -30,6 +51,12 @@
               class="editor-tab-dot"
               title="有未保存的修改"
             />
+            <!-- 外部改动标记：磁盘上的这个文件已变，编辑器里是旧内容 -->
+            <span
+              v-if="store.contentOf(file.path)?.externalChanged"
+              class="editor-tab-external"
+              title="文件已在别处被修改，内容可能已过期"
+            >⟳</span>
             <svg v-if="file.pinned" class="editor-tab-pin" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" fill="currentColor" />
             </svg>
@@ -176,10 +203,36 @@
           </svg>
           <span>刷新</span>
         </button>
+        <!-- 放大图片：右侧栏太窄看大图吃力，全屏查看不受面板宽度限制 -->
+        <button
+          v-if="isImageFile && content?.imageDataUrl"
+          class="editor-zoom-btn"
+          type="button"
+          title="放大查看（全屏）"
+          @click="openImageViewer"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M6.2 2H2v4.2M9.8 2H14v4.2M14 9.8V14H9.8M6.2 14H2V9.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>放大</span>
+        </button>
       </div>
 
-      <!-- 工具栏：搜索 + 保存 + 复制。图片不参与搜索/复制，整条工具栏隐藏 -->
-      <div v-if="!isImageFile" class="editor-toolbar">
+      <!-- 外部改动提示：磁盘上的内容已变，编辑器里是旧内容 -->
+      <div v-if="content?.externalChanged" class="editor-external-bar">
+        <span class="editor-external-icon">⟳</span>
+        <span class="editor-external-text">
+          此文件已在别处被修改，当前显示的可能不是最新内容
+          <template v-if="content?.dirty">；重新加载会丢弃你未保存的修改</template>
+        </span>
+        <button class="editor-external-reload" type="button" @click="handleReloadExternal">重新加载</button>
+        <button class="editor-external-keep" type="button" @click="store.dismissExternalChanged(store.activePath)">
+          保留我的内容
+        </button>
+      </div>
+
+      <!-- 工具栏：搜索 + 保存 + 复制。图片/文档不参与搜索复制，整条工具栏隐藏 -->
+      <div v-if="!isImageFile && !isDocumentFile" class="editor-toolbar">
         <input
           ref="searchInputRef"
           v-model="searchQuery"
@@ -250,6 +303,42 @@
         </div>
         <p class="editor-binary-title">图片过大，无法预览</p>
         <p class="editor-binary-hint">{{ store.activeFile.name }} 超过 8MB，超出预览上限，请用系统图片查看器打开</p>
+      </div>
+
+      <!-- 文档过大：后端不下发数据，只能提示 -->
+      <div v-else-if="content?.document && content?.documentTooLarge" class="editor-binary">
+        <div class="editor-binary-icon">
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <path
+              d="M28 6H14a3 3 0 0 0-3 3v30a3 3 0 0 0 3 3h20a3 3 0 0 0 3-3V15z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linejoin="round"
+            />
+            <path d="M28 6v9h9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" />
+            <path d="M17 27h14M17 33h9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+          </svg>
+        </div>
+        <p class="editor-binary-title">文档过大，无法预览</p>
+        <p class="editor-binary-hint">{{ store.activeFile.name }} 超过 32MB，超出预览上限，请用本机 Office 或阅读器打开</p>
+      </div>
+
+      <!-- 文档预览：pdf/docx/xlsx/pptx，只读，渲染组件按格式动态加载 -->
+      <div v-else-if="content?.document" class="editor-document">
+        <component
+          :is="docComponent"
+          v-if="docComponent && docBuffer"
+          class="editor-document-view"
+          :src="docBuffer"
+          v-bind="docComponentProps"
+          @error="onDocumentError"
+        />
+        <div v-else-if="docError" class="editor-error">{{ docError }}</div>
+        <div v-else class="editor-status">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          加载文档中
+        </div>
       </div>
 
       <!-- 二进制文件：不渲染内容，给出提示 -->
@@ -327,11 +416,18 @@
         </div>
       </teleport>
     </template>
+
+    <!-- 图片全屏查看：组件自身 teleport 到 body，不受右侧面板宽度限制 -->
+    <el-image-viewer
+      v-if="imageViewerVisible"
+      :url-list="imageViewerUrl ? [imageViewerUrl] : []"
+      @close="imageViewerVisible = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import hljs from 'highlight.js'
 import { Loading } from '@element-plus/icons-vue'
@@ -339,11 +435,14 @@ import { renderMarkdown } from '@/utils/markdown'
 import { useOpenedFilesStore } from '@/stores/opened-files'
 import type { OpenedFile } from '@/stores/opened-files'
 import { useProjectTreeStore } from '@/stores/project-tree'
+import { useUiStore } from '@/stores/ui'
 import FileTypeIcon from '@/components/common/FileTypeIcon.vue'
 import CodeEditor from '@/components/panels/CodeEditor.vue'
+import { documentErrorMessage } from '@/components/panels/documentPreviewError'
 
 const store = useOpenedFilesStore()
 const treeStore = useProjectTreeStore()
+const uiStore = useUiStore()
 
 const content = computed(() => store.activeContent)
 const codeEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null)
@@ -363,6 +462,21 @@ async function saveActiveFile() {
   } else if (result.ok) {
     ElMessage.success('已保存')
   }
+}
+
+/** 重载被外部改过的文件；本地有未保存编辑时先确认，避免白编 */
+async function handleReloadExternal() {
+  const path = store.activePath
+  if (!path) return
+  if (content.value?.dirty) {
+    const confirmed = await ElMessageBox.confirm(
+      '重新加载会丢弃你未保存的修改，确定继续吗？',
+      '文件已在别处被修改',
+      { type: 'warning', confirmButtonText: '丢弃并重新加载', cancelButtonText: '取消' },
+    ).catch(() => null)
+    if (!confirmed) return
+  }
+  store.refresh(path)
 }
 
 /** 关闭标签前检查脏状态：有未保存修改时先询问 */
@@ -386,6 +500,104 @@ async function confirmClose(path: string) {
 // 图片不参与搜索与复制：既看扩展名（内容未到达前就能判断），也看后端识别结果
 const isImageFile = computed(() =>
   !!store.activeFile && (store.isImagePath(store.activeFile.path) || !!content.value?.image),
+)
+
+// ---- 图片全屏放大 ----
+const imageViewerVisible = ref(false)
+const imageViewerUrl = ref('')
+
+function openImageViewer() {
+  const url = content.value?.imageDataUrl
+  if (!url) return
+  imageViewerUrl.value = url
+  imageViewerVisible.value = true
+}
+
+// 切换文件时关闭查看器，避免残留上一张图
+watch(() => store.activePath, () => {
+  imageViewerVisible.value = false
+})
+
+// ---- 文档只读预览（pdf/docx/xlsx/pptx） ----
+// 文档同样不参与搜索与复制，工具栏整条隐藏
+const isDocumentFile = computed(() =>
+  !!store.activeFile && (store.isDocumentPath(store.activeFile.path) || !!content.value?.document),
+)
+
+// 预览组件按格式懒加载：pdf/excel 打包体积大，不打开文档就不进主 bundle
+const DOC_COMPONENT_LOADERS: Record<string, () => Promise<{ default: any }>> = {
+  pdf: () => import('@vue-office/pdf'),
+  docx: async () => {
+    const [mod] = await Promise.all([
+      import('@vue-office/docx'),
+      import('@vue-office/docx/lib/index.css'),
+    ])
+    return mod as { default: any }
+  },
+  xlsx: async () => {
+    const [mod] = await Promise.all([
+      import('@vue-office/excel'),
+      import('@vue-office/excel/lib/index.css'),
+    ])
+    return mod as { default: any }
+  },
+  pptx: () => import('@vue-office/pptx'),
+}
+
+const docComponent = shallowRef<any>(null)
+const docBuffer = shallowRef<ArrayBuffer | null>(null)
+const docError = ref('')
+// 竞态保护：切换标签时丢弃上一次未完成的加载结果
+let docLoadToken = 0
+
+// pdf 组件默认从 unpkg 拉 CMap，内网会缺中文；改为本地，资源由 frontend/public/cmaps 随构建产出
+const docComponentProps = computed(() => (content.value?.documentKind === 'pdf' ? { staticFileUrl: '/' } : {}))
+
+// data URL → ArrayBuffer：四种预览组件都接受 ArrayBuffer，比让组件自己 fetch 更可控
+function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
+  const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  return bytes.buffer
+}
+
+async function loadDocument() {
+  // 先占号再校验：切到非文档标签时也要让在飞的加载作废
+  const token = (docLoadToken += 1)
+  docComponent.value = null
+  docBuffer.value = null
+  docError.value = ''
+  const c = content.value
+  const kind = c?.documentKind || ''
+  if (!c?.document || !c.documentDataUrl || !kind) return
+  const loader = DOC_COMPONENT_LOADERS[kind]
+  if (!loader) {
+    docError.value = `暂不支持预览 .${kind} 文档`
+    return
+  }
+  try {
+    const buffer = dataUrlToArrayBuffer(c.documentDataUrl)
+    const mod = await loader()
+    if (token !== docLoadToken) return
+    docBuffer.value = buffer
+    docComponent.value = mod.default ?? mod
+  } catch (e: any) {
+    if (token !== docLoadToken) return
+    docError.value = `文档预览组件加载失败：${e?.message || e}`
+  }
+}
+
+function onDocumentError(err: any) {
+  console.warn('[document-preview] render failed:', err)
+  docComponent.value = null
+  docError.value = documentErrorMessage(err)
+}
+
+watch(
+  () => [store.activePath, content.value?.documentDataUrl, content.value?.documentKind] as const,
+  () => { void loadDocument() },
+  { immediate: true },
 )
 
 // ---- 路径面包屑 ----
@@ -426,8 +638,10 @@ const breadcrumbSegments = computed<BreadcrumbSeg[]>(() => {
   })
 })
 
+// 面包屑点击：定位到该级并确保文件树可见（侧栏停在会话列表时会被切到「文件」）
 function revealInTree(seg: BreadcrumbSeg) {
   treeStore.reveal(seg.path)
+  uiStore.requestFileTree()
 }
 
 // 「在树中显示」：把当前激活文件在文件树里展开定位（应对自动定位被手动滚动打断）
@@ -435,10 +649,13 @@ function revealActiveInTree() {
   const file = store.activeFile
   if (!file) return
   const rel = toRevealPath(file.path)
-  if (rel) treeStore.reveal(rel)
+  if (!rel) return
+  treeStore.reveal(rel)
+  uiStore.requestFileTree()
 }
 
-// 切换标签时让文件树跟随定位（仅在激活项变化时触发，树内滚动不反向干扰编辑器）
+// 切换标签时让文件树跟随定位（仅在激活项变化时触发，树内滚动不反向干扰编辑器）。
+// 这里刻意不调 requestFileTree：自动跟随不该把正在看会话列表的用户拽到文件视图
 watch(() => store.activePath, (path) => {
   if (!path) return
   const rel = toRevealPath(path)
@@ -533,15 +750,22 @@ function syncActive() {
 
 function jumpToNextMatch() {
   if (!matchCount.value) return
-  if (content.value?.editable) { codeEditorRef.value?.gotoMatch(1); return }
   activeMatchIndex.value = (activeMatchIndex.value + 1) % matchCount.value
 }
 
 function jumpToPrevMatch() {
   if (!matchCount.value) return
-  if (content.value?.editable) { codeEditorRef.value?.gotoMatch(-1); return }
   activeMatchIndex.value = (activeMatchIndex.value - 1 + matchCount.value) % matchCount.value
 }
+
+// 下标变化时同步视图：可编辑模式交给 CodeMirror 定位，只读模式切换 mark 高亮
+watch(activeMatchIndex, () => {
+  if (content.value?.editable) {
+    codeEditorRef.value?.gotoMatchIndex(activeMatchIndex.value)
+    return
+  }
+  syncActive()
+})
 
 // 搜索词变化：可编辑模式同步给 CodeMirror，由其返回匹配数
 watch(searchQuery, async (query, prev) => {
@@ -554,7 +778,6 @@ watch(searchQuery, async (query, prev) => {
   await nextTick()
   applyMarks()
 })
-watch(activeMatchIndex, () => syncActive())
 watch(() => store.activePath, async () => {
   searchQuery.value = ''
   activeMatchIndex.value = 0
@@ -577,8 +800,8 @@ async function applyJumpLine() {
   const line = store.jumpLine
   const c = content.value
   if (line <= 0 || !c?.code) return
-  // Markdown 是渲染后的排版，行号与源码行不对应；图片/二进制无代码区，均只清空请求
-  if (c.image || c.binary || store.activeFile?.asMarkdown) {
+  // Markdown 是渲染后的排版，行号与源码行不对应；图片/文档/二进制无代码区，均只清空请求
+  if (c.image || c.document || c.binary || store.activeFile?.asMarkdown) {
     store.consumeJumpLine()
     return
   }
@@ -622,6 +845,19 @@ const tabsBarRef = ref<HTMLElement | null>(null)
 const tabsOverflow = ref(false)
 const canScrollLeft = ref(false)
 const canScrollRight = ref(false)
+
+// 下拉列表直接映射 store.files，保证列表顺序与标签栏视觉顺序一致（固定标签已由 store 置前）
+const fileMenuItems = computed(() => store.files.map(file => ({
+  key: file.path,
+  title: file.name,
+  // 文件名可能重名，提示里补全路径
+  hint: file.path,
+  active: store.activePath === file.path,
+  name: file.name,
+  pinned: file.pinned,
+  dirty: !!store.contentOf(file.path)?.dirty,
+  externalChanged: !!store.contentOf(file.path)?.externalChanged,
+})))
 
 function syncTabScrollState() {
   const bar = tabsBarRef.value
@@ -686,21 +922,38 @@ function copyTabPath() {
 }
 
 // 激活标签变化后滚进可见区，避免被其他标签挤出视野
-watch(() => store.activePath, async () => {
-  await nextTick()
+function ensureActiveTabVisible() {
   const bar = tabsBarRef.value
   if (!bar) return
   const el = bar.querySelector<HTMLElement>('.editor-tab.active')
   if (!el) return
-  const left = el.offsetLeft
-  const right = left + el.offsetWidth
-  const viewLeft = bar.scrollLeft
-  const viewRight = viewLeft + bar.clientWidth
-  if (left < viewLeft) {
-    bar.scrollLeft = left
-  } else if (right > viewRight) {
-    bar.scrollLeft = right - bar.clientWidth
+  // 用 rect 差值算偏移：标签栏自身有边框和内边距，拿 offsetLeft 比会带上固定误差
+  const barRect = bar.getBoundingClientRect()
+  const tabRect = el.getBoundingClientRect()
+  if (tabRect.left < barRect.left) {
+    bar.scrollLeft -= barRect.left - tabRect.left
+  } else if (tabRect.right > barRect.right) {
+    bar.scrollLeft += tabRect.right - barRect.right
   }
+}
+
+watch(() => store.activePath, async () => {
+  await nextTick()
+  ensureActiveTabVisible()
+})
+
+// 标签栏宽度变化（拖动面板分隔条、窗口缩放）时，激活标签可能被挤出视野：
+// 窗口 resize 事件抓不到拖分隔条，所以直接观察标签栏自身尺寸
+let tabBarObserver: ResizeObserver | null = null
+watch(tabsBarRef, (bar) => {
+  tabBarObserver?.disconnect()
+  tabBarObserver = null
+  if (!bar || typeof ResizeObserver === 'undefined') return
+  tabBarObserver = new ResizeObserver(() => {
+    syncTabScrollState()
+    ensureActiveTabVisible()
+  })
+  tabBarObserver.observe(bar)
 })
 
 // ---- 复制 ----
@@ -851,6 +1104,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onDocumentKeydown)
   window.removeEventListener('resize', onWindowResize)
   contentWrapRef.value?.removeEventListener('contextmenu', handleContextMenu)
+  tabBarObserver?.disconnect()
   clearTimeout(jumpFlashTimer)
 })
 
@@ -970,6 +1224,14 @@ watch(contentWrapRef, (el, prev) => {
   border-radius: 50%;
   flex-shrink: 0;
   background: currentColor;
+}
+
+/* 外部改动标记：提醒标签内容已过期，用琥珀色与脏点区分 */
+.editor-tab-external {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--el-color-warning);
 }
 
 .editor-tab-close {
@@ -1247,6 +1509,40 @@ watch(contentWrapRef, (el, prev) => {
   animation: spin 0.9s linear infinite;
 }
 
+/* 放大图片：与「刷新」同为描边胶囊，用蓝色区分动作语义 */
+.editor-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, #2563eb 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #2563eb 10%, transparent);
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.editor-zoom-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.editor-zoom-btn:hover {
+  background: color-mix(in srgb, #2563eb 20%, transparent);
+  border-color: #2563eb;
+}
+
+.editor-zoom-btn:active {
+  transform: translateY(1px);
+}
+
 /* 工具栏 */
 .editor-toolbar {
   display: flex;
@@ -1341,6 +1637,49 @@ watch(contentWrapRef, (el, prev) => {
   box-shadow: none;
   cursor: not-allowed;
 }
+
+/* 外部改动提示条：Agent 已改过磁盘文件，编辑器里是旧内容 */
+.editor-external-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  color: #b45309;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.editor-external-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+.editor-external-text {
+  flex: 1;
+  min-width: 0;
+}
+.editor-external-reload,
+.editor-external-keep {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.editor-external-reload {
+  border: 1px solid color-mix(in srgb, #f59e0b 55%, transparent);
+  background: color-mix(in srgb, #f59e0b 22%, transparent);
+  color: #b45309;
+}
+.editor-external-reload:hover { background: color-mix(in srgb, #f59e0b 34%, transparent); }
+.editor-external-keep {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #b45309;
+}
+.editor-external-keep:hover { background: color-mix(in srgb, #f59e0b 18%, transparent); }
 
 /* 保存错误条：乐观锁冲突等 */
 .editor-save-error {
@@ -1512,6 +1851,22 @@ watch(contentWrapRef, (el, prev) => {
   object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 6px 22px color-mix(in srgb, var(--el-text-color-primary) 16%, transparent);
+}
+
+/* 文档只读预览：pdf/docx/pptx 自带滚动，撑满剩余高度；xlsx 需要在容器内铺开 */
+.editor-document {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--el-fill-color-light);
+}
+
+.editor-document-view {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
 
 .editor-code {

@@ -1,6 +1,6 @@
 <template>
-  <FileEditCard v-if="kind === 'edit'" :tool-call="toolCall" :collapsed="collapsed" />
-  <FileWriteCard v-else-if="kind === 'write'" :tool-call="toolCall" :collapsed="collapsed" />
+  <FileEditCard v-if="kind === 'edit'" :tool-call="toolCall" :collapsed="collapsed" :round="round" />
+  <FileWriteCard v-else-if="kind === 'write'" :tool-call="toolCall" :collapsed="collapsed" :round="round" />
   <TerminalCard v-else-if="kind === 'terminal'" :tool-call="toolCall" :collapsed="collapsed" />
   <GenericToolCard v-else :tool-call="toolCall" :collapsed="collapsed" />
 </template>
@@ -17,6 +17,8 @@ import GenericToolCard from './ToolGenericCard.vue'
 const props = defineProps<{
   toolCall: ToolCall
   collapsed?: boolean
+  /** 该工具调用所在的对话轮次，透传给文件卡片做变更面板定位 */
+  round?: number | null
 }>()
 
 const kind = computed(() => {

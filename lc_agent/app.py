@@ -217,8 +217,8 @@ class LcAgentApp:
 
         db = get_async_session(self._db_url)
         try:
-            result = await db.execute(select(User).where(User.role == "admin"))
-            admin = result.scalar_one_or_none()
+            result = await db.execute(select(User).where(User.role == "admin").limit(1))
+            admin = result.scalars().first()
             if admin is None:
                 password = "123456"
                 admin = User(

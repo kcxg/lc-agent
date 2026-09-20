@@ -60,6 +60,15 @@ export function formatTokenCount(count: number): string {
   return `~${(count / 1000).toFixed(1)}K`
 }
 
+// 弹框「看全文」能承载的最大字符数：超长内容必须带截断标记，否则用户以为看到的就是全部
+export const MODAL_TEXT_MAX = 200000
+
+/** 内容超过上限时截断并追加可见的截断标记，未超长则原样返回 */
+export function clipForModal(text: string, max = MODAL_TEXT_MAX): string {
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}\n\n… 内容超长（共 ${text.length} 字符），弹框仅显示前 ${max} 字符`
+}
+
 // lazy-load js-tiktoken only when the first tool result arrives
 let _encPromise: Promise<{ encode: (text: string) => ArrayLike<number> }> | null = null
 function getTiktokenEnc() {
