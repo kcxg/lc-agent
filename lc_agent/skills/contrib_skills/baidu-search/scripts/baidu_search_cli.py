@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/python3.12/bin/python3.12
 # -*- coding: utf-8 -*-
 """百度搜索 CLI — 按关键词搜索网页 + 阅读网页详细内容。
 
