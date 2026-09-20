@@ -560,6 +560,9 @@ function handleCancelEdit() {
   align-items: flex-end;
   gap: 8px;
   width: 100%;
+  /* 与消息内容列同一把尺：限宽居中，宽屏下输入框和消息列左右边界对齐 */
+  max-width: calc(var(--md-answer-width) + 18px);
+  margin-inline: auto;
   padding: 7px 8px 7px 12px;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
@@ -936,6 +939,10 @@ function handleCancelEdit() {
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 8px;
+  /* 跟随输入框内容列限宽居中 */
+  width: 100%;
+  max-width: calc(var(--md-answer-width) + 18px);
+  margin-inline: auto;
   padding: 7px 10px;
   border: 1px solid color-mix(in srgb, var(--el-color-success) 38%, var(--el-border-color));
   border-radius: 8px;

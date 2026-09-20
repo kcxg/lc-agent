@@ -1494,8 +1494,18 @@ onBeforeUnmount(() => {
 
 .messages-container :deep(.elx-bubble-list) {
   width: 100%;
+  /* 内容列限宽居中：宽屏下整个消息列收进正文最大宽度并水平居中，避免右侧大片留白 */
+  max-width: calc(var(--md-answer-width) + 18px);
+  margin-inline: auto;
   flex: 1;
   min-height: 0;
+}
+
+/* 单独渲染的加载中/输入中指示器跟随内容列同宽居中 */
+.messages-container :deep(.elx-thinking) {
+  width: 100%;
+  max-width: calc(var(--md-answer-width) + 18px);
+  margin-inline: auto;
 }
 
 .messages-container :deep(.elx-bubble-list__list) {
@@ -2348,6 +2358,10 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 48px 24px;
   user-select: none;
+  /* 与消息内容列同宽居中，空状态视觉锚点和对话时保持一致 */
+  width: 100%;
+  max-width: calc(var(--md-answer-width) + 18px);
+  margin-inline: auto;
 }
 
 /* Blockquote styling for system and thinking content. Final answers use markdown-theme.css. */
