@@ -65,7 +65,12 @@ class TracingAsyncClient(openai.DefaultAsyncHttpxClient):
         model: str | None,
         **kwargs: Any,
     ):
-        super().__init__(**kwargs)
+        headers = dict(kwargs.pop("headers", None) or {})
+        # venv 里存在 zstandard（langsmith 依赖）时 httpx 会主动声明支持 zstd，
+        # 而部分网关会返回标了 Content-Encoding: zstd 却非法的响应体导致解码异常；
+        # 固定为通用编码规避（zstd/brotli 均不请求）
+        headers.setdefault("Accept-Encoding", "gzip, deflate")
+        super().__init__(headers=headers, **kwargs)
         self._collector_getter = collector_getter
         self.provider = provider
         self.model = model

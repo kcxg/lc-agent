@@ -40,6 +40,19 @@ def test_create_traced_chat_openai_defaults_to_openai_base_url_for_trace_metadat
     assert llm.http_async_client.model == "gpt-5-mini"
 
 
+def test_tracing_async_client_pins_accept_encoding_without_zstd():
+    """venv 装有 zstandard（langsmith 依赖）时 httpx 会声明支持 zstd，
+    部分网关返回标了 zstd 却非法的响应体会炸解码——固定为 gzip/deflate。"""
+    from lc_agent import create_traced_chat_openai
+    from lc_agent.core.http_trace_httpx import TracingAsyncClient
+
+    llm = create_traced_chat_openai(model="gpt-5-mini", api_key="test-key")
+    client = llm.http_async_client
+
+    assert isinstance(client, TracingAsyncClient)
+    assert client.headers["accept-encoding"] == "gzip, deflate"
+
+
 def test_chat_openai_reasoning_default_params_restore_legacy_max_tokens_only():
     """非 OpenAI 兼容端点不能同时收到两个 token 上限字段。"""
     from lc_agent.core.chat_model import ChatOpenAIReasoning
