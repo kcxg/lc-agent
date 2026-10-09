@@ -11,7 +11,12 @@ from langchain_core.tools import InjectedToolCallId
 from langchain_core.tools import tool as lc_tool
 from pydantic import Field as _PydanticField
 
-from lc_agent.config import DEFAULT_MAX_SUBAGENT_DEPTH, DEFAULT_RECURSION_LIMIT, get_config_value
+from lc_agent.config import (
+    DEFAULT_MAX_SUBAGENT_DEPTH,
+    DEFAULT_MODEL_MAX_RETRIES,
+    DEFAULT_RECURSION_LIMIT,
+    get_config_value,
+)
 from lc_agent.core.model_resolve import find_model, parse_models, resolve_request_model
 from lc_agent.core.engine_helpers.content_helpers import _convert_history_item, _convert_text_file_blocks
 from lc_agent.core.engine_helpers.project_context import _build_project_context_text
@@ -29,10 +34,12 @@ from lc_agent.core.http_trace import (
 from lc_agent.core.http_trace_httpx import TracingAsyncClient
 from lc_agent.core.models import AgentPreset, ModelInfo
 from lc_agent.middlewares.inject_current_time_prompt_middleware import inject_current_time_prompt_middleware
+from lc_agent.middlewares.user_os_middleware import user_os_middleware
 from lc_agent.middlewares.system_prompt import SystemPromptMiddleware
 from lc_agent.prompts.subagent_prompts import GENERAL_PURPOSE_DESCRIPTION, SUBAGENT_DELEGATION_PROMPT, TASK_SYSTEM_PROMPT, TASK_TOOL_DESCRIPTION
 from lc_agent.prompts.todo_prompts import TODO_SYSTEM_PROMPT, TODO_TOOL_DESCRIPTION
 from lc_agent.tools.registry import ToolRegistry
+from lc_agent.utils.token_counter import count_tokens_tiktoken
 
 logger = logging.getLogger(__name__)
 
@@ -334,34 +341,31 @@ class AgentEngine:
         if preset.project_mode and preset.project_root:
             from pathlib import Path as _PRoot
             _effective_project_root = str(_PRoot(preset.project_root).expanduser().resolve())
-        if _depth == 0 and hasattr(self, '_skills_toolkit') and self._skills_toolkit:
-            loader = getattr(self._skills_toolkit, '_resolved_loader', None)
-            if loader and hasattr(loader, 'set_project_overlay'):
-                # Overlay = project skills dir (project_mode) + per-preset extra skill dirs.
-                # extra_skill_dirs works independently of project_mode.
-                _overlay_dirs: list[str] = []
-                if _effective_project_root:
-                    from pathlib import Path as _Path
-                    _overlay_dirs.append(str(_Path(_effective_project_root) / ".agents" / "skills"))
-                for _d in (preset.extra_skill_dirs or []):
-                    if isinstance(_d, str) and _d.strip():
-                        _overlay_dirs.append(_d.strip())
-                loader.set_project_overlay(_overlay_dirs or None)
+        if _depth == 0 and getattr(self, '_skills_loader', None):
+            loader = self._skills_loader
+            # Overlay = project skills dir (project_mode) + per-preset extra skill dirs.
+            # extra_skill_dirs works independently of project_mode.
+            _overlay_dirs: list[str] = []
+            if _effective_project_root:
+                from pathlib import Path as _Path
+                _overlay_dirs.append(str(_Path(_effective_project_root) / ".agents" / "skills"))
+            for _d in (preset.extra_skill_dirs or []):
+                if isinstance(_d, str) and _d.strip():
+                    _overlay_dirs.append(_d.strip())
+            loader.set_project_overlay(_overlay_dirs or None)
 
         _memory_middleware: SystemPromptMiddleware | None = None
         _skills_middleware: _LcAgentSkillMiddleware | None = None
-        if hasattr(self, '_skills_toolkit') and self._skills_toolkit:
+        if getattr(self, '_skills_loader', None):
             allowed = preset.allowed_skills
             if allowed is None or allowed:
-                loader = self._skills_toolkit._resolved_loader
-                if loader:
-                    _candidate = _LcAgentSkillMiddleware(
-                        loader,
-                        allowed_skills=allowed,
-                        executor=self._skills_toolkit._executor,
-                    )
-                    if _candidate.has_visible_skills:
-                        _skills_middleware = _candidate
+                _candidate = _LcAgentSkillMiddleware(
+                    self._skills_loader,
+                    allowed_skills=allowed,
+                    executor=getattr(self, '_skills_executor', None),
+                )
+                if _candidate.has_visible_skills:
+                    _skills_middleware = _candidate
 
         if hasattr(self, '_mcp_manager') and self._mcp_manager:
             mcp_tools = self._mcp_manager.get_filtered_langchain_tools(preset.allowed_mcp_servers)
@@ -429,7 +433,7 @@ class AgentEngine:
                     f"<project_rules>\n## Project Rules (AGENTS.md)\n\n{_agents_md}\n</project_rules>",
                     "ProjectAgentsMdMiddleware",
                 ))
-            # 2. Git status + OS context snapshot injection
+            # 2. Git status snapshot injection (OS info lives in <user_os>)
             # Use cached text pre-computed async in chat_stream; fall back to sync if missing.
             _ctx_text = self._project_ctx_text_cache.get(_effective_project_root) or _build_project_context_text(_effective_project_root)
             middleware.append(SystemPromptMiddleware(_ctx_text, "ProjectContextMiddleware"))
@@ -456,6 +460,7 @@ class AgentEngine:
             from lc_agent.middlewares import AskUserMiddleware
             middleware.append(AskUserMiddleware())
         middleware.append(inject_current_time_prompt_middleware)
+        middleware.append(user_os_middleware)
 
         # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
         if hasattr(self, '_permissions_service') and self._permissions_service and _depth == 0:
@@ -561,6 +566,23 @@ class AgentEngine:
         HANDLED_KEYS = {"temperature", "reasoning_effort"}
         extra_params = {k: v for k, v in params.items() if k not in HANDLED_KEYS and v is not None}
 
+        # 模型调用重试次数（SDK 层：openai 客户端内置重试，只覆盖 429/5xx/超时/连接错误
+        # 这类"响应开始前"的失败；流式吐字中途断流不会重试）。
+        # 对应配置键 agent.model_retry.max_retries，范围 0-10，非法值回落默认。
+        retry_conf = get_config_value(self.config, "agent.model_retry", None)
+        raw_retries = retry_conf.get("max_retries") if isinstance(retry_conf, dict) else None
+        if raw_retries is None:
+            max_retries = DEFAULT_MODEL_MAX_RETRIES
+        else:
+            try:
+                max_retries = max(0, min(int(raw_retries), 10))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "agent.model_retry.max_retries 非法值 %r，回落默认 %s",
+                    raw_retries, DEFAULT_MODEL_MAX_RETRIES,
+                )
+                max_retries = DEFAULT_MODEL_MAX_RETRIES
+
         if model_info and model_info.base_url:
             from lc_agent.core.chat_model import ChatOpenAIReasoning
             kwargs: dict[str, Any] = dict(
@@ -576,6 +598,7 @@ class AgentEngine:
                 kwargs["max_tokens"] = model_info.max_output_tokens
             if reasoning_effort:
                 kwargs["reasoning_effort"] = reasoning_effort
+            kwargs["max_retries"] = max_retries
             return ChatOpenAIReasoning(**kwargs)
 
         from langchain.chat_models import init_chat_model
@@ -591,11 +614,13 @@ class AgentEngine:
             )
             if reasoning_effort:
                 kwargs["reasoning_effort"] = reasoning_effort
+            kwargs["max_retries"] = max_retries
             return init_chat_model(model_str, **kwargs)
 
         kwargs: dict[str, Any] = dict(api_key="not-set", temperature=temperature, stream_usage=True, **extra_params)
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
+        kwargs["max_retries"] = max_retries
         return init_chat_model(model_id, **kwargs)
 
     def _find_model(self, model_id: str) -> ModelInfo | None:
@@ -628,7 +653,10 @@ class AgentEngine:
         if needs_profile and model_info:
             llm.profile = {"max_input_tokens": model_info.context_limit}
 
-        kwargs: dict[str, Any] = {"model": llm, "keep": keep, "trigger": trigger}
+        # 传自定义 token_counter：langchain 默认的近似计数器（字符数/4）对中文和
+        # JSON 工具结果低估约 1.75 倍，keep 预算会多留近一倍。传了之后触发判断和
+        # 裁剪判断（_partial_token_counter）都用同一口径。
+        kwargs: dict[str, Any] = {"model": llm, "keep": keep, "trigger": trigger, "token_counter": count_tokens_tiktoken}
 
         try:
             mw = NotifyingSummarizationMiddleware(**kwargs)
@@ -648,6 +676,95 @@ class AgentEngine:
             if kind in ("fraction", "tokens", "messages"):
                 return (kind, amount)
         return None
+
+    def _resolve_compact_keep(self, keep_override: str) -> tuple:
+        """手动压缩的 keep 策略：覆盖参数优先（'all'→只留 1 条 / 'N'→留最近 N 条），否则沿用配置。"""
+        override = (keep_override or "").strip().lower()
+        if override == "all":
+            return ("messages", 1)
+        if override.isdigit() and int(override) > 0:
+            return ("messages", int(override))
+        summ_conf = get_config_value(self.config, "agent.summarization", {})
+        return self._parse_context_size(summ_conf.get("keep")) or ("fraction", 0.20)
+
+    async def compact_thread(
+        self,
+        thread_id: str,
+        preset_id: str = "",
+        model_id: str = "",
+        keep_override: str = "",
+    ) -> dict:
+        """手动压缩（/compact）：不看触发阈值，按 keep 策略摘要历史并重写 checkpoint 线程。
+
+        只重写模型上下文（checkpoint），业务库聊天记录不动。
+        摘要逻辑复用 NotifyingSummarizationMiddleware：trigger 设为永真（("messages", 1)），
+        走公开的 abefore_model 拿到重写后的消息列表，再用 aupdate_state 写回，
+        不依赖 langchain 私有方法。
+        与自动压缩的 enabled 开关无关——enabled 只关自动触发，手动压缩始终可用。
+        """
+        preset = self._resolve_preset_for_model(preset_id, model_id)
+        summ_conf = get_config_value(self.config, "agent.summarization", {})
+        summ_model_id = summ_conf.get("default_model", "") or preset.default_model
+        model_info = find_model(summ_model_id, self.config)
+        llm = self._create_llm(model_info, summ_model_id)
+
+        keep = self._resolve_compact_keep(keep_override)
+        if keep[0] == "fraction" and model_info:
+            llm.profile = {"max_input_tokens": model_info.context_limit}
+
+        mw = NotifyingSummarizationMiddleware(
+            model=llm,
+            trigger=("messages", 1),
+            keep=keep,
+            token_counter=count_tokens_tiktoken,
+        )
+
+        agent = self._get_or_build_agent(preset_id, model_id)
+        if agent is None:
+            return {"compacted": False, "reason": "agent_not_found"}
+        config = {"configurable": {"thread_id": thread_id}}
+        state = await agent.aget_state(config)
+        messages = list((state.values or {}).get("messages", []))
+        if not messages:
+            return {"compacted": False, "reason": "empty"}
+
+        result = await mw.abefore_model({"messages": messages}, None)
+        if result is None:
+            return {"compacted": False, "reason": "nothing_to_compact"}
+
+        await agent.aupdate_state(config, result, as_node="__start__")
+
+        # result["messages"] 结构：[RemoveMessage(全部), 摘要 HumanMessage, *保留消息]
+        kept = len(result["messages"]) - 2
+        summarized = len(messages) - kept
+        kept_user = sum(
+            1 for m in result["messages"][2:]
+            if getattr(m, "type", "") == "human"
+            and getattr(m, "additional_kwargs", {}).get("lc_source") != "summarization"
+        )
+        # 预估口径（给前端水位条压缩后即时展示用）：只数 checkpoint 历史，
+        # 与供应商 input_tokens（整条 prompt，含 system/tools 开销）不是同一口径，
+        # 所以前端必须标“预估·待更新”，下一轮真实 usage 回来自动恢复。
+        approx_before = approx_after = None
+        try:
+            approx_before = int(mw.token_counter(messages))
+            new_checkpoint_messages = list(result["messages"][1:])
+            approx_after = int(mw.token_counter(new_checkpoint_messages))
+        except Exception:
+            pass
+        logger.info(
+            "Manual compaction for thread %s: summarized=%d kept=%d kept_user=%d approx_before=%s approx_after=%s",
+            thread_id, summarized, kept, kept_user, approx_before, approx_after,
+        )
+        return {
+            "compacted": True,
+            "summarized_count": summarized,
+            "kept_count": kept,
+            "kept_user_count": kept_user,
+            "checkpoint_tokens_before": approx_before,
+            "checkpoint_tokens_after": approx_after,
+        }
+
 
     def _resolve_preset(self, preset_id: str) -> AgentPreset:
         """Resolve a preset ID to an AgentPreset object."""

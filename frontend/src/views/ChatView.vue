@@ -78,6 +78,14 @@
             <span class="chat-time-label">{{ (item as any).label }}</span>
             <span class="chat-time-line" />
           </div>
+          <div
+            v-else-if="item.itemType === 'compaction-boundary'"
+            class="chat-compaction-boundary"
+          >
+            <span class="chat-compaction-line" />
+            <span class="chat-compaction-label">{{ (item as any).label }}</span>
+            <span class="chat-compaction-line" />
+          </div>
         </template>
         <template #header="{ item }">
           <div v-if="item.isSystem" class="role-header is-system">
@@ -107,13 +115,14 @@
           </div>
         </template>
         <template #content="{ item }">
-          <div
-            class="bubble-content-wrap"
-            :class="[
-              { 'is-system-delegation': item.isSystem },
-              (item as any).enterClass || '',
-            ]"
-          >
+            <div
+              class="bubble-content-wrap"
+              :class="[
+                { 'is-system-delegation': item.isSystem },
+                (item as any).enterClass || '',
+                (item as any).dimmed ? 'is-dimmed' : '',
+              ]"
+            >
             <div v-if="item.isSystem" class="system-delegation-msg">
               <div class="markdown-body" v-html="renderMarkdown(item.content || '')" />
             </div>
@@ -295,16 +304,19 @@
       <span>子 Agent 查看模式 — 如需停止或继续输入，请返回主对话</span>
       <button class="subagent-readonly-back" @click="sessionsStore.popToRoot()">返回主对话</button>
     </div>
-    <ChatInput
-      v-else
-      :is-streaming="isStreaming"
-      :edit-content="editingContent"
-      :edit-attachments="editingAttachments"
-      :is-editing="Boolean(editingMessageId)"
-      @send="handleSend"
-      @stop="handleStop"
-      @cancel-edit="cancelEdit"
-    />
+    <template v-else>
+      <ChatInput
+        ref="chatInputRef"
+        :is-streaming="isStreaming"
+        :edit-content="editingContent"
+        :edit-attachments="editingAttachments"
+        :is-editing="Boolean(editingMessageId)"
+        @send="handleSend"
+        @stop="handleStop"
+        @cancel-edit="cancelEdit"
+        @compact="handleCompact"
+      />
+    </template>
 
     <InterruptDialog
       :interrupt="interrupt"
@@ -353,6 +365,7 @@ import { useAgentsStore } from '@/stores/agents'
 import { useToolsStore } from '@/stores/tools'
 import { useFileChangesStore } from '@/stores/file-changes'
 import { renderMarkdown } from '@/utils/markdown'
+import { api } from '@/api/http'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import InterruptDialog from '@/components/chat/InterruptDialog.vue'
 import ToolCardRouter from '@/components/chat/tools/ToolCardRouter.vue'
@@ -392,6 +405,8 @@ type MessageBubbleItem = BubbleListItemProps & {
   isStreamingMessage?: boolean
   /** 该气泡所属对话轮次（用户消息序号），透传给工具卡片做变更面板定位 */
   round?: number | null
+  /** 手动压缩分界线以上的消息（已进摘要）灰显 */
+  dimmed?: boolean
   timestamp?: number
   enterClass?: string
 }
@@ -427,7 +442,17 @@ type LoadOlderBubbleItem = BubbleListItemProps & {
   isStreamingMessage?: boolean
 }
 
-type ChatBubbleItem = MessageBubbleItem | LoadOlderBubbleItem | TimeSeparatorItem
+type CompactionBoundaryItem = MessageBubbleItem & {
+  key: string
+  itemType: 'compaction-boundary'
+  type: 'compaction-boundary'
+  label: string
+  role: 'ai'
+  messageId: string
+  content: string
+}
+
+type ChatBubbleItem = MessageBubbleItem | LoadOlderBubbleItem | TimeSeparatorItem | CompactionBoundaryItem
 
 const chatStore = useChatStore()
 const sessionsStore = useSessionsStore()
@@ -601,14 +626,16 @@ const bubbleList = computed((): ChatBubbleItem[] => {
   const filtered = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
 
-  // 轮次号 = 用户消息序号（和后端 FileChange.round_number 同口径）：
+  // 轮次号（和后端 FileChange.round_number 同口径）：
+  // 历史消息用后端带回的 round_number（分页加载时本地计数会错位），
+  // 直播消息没有该字段，从最后已知轮次递增。
   // 每个 assistant 气泡记下它所属的轮次，透传给工具卡片做变更面板定位。
   const roundOfMessage = new Map<string, number>()
   {
     let round = 0
     for (const msg of filtered) {
       if (msg.isSystem) continue
-      if (msg.role === 'user') { round++; continue }
+      if (msg.role === 'user') { round = msg.roundNumber ?? round + 1; continue }
       roundOfMessage.set(msg.id, round)
     }
   }
@@ -666,6 +693,40 @@ const bubbleList = computed((): ChatBubbleItem[] => {
   }
 
   if (hasOlderMessages.value) out.unshift(createLoadOlderItem())
+
+  // 手动压缩分界线：插在倒数第 keptUserCount 个 user 消息上方，
+  // 线以上的消息已进摘要（灰显）。按条数对齐，之后又发的消息会让线偏上，刷新重算自愈。
+  const compaction = chatUiState.getCompaction(sessionsStore.effectiveThreadId || sessionsStore.currentSessionId || '')
+  if (compaction && compaction.keptUserCount > 0) {
+    let seen = 0
+    let boundaryIdx = -1
+    for (let i = out.length - 1; i >= 0; i--) {
+      const item = out[i]
+      if (item.role === 'user' && !(item as MessageBubbleItem).isSystem) {
+        seen++
+        if (seen >= compaction.keptUserCount) {
+          boundaryIdx = i
+          break
+        }
+      }
+    }
+    if (boundaryIdx > 0) {
+      out.splice(boundaryIdx, 0, {
+        key: '__compaction_boundary__',
+        itemType: 'compaction-boundary',
+        type: 'compaction-boundary',
+        role: 'ai',
+        messageId: '__compaction_boundary__',
+        content: '',
+        label: `以上 ${compaction.summarizedCount} 条已压缩为摘要，模型只记得摘要`,
+      } as CompactionBoundaryItem)
+      for (let i = 0; i < boundaryIdx; i++) {
+        const item = out[i] as MessageBubbleItem
+        if (item.itemType === undefined) item.dimmed = true
+      }
+    }
+  }
+
   return out
 })
 
@@ -674,7 +735,8 @@ const lastUserMessage = computed(() =>
 )
 
 // 每轮回复末尾的「文件已更改」卡片：messageId → 轮次。
-// 轮次号 = 用户消息序号；卡片挂在每轮最后一条非系统 assistant 消息上。
+// 轮次号优先用后端带回的 round_number（分页加载时本地计数会错位），
+// 直播消息没有该字段，从最后已知轮次递增；卡片挂在每轮最后一条非系统 assistant 消息上。
 const roundFileCards = computed((): Record<string, { round: number }> => {
   const fc = useFileChangesStore()
   const map: Record<string, { round: number }> = {}
@@ -684,7 +746,7 @@ const roundFileCards = computed((): Record<string, { round: number }> => {
   for (const msg of messages.value) {
     if (msg.isSystem) continue
     if (msg.role === 'user') {
-      round++
+      round = msg.roundNumber ?? round + 1
       continue
     }
     if (msg.role === 'assistant') lastAiIdByRound[round] = msg.id
@@ -1039,6 +1101,32 @@ function handleSend(content: ContentBlock[]) {
 function handleStop() {
   chatStore.stopGeneration()
 }
+
+const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
+
+/** 手动压缩（加速球 / 输入框 /compact 命令），arg 为 '' | 'all' | 'N' */
+async function handleCompact(arg: string) {
+  const sessionId = sessionsStore.effectiveThreadId || sessionsStore.currentSessionId
+  if (!sessionId || isStreaming.value) return
+  chatInputRef.value?.setCompacting(true)
+  try {
+    const data = await api.compactSession(sessionId, arg)
+    chatUiState.rememberCompaction(sessionId, {
+      summarizedCount: data.summarized_count,
+      keptCount: data.kept_count,
+      keptUserCount: data.kept_user_count,
+      timestamp: Date.now(),
+      checkpointTokensBefore: data.checkpoint_tokens_before ?? null,
+      checkpointTokensAfter: data.checkpoint_tokens_after ?? null,
+    })
+    ElMessage.success(`已压缩 ${data.summarized_count} 条，保留 ${data.kept_count} 条`)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '压缩失败')
+  } finally {
+    chatInputRef.value?.setCompacting(false)
+  }
+}
+
 
 function escapeHtml(str: string): string {
   return str
@@ -1559,6 +1647,36 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
   background: color-mix(in srgb, var(--el-fill-color-light) 80%, transparent);
   border: 1px solid var(--el-border-color-lighter);
+}
+
+/* 手动压缩分界线：线以上消息已进摘要 */
+.chat-compaction-boundary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: var(--md-answer-width);
+  padding: 12px 4% 8px;
+  pointer-events: none;
+}
+.chat-compaction-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--el-color-warning-light-5) 50%, transparent);
+}
+.chat-compaction-label {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: var(--el-color-warning-dark-2);
+  background: var(--el-color-warning-light-9);
+  border: 1px solid var(--el-color-warning-light-5);
+  white-space: nowrap;
+}
+
+.bubble-content-wrap.is-dimmed {
+  opacity: 0.55;
 }
 
 .messages-container :deep(.elx-bubble) {

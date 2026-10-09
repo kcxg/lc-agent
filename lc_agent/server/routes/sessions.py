@@ -23,6 +23,10 @@ class SessionUpdateRequest(BaseModel):
     is_pinned: bool | None = None
 
 
+class CompactRequest(BaseModel):
+    keep: str = ""  # ""=沿用配置 keep；"all"=只留 1 条；数字=留最近 N 条
+
+
 def serialize_session(s):
     return {
         "id": s.id,
@@ -132,6 +136,44 @@ async def delete_session(
     return Response(status_code=204)
 
 
+@router.post("/sessions/{session_id}/compact")
+async def compact_session(
+    session_id: str,
+    body: CompactRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """手动压缩上下文（不看触发阈值）：只重写模型上下文，聊天记录不动。"""
+    repo = SessionRepository(db)
+    sess = await repo.get_by_id(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _check_session_access(sess, user)
+
+    engine = request.app.state.engine
+    try:
+        result = await engine.compact_thread(
+            session_id, preset_id=sess.agent_id, model_id=sess.model, keep_override=body.keep,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        server_logger.exception("Manual compaction failed for session %s", session_id)
+        raise HTTPException(status_code=503, detail="压缩失败，请稍后重试") from e
+
+    if not result.get("compacted"):
+        reasons = {
+            "empty": "会话还没有消息",
+            "nothing_to_compact": "消息量在保留范围内，无需压缩",
+            "agent_not_found": "Agent 不可用",
+        }
+        raise HTTPException(
+            status_code=409, detail=reasons.get(result.get("reason", ""), "无需压缩")
+        )
+    return result
+
+
 @router.get("/sessions/{session_id}/messages")
 async def get_session_messages(
     session_id: str,
@@ -163,6 +205,15 @@ async def get_session_messages(
     ui_messages = await msg_repo.list_by_session(session_id, limit=limit, offset=effective_offset)
 
     if ui_messages:
+        # 轮次号 = 该消息之前的 user 消息数（全局口径，与 FileChange.round_number 同源）。
+        # 前端只加载窗口消息，自己数会和后端错位，这里算好直接带回去。
+        round_of: dict[str, int] = {}
+        round_no = 0
+        for mid, mrole in await msg_repo.list_ids_roles(session_id):
+            if mrole == "user":
+                round_no += 1
+            round_of[mid] = round_no
+
         return {
             "total": total,
             "offset": effective_offset,
@@ -175,6 +226,7 @@ async def get_session_messages(
                     "tool_calls": msg.tool_calls or [],
                     "usage": msg.usage,
                     "http_traces_count": len(msg.http_traces) if msg.http_traces else 0,
+                    "round_number": round_of.get(msg.id),
                     "created_at": msg.created_at.isoformat(),
                 }
                 for msg in ui_messages
