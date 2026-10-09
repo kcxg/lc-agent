@@ -1,5 +1,6 @@
 """Internal Agent execution service shared by chat and automation."""
 
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from lc_agent.core.http_trace import (
 from lc_agent.server import persistence, stream_utils
 from lc_agent.server.subagent_tracker import SubAgentRunTracker
 from lc_agent.server.usage_recorder import build_model_map, record_usage
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -202,6 +205,7 @@ class AgentRunService:
                 pass
             return AgentRunResult(final_output="".join(content_parts))
         except Exception as exc:
+            logger.exception("agent run failed: preset=%s session=%s", preset_id, session_id)
             await record_usage(
                 usage_rounds,
                 session_id=session_id,
