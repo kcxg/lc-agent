@@ -41,8 +41,8 @@ def test_create_traced_chat_openai_defaults_to_openai_base_url_for_trace_metadat
 
 
 def test_tracing_async_client_pins_accept_encoding_without_zstd():
-    """venv 装有 zstandard（langsmith 依赖）时 httpx 会声明支持 zstd，
-    部分网关返回标了 zstd 却非法的响应体会炸解码——固定为 gzip/deflate。"""
+    """网关偶发返回编码标注错误的压缩响应体（zstd/gzip 解码报错），
+    固定请求 identity 不压缩，从根上绕开解码错误。"""
     from lc_agent import create_traced_chat_openai
     from lc_agent.core.http_trace_httpx import TracingAsyncClient
 
@@ -50,7 +50,7 @@ def test_tracing_async_client_pins_accept_encoding_without_zstd():
     client = llm.http_async_client
 
     assert isinstance(client, TracingAsyncClient)
-    assert client.headers["accept-encoding"] == "gzip, deflate"
+    assert client.headers["accept-encoding"] == "identity"
 
 
 def test_chat_openai_reasoning_default_params_restore_legacy_max_tokens_only():
