@@ -324,6 +324,7 @@ class AgentEngine:
         llm_params: dict | None = None,
         building_set: frozenset[str] | None = None,
         _depth: int = 0,
+        bypass_permissions: bool = False,
     ):
         """Build a LangGraph ReAct agent from preset."""
         if preset is None:
@@ -456,14 +457,16 @@ class AgentEngine:
                 tool_description=TODO_TOOL_DESCRIPTION,
             ))
         middleware.extend(self._build_summarization_middleware(preset))
-        if _depth == 0:
+        # 无人值守运行（bypass_permissions）没有可应答的用户，不提供 ask_user 工具
+        if _depth == 0 and not bypass_permissions:
             from lc_agent.middlewares import AskUserMiddleware
             middleware.append(AskUserMiddleware())
         middleware.append(inject_current_time_prompt_middleware)
         middleware.append(user_os_middleware)
 
-        # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously
-        if hasattr(self, '_permissions_service') and self._permissions_service and _depth == 0:
+        # Only top-level agents need human-in-the-loop approval; sub-agents run autonomously.
+        # bypass_permissions skips it for unattended runs (lcagent_as_mcp) that have no one to approve.
+        if not bypass_permissions and hasattr(self, '_permissions_service') and self._permissions_service and _depth == 0:
             from langchain.agents.middleware import HumanInTheLoopMiddleware
             # Include skill middleware tools so they're subject to permission checks
             hitl_tools = list(tools)
@@ -784,6 +787,7 @@ class AgentEngine:
         model_id: str = "",
         llm_params: dict | None = None,
         _depth: int = 0,
+        _bypass_permissions: bool = False,
     ) -> str:
         key = f"{preset_id}::model::{model_id}" if model_id else preset_id
         if llm_params:
@@ -791,6 +795,8 @@ class AgentEngine:
             key = f"{key}::llm::{json.dumps(llm_params, sort_keys=True)}"
         if _depth:
             key = f"{key}::depth::{_depth}"
+        if _bypass_permissions:
+            key = f"{key}::nohitl"
         return key
 
     def get_subagent_tool_names(
@@ -799,6 +805,7 @@ class AgentEngine:
         model_id: str = "",
         llm_params: dict | None = None,
         _depth: int = 0,
+        bypass_permissions: bool = False,
     ) -> set[str]:
         """Return the set of tool names (not IDs) that are sub-agents for the given preset."""
         cache_key = self._get_agent_cache_key(
@@ -806,6 +813,7 @@ class AgentEngine:
             model_id if self._find_model(model_id) else "",
             llm_params=llm_params,
             _depth=_depth,
+            _bypass_permissions=bypass_permissions,
         )
         return self._agent_subagent_tools.get(cache_key, set())
 
@@ -815,6 +823,7 @@ class AgentEngine:
         model_id: str = "",
         llm_params: dict | None = None,
         _depth: int = 0,
+        bypass_permissions: bool = False,
     ) -> dict[str, str]:
         """Return {tool_name: display_name} for sub-agents of the given preset."""
         cache_key = self._get_agent_cache_key(
@@ -822,6 +831,7 @@ class AgentEngine:
             model_id if self._find_model(model_id) else "",
             llm_params=llm_params,
             _depth=_depth,
+            _bypass_permissions=bypass_permissions,
         )
         return self._agent_subagent_display_map.get(cache_key, {})
 
@@ -861,6 +871,7 @@ class AgentEngine:
         model_id: str = "",
         llm_params: dict | None = None,
         _depth: int = 0,
+        bypass_permissions: bool = False,
     ):
         """Get cached agent or build a new one. Rebuilds preset agents if MCP state changed."""
         preset = self._resolve_preset(preset_id)
@@ -899,12 +910,19 @@ class AgentEngine:
             model_id if preset.default_model == model_id else "",
             llm_params=llm_params,
             _depth=_depth,
+            _bypass_permissions=bypass_permissions,
         )
         mcp_gen = getattr(self, '_mcp_generation', 0)
         cached = self._agents.get(cache_key)
         cached_gen = self._agent_mcp_gen.get(cache_key, -1)
         if cached is None or cached_gen != mcp_gen:
-            agent = self.build_agent(preset, cache_key=cache_key, llm_params=llm_params, _depth=_depth)
+            agent = self.build_agent(
+                preset,
+                cache_key=cache_key,
+                llm_params=llm_params,
+                _depth=_depth,
+                bypass_permissions=bypass_permissions,
+            )
             self._agent_mcp_gen[cache_key] = mcp_gen
             return agent
         return cached
@@ -957,6 +975,7 @@ class AgentEngine:
         history: list[dict[str, str]] | None = None,
         llm_params: dict | None = None,
         user_id: str = "anonymous",
+        bypass_permissions: bool = False,
     ) -> AsyncIterator[dict]:
         """Stream chat responses as events.
 
@@ -993,7 +1012,9 @@ class AgentEngine:
                 _build_project_context_text, _eff_project_root
             )
 
-        agent = self._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
+        agent = self._get_or_build_agent(
+            preset_id, model_id, llm_params=llm_params, bypass_permissions=bypass_permissions
+        )
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": self.recursion_limit}
         message = _convert_text_file_blocks(message)

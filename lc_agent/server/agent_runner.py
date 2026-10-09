@@ -39,6 +39,7 @@ class AgentRunService:
         user_id: str,
         model_id: str = "",
         llm_params: dict[str, Any] | None = None,
+        bypass_permissions: bool = False,
     ) -> AgentRunResult:
         if not self.engine._preset_exists(preset_id):
             return AgentRunResult(error=f"Agent 不存在: {preset_id}")
@@ -61,12 +62,16 @@ class AgentRunService:
                 content,
             )
             round_number = await persistence.get_session_user_message_count(session_id)
-            self.engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
+            self.engine._get_or_build_agent(
+                preset_id, model_id, llm_params=llm_params, bypass_permissions=bypass_permissions
+            )
             display_map = self.engine.get_subagent_display_name_map(
                 preset_id, model_id=model_id, llm_params=llm_params,
+                bypass_permissions=bypass_permissions,
             )
             tool_names = self.engine.get_subagent_tool_names(
                 preset_id, model_id=model_id, llm_params=llm_params,
+                bypass_permissions=bypass_permissions,
             )
             tracker = SubAgentRunTracker(
                 parent_thread_id=session_id,
@@ -91,6 +96,7 @@ class AgentRunService:
                     model_id=model_id,
                     llm_params=llm_params,
                     user_id=user_id,
+                    bypass_permissions=bypass_permissions,
                 ):
                     in_thinking = stream_utils.accumulate_display_state(
                         event,
@@ -179,7 +185,9 @@ class AgentRunService:
                 )
             await persistence.increment_session_message_count(session_id)
             try:
-                agent = self.engine._get_or_build_agent(preset_id, model_id, llm_params=llm_params)
+                agent = self.engine._get_or_build_agent(
+                    preset_id, model_id, llm_params=llm_params, bypass_permissions=bypass_permissions
+                )
                 config = {"configurable": {"thread_id": session_id}, "recursion_limit": self.engine.recursion_limit}
                 state = await agent.aget_state(config)
                 if any(task.interrupts for task in (state.tasks or ())):

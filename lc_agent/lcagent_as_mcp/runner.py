@@ -47,11 +47,13 @@ async def run_agent_once(
     from lc_agent.server.agent_runner import AgentRunService
 
     service = AgentRunService(engine)
+    # MCP 通道无人值守，中断等不到人批准——跳过 HITL，避免"任务需要人工审批"死路
     result = await service.run(
         session_id=session_id,
         prompt=prompt,
         preset_id=preset_id,
         user_id=user.id,
+        bypass_permissions=True,
     )
     if result.error:
         server_logger.error(

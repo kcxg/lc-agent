@@ -285,7 +285,7 @@ class TestAgentEngine:
         monkeypatch.setattr(
             engine,
             "_get_or_build_agent",
-            lambda preset_id, model_id="", llm_params=None: FakeAgent(),
+            lambda preset_id, model_id="", llm_params=None, bypass_permissions=False: FakeAgent(),
         )
 
         events = []

@@ -369,3 +369,52 @@ async def test_ensure_service_user(tmp_path):
         assert count == 1
 
     await engine.dispose()
+
+
+# ---------- 无人值守执行：绕过人工审批 ----------
+
+
+@pytest.mark.asyncio
+async def test_run_agent_once_bypasses_permissions(monkeypatch):
+    """MCP 通道无人值守：run_agent_once 必须以 bypass_permissions=True 跑 agent，
+    否则工具调用中断后无人批准，只能返回"任务需要人工审批"。"""
+    from lc_agent.lcagent_as_mcp import runner as mcp_runner
+    from lc_agent.server import agent_runner as ar
+
+    class _User:
+        id = "svc-user"
+
+    class _DB:
+        async def get(self, model, pk):
+            return None  # preset 查不到 → 标题回退到 preset_id
+
+        async def close(self):
+            pass
+
+    class _Repo:
+        def __init__(self, db):
+            pass
+
+        async def create(self, **kwargs):
+            return None
+
+    captured = {}
+
+    async def fake_run(self, **kwargs):
+        captured.update(kwargs)
+        return ar.AgentRunResult(final_output="ok")
+
+    async def fake_ensure_service_user(db):
+        return _User()
+
+    monkeypatch.setattr(mcp_runner, "get_business_async_session", lambda: _DB())
+    monkeypatch.setattr(mcp_runner, "ensure_service_user", fake_ensure_service_user)
+    monkeypatch.setattr(mcp_runner, "SessionRepository", _Repo)
+    monkeypatch.setattr(ar.AgentRunService, "run", fake_run)
+
+    output, error = await mcp_runner.run_agent_once(
+        engine=object(), preset_id="p-search", prompt="hi"
+    )
+    assert error is None
+    assert output == "ok"
+    assert captured["bypass_permissions"] is True

@@ -203,7 +203,7 @@ async def test_agent_run_service_persists_a_standalone_execution(db_url):
         def _preset_exists(self, preset_id):
             return preset_id == "fake-agent"
 
-        def _get_or_build_agent(self, preset_id, model_id="", llm_params=None):
+        def _get_or_build_agent(self, preset_id, model_id="", llm_params=None, bypass_permissions=False):
             return self.FakeAgent()
 
         def get_subagent_display_name_map(self, preset_id, **kwargs):
