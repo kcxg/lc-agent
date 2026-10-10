@@ -47,5 +47,5 @@
       "admin_password": "admin123",
       // Token 有效期（天）
       "token_expire_days": 7
-  },
+  }
 }
