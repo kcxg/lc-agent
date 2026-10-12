@@ -86,10 +86,10 @@
         </div>
         <BubbleList
           v-else
+          ref="bubbleListRef"
           :list="bubbleList"
           max-height="100%"
-          :auto-scroll="isStreaming"
-          :virtual="false"
+          :auto-scroll="isStreaming || stickBottomOnLoad"
         >
         <template #item="{ item }">
           <div
@@ -154,6 +154,7 @@
               class="bubble-content-wrap"
               :class="[
                 { 'is-system-delegation': item.isSystem },
+                { 'is-jump-highlight': item.key === jumpHighlightKey },
                 (item as any).enterClass || '',
                 (item as any).dimmed ? 'is-dimmed' : '',
               ]"
@@ -415,6 +416,8 @@ import { useDesktopMode } from '@/stores/desktop'
 import { useDomSearch } from '@/composables/useDomSearch'
 
 const LOAD_OLDER_REVEAL_THRESHOLD = 24
+// 「概览」跳转时目标消息可能尚未加载：最多往回翻这么多页，避免异常会话把页面拖死
+const JUMP_MAX_LOAD_ATTEMPTS = 30
 
 interface ContentSegment {
   type: 'text' | 'thinking' | 'tool' | 'http'
@@ -442,6 +445,8 @@ type MessageBubbleItem = BubbleListItemProps & {
   isStreamingMessage?: boolean
   /** 该气泡所属对话轮次（用户消息序号），透传给工具卡片做变更面板定位 */
   round?: number | null
+  /** 仅用户气泡：该提问的轮次号，供概览跳转兜底定位 */
+  msgRound?: number | null
   /** 手动压缩分界线以上的消息（已进摘要）灰显 */
   dimmed?: boolean
   timestamp?: number
@@ -477,6 +482,8 @@ type LoadOlderBubbleItem = BubbleListItemProps & {
   httpTraces?: HttpTrace[]
   httpTracesCount?: number
   isStreamingMessage?: boolean
+  /** 仅用户气泡：该提问的轮次号，供概览跳转兜底定位 */
+  msgRound?: number | null
 }
 
 type CompactionBoundaryItem = MessageBubbleItem & {
@@ -504,7 +511,14 @@ const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
 const editingAttachments = ref<Attachment[]>([])
 const messagesContainerRef = ref<HTMLElement | null>(null)
+// 概览跳转靠列表自身的滚动 API 定位，不依赖 DOM 属性比对（虚拟列表下元素可能未挂载）
+const bubbleListRef = ref<{ scrollToBubble?: (index: number, smooth?: boolean) => void } | null>(null)
+// 概览跳转命中的气泡 key：由模板绑定高亮类
+const jumpHighlightKey = ref<string | number | null>(null)
+let jumpHighlightTimer: ReturnType<typeof setTimeout> | null = null
 const showLoadOlderMessages = ref(false)
+// 首次打开会话（无历史滚动位置）时跟底：先手动贴底，再交给 BubbleList 的 auto-scroll 跟随异步渲染
+const stickBottomOnLoad = ref(false)
 
 // ---- 聊天区内查找（desktop 下 Ctrl+F 浮层；只标记已加载消息的可见 DOM）----
 const {
@@ -708,6 +722,21 @@ function createTimeSeparatorItem(ts: number): TimeSeparatorItem {
   }
 }
 
+/** 每条消息 → 所属对话轮次（用户消息序号）。
+ *  历史消息用后端带回的 round_number（分页加载时本地计数会错位），
+ *  直播消息没有该字段，从最后已知轮次递增；概览跳转在 id 对不上时靠它兜底。 */
+const roundOfMessage = computed<Map<string, number>>(() => {
+  const map = new Map<string, number>()
+  let round = 0
+  for (const msg of messages.value) {
+    if (msg.role !== 'user' && msg.role !== 'assistant') continue
+    if (msg.isSystem) continue
+    if (msg.role === 'user') round = msg.roundNumber ?? round + 1
+    map.set(msg.id, round)
+  }
+  return map
+})
+
 const bubbleList = computed((): ChatBubbleItem[] => {
   // When in live sub-session mode, render from SubAgentEntry without touching main SSE
   if (subLiveToolCallId.value !== null) return subLiveBubbleList.value
@@ -715,19 +744,7 @@ const bubbleList = computed((): ChatBubbleItem[] => {
   const filtered = messages.value
     .filter(msg => msg.role === 'user' || msg.role === 'assistant')
 
-  // 轮次号（和后端 FileChange.round_number 同口径）：
-  // 历史消息用后端带回的 round_number（分页加载时本地计数会错位），
-  // 直播消息没有该字段，从最后已知轮次递增。
-  // 每个 assistant 气泡记下它所属的轮次，透传给工具卡片做变更面板定位。
-  const roundOfMessage = new Map<string, number>()
-  {
-    let round = 0
-    for (const msg of filtered) {
-      if (msg.isSystem) continue
-      if (msg.role === 'user') { round = msg.roundNumber ?? round + 1; continue }
-      roundOfMessage.set(msg.id, round)
-    }
-  }
+  const roundsOf = roundOfMessage.value
 
   const out: ChatBubbleItem[] = []
   let prevTs: number | null = null
@@ -766,7 +783,9 @@ const bubbleList = computed((): ChatBubbleItem[] => {
       segments: segs,
       httpTraces: msg.role === 'assistant' ? msg.httpTraces : undefined,
       httpTracesCount: msg.role === 'assistant' ? (msg.httpTracesCount || 0) : 0,
-      round: msg.role === 'assistant' ? (roundOfMessage.get(msg.id) ?? null) : undefined,
+      round: msg.role === 'assistant' ? (roundsOf.get(msg.id) ?? null) : undefined,
+      // 用户气泡带着轮次号，供概览跳转在 id 对不上时兜底定位
+      msgRound: msg.role === 'user' ? (roundsOf.get(msg.id) ?? null) : null,
       summarizations: msg.role === 'assistant' ? msg.summarizations : undefined,
       hasThinking: segs?.some(s => s.type === 'thinking' && s.text?.trim()) ?? false,
       hasToolCalls: segs?.some(s => s.type === 'tool') ?? false,
@@ -1396,7 +1415,15 @@ async function copyMarkdownCode(button: HTMLButtonElement) {
 }
 
 function getMessagesScroller() {
-  return messagesContainerRef.value?.querySelector('.elx-bubble-list') as HTMLElement | null
+  // 真正滚动的是 BubbleList 内部的列表元素；外层 .elx-bubble-list 不滚动（clientHeight==scrollHeight）
+  return messagesContainerRef.value?.querySelector('.elx-bubble-list__list') as HTMLElement | null
+}
+
+function pinMessagesToBottom() {
+  const scroller = getMessagesScroller()
+  if (!scroller) return
+  scroller.scrollTop = scroller.scrollHeight
+  handleMessagesScroll()
 }
 
 function handleMessagesScroll() {
@@ -1404,6 +1431,11 @@ function handleMessagesScroll() {
   if (!scroller) {
     showLoadOlderMessages.value = false
     return
+  }
+  const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+  // 用户主动上滚即停止"打开后跟底"，不抢用户的滚动
+  if (stickBottomOnLoad.value && distanceFromBottom > LOAD_OLDER_REVEAL_THRESHOLD) {
+    stickBottomOnLoad.value = false
   }
   // 记下当前会话的滚动位置，切走再切回时恢复，而不是从头滚到底
   const sessionId = sessionsStore.currentSessionId
@@ -1420,8 +1452,15 @@ async function restoreScrollPosition(sessionId: string) {
   const scroller = getMessagesScroller()
   if (!scroller) return
   const saved = chatUiState.getScrollTop(sessionId)
-  scroller.scrollTop = saved ?? scroller.scrollHeight
-  handleMessagesScroll()
+  if (saved != null) {
+    stickBottomOnLoad.value = false
+    scroller.scrollTop = saved
+    handleMessagesScroll()
+    return
+  }
+  // 无记录：先贴底，再让 BubbleList 的 auto-scroll 跟随异步渲染继续跟底（内容增高自动补底）
+  stickBottomOnLoad.value = true
+  pinMessagesToBottom()
 }
 
 async function scrollMessagesToBottom() {
@@ -1444,6 +1483,65 @@ async function handleLoadOlderMessages() {
   scroller.scrollTop = scroller.scrollHeight - distanceFromBottom
   handleMessagesScroll()
 }
+
+/** 概览面板请求跳转到某轮：先补加载历史，再定位并高亮闪烁 */
+async function jumpToOverviewMessage(target: { messageId: string; roundNumber?: number }) {
+  const sessionId = chatStore.threadId
+  const { messageId, roundNumber } = target
+
+  // 在气泡列表里定位目标项：先按消息 id，直播消息用的是本地生成的 id、与库里 uuid 对不上，
+  // 再按轮次号兜底（后端 round_number 与前端本地计数同为 1-based）
+  const resolveIndex = (): number => {
+    const items = bubbleList.value
+    const byId = items.findIndex(it => it.messageId === messageId)
+    if (byId >= 0) return byId
+    if (roundNumber == null) return -1
+    return items.findIndex(
+      it => it.role === 'user' && (it as MessageBubbleItem).msgRound === roundNumber,
+    )
+  }
+
+  let index = resolveIndex()
+  for (let attempt = 0; index < 0 && attempt < JUMP_MAX_LOAD_ATTEMPTS; attempt++) {
+    if (!sessionId || !hasOlderMessages.value) break
+    const before = messages.value.length
+    await chatStore.loadOlderMessages(sessionId)
+    await nextTick()
+    index = resolveIndex()
+    if (index < 0 && messages.value.length === before) {
+      // 分页可能正被其它入口占用而空转：让出的事件循环再试，已到顶则退出
+      await new Promise(resolve => setTimeout(resolve, 50))
+      if (!hasOlderMessages.value) break
+    }
+  }
+
+  if (index < 0) {
+    ElMessage.warning('未找到该消息，可能已被删除或压缩')
+    return
+  }
+
+  // 高亮走 Vue 绑定，滚动交给列表自身的 API：目标行在视口外时 DOM 尚未挂载，直接查 DOM 会落空
+  jumpHighlightKey.value = bubbleList.value[index]?.key ?? null
+  bubbleListRef.value?.scrollToBubble?.(index, false)
+
+  if (jumpHighlightTimer) clearTimeout(jumpHighlightTimer)
+  jumpHighlightTimer = setTimeout(() => {
+    jumpHighlightKey.value = null
+    jumpHighlightTimer = null
+  }, 1600)
+}
+
+watch(
+  () => chatStore.overviewJumpTarget,
+  async (target) => {
+    if (!target) return
+    try {
+      await jumpToOverviewMessage(target)
+    } finally {
+      chatStore.clearJumpTarget()
+    }
+  },
+)
 
 function handleMarkdownClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null
@@ -2139,6 +2237,26 @@ onBeforeUnmount(() => {
   max-width: var(--md-answer-width);
 }
 
+/* 概览点击跳转命中：一次性描边闪烁。纯主题变量，深/浅色都能看清 */
+.bubble-content-wrap.is-jump-highlight {
+  border-radius: 10px;
+  animation: jump-target-flash 1.5s ease-out;
+}
+
+@keyframes jump-target-flash {
+  0% {
+    box-shadow: 0 0 0 2px var(--el-color-primary);
+    background: color-mix(in srgb, var(--el-color-primary) 18%, transparent);
+  }
+  60% {
+    box-shadow: 0 0 0 2px var(--el-color-primary-light-3);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    background: transparent;
+  }
+}
+
 .user-plain-text {
   white-space: pre-wrap;
   word-break: break-word;
@@ -2324,6 +2442,12 @@ onBeforeUnmount(() => {
   .subagent-workflow.is-running .subagent-workflow-pulse,
   .subagent-workflow.is-running .subagent-delegation-node {
     animation: none;
+  }
+
+  /* 关掉闪烁，保留一段静态描边，1.5s 后由脚本移除 */
+  .bubble-content-wrap.is-jump-highlight {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--el-color-primary);
   }
 }
 

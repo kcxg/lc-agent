@@ -35,7 +35,24 @@ export function useDomSearch(rootGetter: () => HTMLElement | null, options: UseD
     applying = true
     try {
       el.querySelectorAll('mark.code-search-hit').forEach((m) => {
-        m.replaceWith(document.createTextNode(m.textContent))
+        const t = document.createTextNode(m.textContent)
+        m.replaceWith(t)
+        // 只合并命中处相邻的文本节点，还原被高亮切开的词（如 "P" | "ython 服务"）；
+        // 逐文本节点匹配否则会漏掉整词。不做整容器 normalize——那会打乱 Vue 记账的
+        // 文本节点，后续 patch 时会丢掉大段内容
+        const prev = t.previousSibling
+        const next = t.nextSibling
+        if (prev && prev.nodeType === Node.TEXT_NODE) {
+          ;(prev as Text).appendData(t.data)
+          t.remove()
+          if (next && next.nodeType === Node.TEXT_NODE) {
+            ;(prev as Text).appendData((next as Text).data)
+            next.remove()
+          }
+        } else if (next && next.nodeType === Node.TEXT_NODE) {
+          t.appendData((next as Text).data)
+          next.remove()
+        }
       })
     } finally {
       applying = false
@@ -93,7 +110,8 @@ export function useDomSearch(rootGetter: () => HTMLElement | null, options: UseD
     if (!el) return
     const marks = el.querySelectorAll('mark.code-search-hit')
     marks.forEach((m, i) => m.classList.toggle('is-active', i === activeIndex.value))
-    ;(marks[activeIndex.value] as HTMLElement | undefined)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    // 即时滚动：平滑滚动是异步的，连点 ↑/↓ 会在动画途中重发，视图永远追不上高亮项
+    ;(marks[activeIndex.value] as HTMLElement | undefined)?.scrollIntoView({ block: 'center', behavior: 'auto' })
   }
 
   function goNext() {

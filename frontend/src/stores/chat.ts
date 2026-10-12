@@ -386,7 +386,7 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
   }
 }
 
-function normalizeHistoryMessages(rawMessages: any[]): ChatMessage[] {
+export function normalizeHistoryMessages(rawMessages: any[]): ChatMessage[] {
   const loaded: ChatMessage[] = []
   for (const msg of rawMessages) {
     const chatMsg = normalizeHistoryMessage(msg)
@@ -734,6 +734,9 @@ export const useChatStore = defineStore('chat', () => {
   const activeSessions = shallowReactive(new Map<string, SessionState>())
   const activeSessionId = ref<string | null>(null)
   const sessionOffsets = new Map<string, number>()
+  // 「概览」面板点击某轮后置为待跳转目标，ChatView 消费（定位并高亮）后清空。
+  // 轮次号用于兜底：直播消息用的是本地 client id，与库里 uuid 对不上
+  const overviewJumpTarget = ref<{ messageId: string; roundNumber?: number } | null>(null)
 
   // --- Computed delegates to active session (API unchanged for components) ---
   const _active = (): SessionState | undefined =>
@@ -1533,6 +1536,14 @@ export const useChatStore = defineStore('chat', () => {
     state.messages.value = state.messages.value.slice(0, idx)
   }
 
+  function requestJumpToMessage(messageId: string, roundNumber?: number) {
+    overviewJumpTarget.value = { messageId, roundNumber }
+  }
+
+  function clearJumpTarget() {
+    overviewJumpTarget.value = null
+  }
+
   return {
     messages,
     isStreaming,
@@ -1559,5 +1570,8 @@ export const useChatStore = defineStore('chat', () => {
     resumeInterrupt,
     clearMessages,
     truncateAfterMessage,
+    overviewJumpTarget,
+    requestJumpToMessage,
+    clearJumpTarget,
   }
 })

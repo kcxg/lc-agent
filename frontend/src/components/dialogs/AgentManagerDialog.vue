@@ -1214,9 +1214,7 @@ function groupSkillsByFolder(skills: DialogSkill[]): SkillGroup[] {
     let path: string | null
     if (s.path) {
       const parts = s.path.split(/[\\/]+/).filter(Boolean)
-      // remove filename (SKILL.md)
-      parts.pop()
-      // remove the skill folder name (skill lives one level under its collection)
+      // 后端 path 是 skill 目录本身（不含 SKILL.md），去掉 skill 目录名即所属集合目录
       parts.pop()
       path = parts.join('\\')
       key = path || '__root__'

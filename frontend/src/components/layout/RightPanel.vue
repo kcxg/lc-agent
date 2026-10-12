@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <aside
     class="right-panel"
     :class="{ collapsed }"
@@ -44,9 +44,13 @@
         </div>
       </div>
 
-      <div class="right-panel-scroll" :class="{ 'is-editor': activeTab === 'editor' }">
+      <div class="right-panel-scroll" :class="{ 'is-editor': activeTab === 'editor', 'is-overview': activeTab === 'overview' }">
         <transition name="fade-up" mode="out-in">
         <div :key="activeTab" class="tab-pane">
+
+          <template v-if="activeTab === 'overview'">
+            <ChatOverviewPanel />
+          </template>
 
           <template v-if="activeTab === 'model'">
             <template v-if="!agentsStore.isCodeAgent">
@@ -517,7 +521,7 @@ import { useMarkdownTheme, MARKDOWN_THEME_OPTIONS, type MarkdownThemeId } from '
 import { useMarkdownLayout, MARKDOWN_LAYOUT_OPTIONS, type MarkdownLayoutId } from '@/composables/useMarkdownLayout'
 import { useInputAnimation, INPUT_ANIMATION_OPTIONS, type InputAnimationType } from '@/composables/useInputAnimation'
 import { AnsiUp } from 'ansi_up'
-import { Clock, Cpu, Tools, Files, FolderOpened } from '@element-plus/icons-vue'
+import { Clock, Cpu, Tools, Files, FolderOpened, DataAnalysis } from '@element-plus/icons-vue'
 import ModelSelector from '@/components/panels/ModelSelector.vue'
 import ToolGroupPanel from '@/components/panels/ToolGroupPanel.vue'
 import DetailModal from '@/components/panels/DetailModal.vue'
@@ -525,6 +529,7 @@ import TodoList from '@/components/panels/TodoList.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 import FileChangesPanel from '@/components/panels/FileChangesPanel.vue'
 import FileEditorPane from '@/components/panels/FileEditorPane.vue'
+import ChatOverviewPanel from '@/components/panels/ChatOverviewPanel.vue'
 
 const ansiUp = new AnsiUp()
 
@@ -553,6 +558,7 @@ const dirtyFileCount = computed(() =>
 
 const tabs = computed((): Array<{ id: RightPanelTab; label: string; icon: any; badge: number }> => {
   const list: Array<{ id: RightPanelTab; label: string; icon: any; badge: number }> = [
+    { id: 'overview', label: '概览', icon: DataAnalysis, badge: 0 },
     { id: 'model', label: '模型', icon: Cpu, badge: 0 },
     { id: 'abilities', label: '能力', icon: Tools, badge: mcpErrorCount.value },
     { id: 'changes', label: '变更', icon: Files, badge: fileChangesStore.fileCount },
@@ -893,6 +899,13 @@ async function openDetail(mode: 'tool-group' | 'mcp' | 'skill', title: string, d
 .right-panel-scroll.is-editor > .tab-pane {
   flex: 1;
   min-height: 0;
+}
+
+/* 概览 tab 顶部不留内边距：sticky 只能停在内容盒内，容器自己的上内边距会
+   在吸附元素之上留出一条没被遮住的缝（轮次卡会从缝里透出来）。
+   改为由吸附容器自带内边距，它自己的底色就能把滑过的卡片挡住 */
+.right-panel-scroll.is-overview {
+  padding-top: 0;
 }
 
 .tab-pane {

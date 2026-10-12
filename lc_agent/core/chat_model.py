@@ -16,6 +16,7 @@ messages with HTTP 400.
 
 
 import contextvars
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, ClassVar
 
 from langchain_core.messages import AIMessage, AIMessageChunk
@@ -40,6 +41,28 @@ class ChatOpenAIReasoning(ChatOpenAI):
     _think_mode: ClassVar[contextvars.ContextVar[bool]] = contextvars.ContextVar(
         "ChatOpenAIReasoning__think_mode", default=False,
     )
+
+    # 同一条流里上一份 usage 的身份，用于丢弃重复下发的 usage。
+    _last_usage_key: ClassVar[contextvars.ContextVar[tuple[int, int, int] | None]] = (
+        contextvars.ContextVar("ChatOpenAIReasoning__last_usage_key", default=None)
+    )
+
+    def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
+        token = self._last_usage_key.set(None)
+        try:
+            yield from super()._stream(*args, **kwargs)
+        finally:
+            self._last_usage_key.reset(token)
+
+    async def _astream(
+        self, *args: Any, **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        token = self._last_usage_key.set(None)
+        try:
+            async for chunk in super()._astream(*args, **kwargs):
+                yield chunk
+        finally:
+            self._last_usage_key.reset(token)
 
     def _get_request_payload(
         self,
@@ -71,6 +94,28 @@ class ChatOpenAIReasoning(ChatOpenAI):
                     ai_counter += 1
         return payload
 
+    def _dedupe_stream_usage(self, generation_chunk: ChatGenerationChunk) -> None:
+        """丢弃同一条流里重复下发的 usage。
+
+        部分 OpenAI 兼容网关会把整份 usage 在多个分片里各发一遍，而 OpenAI 规范要求
+        usage 只在最后一个分片出现一次。LangChain 合并流式分片时会累加 usage_metadata，
+        重复下发会直接让上报用量翻倍。这里以 (输入, 输出, 总计) 作为同一份 usage 的身份，
+        一条流内只保留第一份。
+        """
+        message = generation_chunk.message
+        if not isinstance(message, AIMessageChunk) or not message.usage_metadata:
+            return
+        usage = message.usage_metadata
+        key = (
+            int(usage.get("input_tokens") or 0),
+            int(usage.get("output_tokens") or 0),
+            int(usage.get("total_tokens") or 0),
+        )
+        if self._last_usage_key.get() == key:
+            message.usage_metadata = None
+        else:
+            self._last_usage_key.set(key)
+
     def _convert_chunk_to_generation_chunk(
         self,
         chunk: dict,
@@ -82,6 +127,8 @@ class ChatOpenAIReasoning(ChatOpenAI):
         )
         if generation_chunk is None:
             return None
+
+        self._dedupe_stream_usage(generation_chunk)
 
         choices = chunk.get("choices") or chunk.get("chunk", {}).get("choices") or []
         if not choices:
