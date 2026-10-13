@@ -225,7 +225,7 @@ async def get_session_messages(
                     "content": msg.content,
                     "tool_calls": msg.tool_calls or [],
                     "usage": msg.usage,
-                    "http_traces_count": len(msg.http_traces) if msg.http_traces else 0,
+                    "http_traces_count": msg.http_traces_count or 0,
                     "round_number": round_of.get(msg.id),
                     "created_at": msg.created_at.isoformat(),
                 }

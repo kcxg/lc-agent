@@ -211,7 +211,7 @@ async def load_resume_context(thread_id: str) -> tuple[list[dict[str, Any]], int
             last_msg = await repo.get_last_assistant(thread_id)
             if last_msg is None:
                 return [], 0
-            return list(last_msg.tool_calls or []), len(last_msg.http_traces or [])
+            return list(last_msg.tool_calls or []), last_msg.http_traces_count or 0
         finally:
             await session.close()
     except Exception:
@@ -262,6 +262,7 @@ async def append_to_last_assistant_message(
                 }
             if http_traces:
                 last_msg.http_traces = (last_msg.http_traces or []) + list(http_traces)
+                last_msg.http_traces_count = len(last_msg.http_traces)
             session.add(last_msg)
             await session.commit()
         finally:

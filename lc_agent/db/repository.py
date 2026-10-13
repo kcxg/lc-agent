@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from lc_agent.db.models import (
     AgentPresetDB,
@@ -350,6 +351,20 @@ class AutomationRunRepository:
 
 
 class ChatUiMessageRepository:
+    # 列表类查询只取这些列：http_traces 正文（单个会话实测 359MB）绝不能因为
+    # select(ChatUiMessage) 全列而被顺带拖出来——那会让每次请求多花约 3 秒、多占约 1GB 内存。
+    # 只要条数请读 http_traces_count；要明细请走 get_by_id（追踪面板专用）。
+    LIST_COLUMNS = (
+        ChatUiMessage.id,
+        ChatUiMessage.session_id,
+        ChatUiMessage.role,
+        ChatUiMessage.content,
+        ChatUiMessage.tool_calls,
+        ChatUiMessage.usage,
+        ChatUiMessage.http_traces_count,
+        ChatUiMessage.created_at,
+    )
+
     def __init__(self, session: AsyncSession):
         self.session = session
 
@@ -370,6 +385,7 @@ class ChatUiMessageRepository:
             tool_calls=tool_calls,
             usage=usage,
             http_traces=http_traces,
+            http_traces_count=len(http_traces) if http_traces else 0,
         )
         self.session.add(message)
         await self.session.commit()
@@ -388,6 +404,7 @@ class ChatUiMessageRepository:
     ) -> list[ChatUiMessage]:
         stmt = (
             select(ChatUiMessage)
+            .options(load_only(*self.LIST_COLUMNS))
             .where(ChatUiMessage.session_id == session_id)
             .order_by(ChatUiMessage.created_at, ChatUiMessage.id)
         )
@@ -417,6 +434,7 @@ class ChatUiMessageRepository:
 
         result = await self.session.execute(
             select(ChatUiMessage)
+            .options(load_only(ChatUiMessage.id, ChatUiMessage.session_id))
             .where(ChatUiMessage.session_id == session_id)
             .order_by(ChatUiMessage.created_at, ChatUiMessage.id)
         )
@@ -431,6 +449,7 @@ class ChatUiMessageRepository:
         return len(rows[start_idx:])
 
     async def get_last_assistant(self, session_id: str) -> ChatUiMessage | None:
+        # 故意全列加载（含 http_traces 正文）：中断续跑要往末尾追加明细，必须拿到已有内容。
         result = await self.session.execute(
             select(ChatUiMessage)
             .where(ChatUiMessage.session_id == session_id, ChatUiMessage.role == "assistant")

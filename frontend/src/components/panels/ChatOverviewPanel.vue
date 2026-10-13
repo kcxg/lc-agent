@@ -11,6 +11,16 @@
             聊天概览
           </h4>
           <div class="overview-header-right">
+            <button
+              class="overview-collapse"
+              :class="{ 'is-collapsed': heroCollapsed }"
+              type="button"
+              :title="heroCollapsed ? '展开概览' : '折叠概览'"
+              :aria-expanded="!heroCollapsed"
+              @click="heroCollapsed = !heroCollapsed"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
             <span class="overview-count">{{ rounds.length }} 轮</span>
             <button
               class="overview-refresh"
@@ -24,39 +34,66 @@
           </div>
         </div>
 
-        <!-- 会话总览：深色渐变仪表盘，与下方轮次卡彻底拉开视觉 -->
-        <div v-if="rounds.length > 0" class="overview-hero">
-          <div class="hero-grid">
-            <div class="hero-cell hero-cell-window">
-              <span class="hero-cell-value">{{ formatToken(summary.windowInput) }}</span>
-              <span class="hero-cell-label">当前窗口</span>
-            </div>
-            <div class="hero-cell">
-              <span class="hero-cell-value">{{ formatToken(summary.totalInput) }}</span>
-              <span class="hero-cell-label">总输入</span>
-            </div>
-            <div class="hero-cell">
-              <span class="hero-cell-value">{{ formatToken(summary.totalOutput) }}</span>
-              <span class="hero-cell-label">总输出</span>
-            </div>
-            <div class="hero-cell hero-cell-cached">
-              <span class="hero-cell-value">{{ formatToken(summary.cacheRead) }}</span>
-              <span class="hero-cell-label">总缓存</span>
-            </div>
+        <!-- 会话总览：遥测仪表盘，中性底 + 点阵纹理；整个 Hero 可折叠，折叠后只留标题行 -->
+        <div v-if="rounds.length > 0" v-show="!heroCollapsed" class="overview-hero">
+          <!-- 两行 7 格：上排 token 四项，下排过程三项；色点把格子与下方对应折线绑起来 -->
+          <div
+            v-for="(row, rowIndex) in heroRows"
+            :key="rowIndex"
+            class="hero-grid"
+            :class="{ 'is-3': row.length === 3 }"
+          >
+            <button
+              v-for="cell in row"
+              :key="cell.key"
+              class="hero-cell"
+              :class="{ 'is-muted': !isSeriesVisible(cell.key) }"
+              type="button"
+              :title="`${cell.title}（点击只看这一条，再点恢复全部）`"
+              :aria-pressed="isSeriesVisible(cell.key)"
+              @click="toggleSeries(cell.key)"
+            >
+              <span class="hero-cell-value" :class="{ 'is-accent': cell.accent }">{{ cell.value }}</span>
+              <span class="hero-cell-label">
+                <i class="series-dot" :class="cell.cls"></i>{{ cell.label }}
+              </span>
+            </button>
           </div>
-          <div class="hero-foot">
-            <span class="hero-foot-item" title="模型调用轮次">
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-              {{ summary.modelRounds }} 轮次
-            </span>
-            <span class="hero-foot-item" title="工具调用次数">
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4.5 4.5 0 0 0-6 6L3 18l3 3 5.7-5.7a4.5 4.5 0 0 0 6-6L14 13l-3-3 3.7-3.7z"/></svg>
-              {{ summary.toolCalls }} 工具
-            </span>
-            <span class="hero-foot-item hero-foot-time" title="总耗时">
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-              {{ formatDuration(summary.durationMs) }}
-            </span>
+          <!-- 批量显隐：两个按钮按当前状态禁用（都已经显示了，"显示全部"就没必要点） -->
+          <div class="hero-chart-tip">
+            <span v-if="chartHint" class="hero-chart-tip-count" :title="chartHintTitle">{{ chartHint }}</span>
+            <button
+              class="hero-chart-btn"
+              type="button"
+              :disabled="allShown"
+              @click="showAllSeries"
+            >显示全部</button>
+            <button
+              class="hero-chart-btn"
+              type="button"
+              :disabled="noneShown"
+              @click="hideAllSeries"
+            >隐藏全部</button>
+          </div>
+          <!-- 走势叠加图：每条线各自归一化，纵轴只表形状不表绝对大小 -->
+          <div class="hero-chart-wrap">
+            <svg
+              class="hero-chart"
+              :viewBox="`0 0 100 ${CHART_H}`"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+                <g v-for="series in visibleChartSeries" :key="series.key">
+                  <polyline
+                    v-for="(seg, segIndex) in series.segs"
+                    :key="segIndex"
+                    :class="series.cls"
+                    :points="seg"
+                    vector-effect="non-scaling-stroke"
+                  />
+                </g>
+            </svg>
+            <span v-if="chartEmptyText" class="hero-chart-empty">{{ chartEmptyText }}</span>
           </div>
 
           <!-- 会话深链：hash 路由 /c/:sessionId，浏览器打开即进入该会话 -->
@@ -94,14 +131,14 @@
         当前会话暂无消息
       </div>
 
-      <!-- 每轮：6 色轮换的彩色轮次卡 -->
+      <!-- 每轮：中性轮次卡，最新一轮左侧色条点亮 -->
       <div v-if="rounds.length > 0" class="overview-timeline">
         <button
-          v-for="round in rounds"
+          v-for="(round, idx) in rounds"
           :key="round.userMessageId"
           type="button"
           class="timeline-item"
-          :class="accentClass(round.roundNumber)"
+          :class="{ 'is-latest': idx === rounds.length - 1 }"
           :title="round.userText"
           @click="jumpToRound(round)"
         >
@@ -129,6 +166,14 @@
               <span class="timeline-metric" title="本轮总输入"><i>输入</i><b>{{ formatToken(round.totalInput) }}</b></span>
               <span class="timeline-metric" title="本轮总输出"><i>输出</i><b>{{ formatToken(round.totalOutput) }}</b></span>
               <span class="timeline-metric metric-cached" title="本轮缓存读取"><i>缓存</i><b>{{ formatToken(round.cacheRead) }}</b></span>
+            </span>
+            <span
+              class="timeline-comp"
+              :title="`缓存 ${formatToken(round.cacheRead)} · 输入 ${formatToken(round.totalInput)} · 输出 ${formatToken(round.totalOutput)}`"
+            >
+              <i class="comp-cache" :style="{ width: compOf(round).cache + '%' }"></i>
+              <i class="comp-input" :style="{ width: compOf(round).input + '%' }"></i>
+              <i class="comp-output" :style="{ width: compOf(round).output + '%' }"></i>
             </span>
           </span>
         </button>
@@ -164,8 +209,6 @@ const PAGE_LIMIT = 200
 const MAX_PAGES = 60
 // 自动刷新防抖：等后端落盘 + 合并一次提问里的多次状态翻转
 const AUTO_REFRESH_DEBOUNCE_MS = 800
-// 每轮主题色数量：按轮次号轮换，深浅主题下都清晰可辨
-const ACCENT_COUNT = 6
 
 const uiStore = useUiStore()
 const sessionsStore = useSessionsStore()
@@ -177,11 +220,6 @@ const loadError = ref('')
 // 会话切换/重试会并发触发加载，只让最后一次的结果落地
 let loadToken = 0
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
-
-/** 每轮主题色：accent-0 ~ accent-5 轮换，样式里定义对应的 --accent */
-function accentClass(roundNumber: number): string {
-  return `accent-${(roundNumber - 1) % ACCENT_COUNT}`
-}
 
 /** 会话级汇总：tokens 求和，窗口取最后一轮的值 */
 const summary = computed(() => {
@@ -215,6 +253,215 @@ const summary = computed(() => {
     durationMs,
   }
 })
+
+type SparkMode = 'minmax' | 'zero'
+type SeriesKey = 'window' | 'input' | 'output' | 'cache' | 'calls' | 'tools' | 'duration'
+
+/** 走势图高度（viewBox 100xCHART_H） */
+const CHART_H = 56
+
+/** 逐轮序列 → SVG 折线段（viewBox 100x{height}）。
+ *  - null 表示"该轮没有数据"：断开折线，且不参与极值计算（当 0 会把曲线砸出假坑）
+ *  - mode='minmax'：按 [min, max] 拉伸，用于起点天然不为 0 的 token 类
+ *  - mode='zero'：按 [0, max] 拉伸，用于 0 是真实最低位的计数/耗时类
+ *  - x 一律按轮次下标定位，7 条线共享同一时间轴
+ *  - 每条线**各自归一化**：7 个量量纲差 6 个数量级，共享尺度会让小量贴成直线，
+ *    因此纵轴只表"形状"，不表绝对大小
+ *  - 单点段补一个微小横段，保证"只有一轮"时也可见 */
+function sparkSegments(values: Array<number | null>, mode: SparkMode, height: number): string[] {
+  const n = values.length
+  if (n === 0) return []
+  const present = values.filter((v): v is number => v != null)
+  if (present.length === 0) return []
+  const max = Math.max(...present)
+  const min = mode === 'zero' ? 0 : Math.min(...present)
+  const span = max - min
+  const padX = 2
+  const padY = 3
+  const w = 100 - padX * 2
+  const h = height - padY * 2
+  const segs: string[] = []
+  let pts: Array<{ x: number; y: number }> = []
+  const flush = () => {
+    if (pts.length === 0) return
+    if (pts.length === 1) {
+      const p = pts[0]
+      segs.push(`${p.x.toFixed(1)},${p.y.toFixed(1)} ${(p.x + 0.8).toFixed(1)},${p.y.toFixed(1)}`)
+    } else {
+      segs.push(pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '))
+    }
+    pts = []
+  }
+  for (let i = 0; i < n; i++) {
+    const v = values[i]
+    if (v == null) {
+      flush()
+      continue
+    }
+    const x = n === 1 ? 50 : padX + (i / (n - 1)) * w
+    // span 为 0 时没有可拉伸的范围：计数类全 0 要贴底（是"真的没有"，不是"有数据"），
+    // 其余情况居中，表示"该项恒定"
+    const y = span === 0
+      ? (mode === 'zero' ? padY + h : padY + h / 2)
+      : padY + (1 - (v - min) / span) * h
+    pts.push({ x, y })
+  }
+  flush()
+  return segs
+}
+
+/** 7 条线的元信息：key 同时决定颜色类 `series-<key>`，格子圆点与折线共用同一个色 */
+const seriesMeta: Array<{ key: SeriesKey; cls: string }> = [
+  { key: 'window', cls: 'series-window' },
+  { key: 'input', cls: 'series-input' },
+  { key: 'output', cls: 'series-output' },
+  { key: 'cache', cls: 'series-cache' },
+  { key: 'calls', cls: 'series-calls' },
+  { key: 'tools', cls: 'series-tools' },
+  { key: 'duration', cls: 'series-duration' },
+]
+
+/** 只有"有数据"的轮次才占 x 位置。
+ *  整轮缺失（run 被取消或模型报错，一条都没落库）不占位：7 条线共享同一布局，
+ *  于是"7 条线在同一 x 一起断开、看起来像两张图"自然消失，而且不伪造任何数据。
+ *  注意：单条线内部残留的 null（某轮只有 token 没有耗时之类）仍照旧断开——那是真的稀疏。 */
+const plotRounds = computed(() =>
+  rounds.value.filter(
+    r => r.totalInput != null || r.modelRounds != null || r.toolCallCount != null || r.durationMs != null,
+  ),
+)
+
+/** 被跳过的轮数——形体干净了，但这个信息不能丢，要显式写出来 */
+const skippedRounds = computed(() => rounds.value.length - plotRounds.value.length)
+
+/** 7 条逐轮走势，叠加在同一张图上 */
+const sparks = computed<Record<SeriesKey, string[]>>(() => ({
+  window: sparkSegments(plotRounds.value.map(r => r.windowInput), 'minmax', CHART_H),
+  input: sparkSegments(plotRounds.value.map(r => r.totalInput), 'minmax', CHART_H),
+  output: sparkSegments(plotRounds.value.map(r => r.totalOutput), 'minmax', CHART_H),
+  cache: sparkSegments(plotRounds.value.map(r => r.cacheRead), 'minmax', CHART_H),
+  calls: sparkSegments(plotRounds.value.map(r => r.modelRounds), 'zero', CHART_H),
+  tools: sparkSegments(plotRounds.value.map(r => r.toolCallCount), 'zero', CHART_H),
+  duration: sparkSegments(plotRounds.value.map(r => r.durationMs), 'zero', CHART_H),
+}))
+
+/** 图表数据：每条线 + 颜色类 + 折线段 */
+const chartSeries = computed(() =>
+  seriesMeta.map(s => ({ ...s, segs: sparks.value[s.key] })),
+)
+
+interface HeroCell {
+  key: SeriesKey
+  label: string
+  title: string
+  /** 会话级数值（总量）；走势统一在下方那张叠加图里 */
+  value: string
+  accent?: boolean
+  cls: string
+}
+
+const heroCells = computed<HeroCell[]>(() => {
+  const m = summary.value
+  return [
+    { key: 'window', label: '当前窗口', title: '当前窗口：最后一次模型调用的输入规模', value: formatToken(m.windowInput), accent: true, cls: 'series-window' },
+    { key: 'input', label: '总输入', title: '本会话所有模型调用的输入合计', value: formatToken(m.totalInput), cls: 'series-input' },
+    { key: 'output', label: '总输出', title: '本会话所有模型调用的输出合计', value: formatToken(m.totalOutput), cls: 'series-output' },
+    { key: 'cache', label: '总缓存', title: '本会话命中缓存的输入合计', value: formatToken(m.cacheRead), cls: 'series-cache' },
+    { key: 'calls', label: '总模型调用', title: '本会话模型调用次数（一次提问内的工具循环会反复调用）', value: formatCount(m.modelRounds), cls: 'series-calls' },
+    { key: 'tools', label: '总工具次数', title: '本会话工具调用次数', value: formatCount(m.toolCalls), cls: 'series-tools' },
+    { key: 'duration', label: '总耗时', title: '本会话所有模型调用的耗时合计', value: formatDuration(m.durationMs), cls: 'series-duration' },
+  ]
+})
+
+/** 两行布局：上排 4 个 token 指标，下排 3 个过程指标 */
+const heroRows = computed(() => {
+  const cells = heroCells.value
+  return [cells.slice(0, 4), cells.slice(4)]
+})
+
+/** Hero 折叠：收起后只留标题行 */
+const heroCollapsed = ref(false)
+
+/** null = 全部显示；[] = 全部隐藏；非空数组 = 只画选中的这几条
+ *  点格子：全部显示 → 只看这一条；已选中 → 取消（点掉最后一条回到全部显示）；
+ *  未选中 → 追加进去；凑满 7 条等同全部显示 */
+const soloKeys = ref<SeriesKey[] | null>(null)
+
+const allShown = computed(() => soloKeys.value === null)
+const noneShown = computed(() => soloKeys.value !== null && soloKeys.value.length === 0)
+const visibleCount = computed(() =>
+  soloKeys.value === null ? seriesMeta.length : soloKeys.value.length,
+)
+
+function isSeriesVisible(key: SeriesKey): boolean {
+  return soloKeys.value === null || soloKeys.value.includes(key)
+}
+
+function toggleSeries(key: SeriesKey) {
+  const cur = soloKeys.value
+  if (cur === null) {
+    soloKeys.value = [key]
+    return
+  }
+  if (cur.includes(key)) {
+    const next = cur.filter(k => k !== key)
+    // 点掉最后一条 = 回到"全部显示"（与"再点它一下就恢复全部"保持一致）
+    soloKeys.value = next.length === 0 ? null : next
+    return
+  }
+  const next = [...cur, key]
+  soloKeys.value = next.length === seriesMeta.length ? null : next
+}
+
+function showAllSeries() {
+  soloKeys.value = null
+}
+
+function hideAllSeries() {
+  soloKeys.value = []
+}
+
+/** 图上实际绘制的线（顺序仍按 seriesMeta） */
+const visibleChartSeries = computed(() => chartSeries.value.filter(s => isSeriesVisible(s.key)))
+
+/** 图表左上角那行小字：只在真有额外信息时才出现（没筛选、没跳轮就什么都不显示） */
+const chartHint = computed(() => {
+  const parts: string[] = []
+  if (!allShown.value) parts.push(`已显示 ${visibleCount.value} / ${seriesMeta.length}`)
+  if (skippedRounds.value > 0) parts.push(`${skippedRounds.value} 轮无数据`)
+  return parts.join(' · ')
+})
+
+/** "无数据"要说清是什么原因，不能让读者自己猜 */
+const chartHintTitle = computed(() =>
+  skippedRounds.value > 0
+    ? `${skippedRounds.value} 个轮次没有落库任何用量数据（运行被取消或模型报错），已从走势图中跳过`
+    : '',
+)
+
+/** 图上什么都画不出来时的提示：全部隐藏，或这个会话还没有可用数据 */
+const chartEmptyText = computed(() => {
+  if (noneShown.value) return '已隐藏全部曲线 · 点上方指标可单独查看'
+  if (plotRounds.value.length === 0) return '还没有可用的用量数据'
+  return ''
+})
+
+/** 轮次构成条：缓存命中 / 新增输入 / 输出 三段百分比。
+ *  注意 cacheRead 在多数厂商口径里是 inputTokens 的子集，所以输入段 = 输入 - 缓存，
+ *  并 clamp 防脏数据（缓存 > 输入）出现负宽度。 */
+function compOf(round: OverviewRound): { cache: number; input: number; output: number } {
+  const input = Math.max(0, round.totalInput ?? 0)
+  const cache = Math.min(Math.max(0, round.cacheRead ?? 0), input)
+  const fresh = input - cache
+  const output = Math.max(0, round.totalOutput ?? 0)
+  const total = cache + fresh + output
+  if (total <= 0) return { cache: 0, input: 0, output: 0 }
+  return {
+    cache: (cache / total) * 100,
+    input: (fresh / total) * 100,
+    output: (output / total) * 100,
+  }
+}
 
 function resolveSessionId(): string {
   return sessionsStore.effectiveThreadId || sessionsStore.currentSessionId || ''
@@ -355,6 +602,12 @@ function formatToken(n: number | null): string {
   return String(n)
 }
 
+/** 次数类不做 k 缩写（90 次就是 90，不该显示成 0.1k） */
+function formatCount(v: number | string | null): string {
+  if (v == null) return '-'
+  return String(v)
+}
+
 function formatDuration(ms: number | null): string {
   if (ms == null) return '-'
   if (ms < 1000) return ms + 'ms'
@@ -387,10 +640,19 @@ watch(
 </script>
 
 <style scoped>
+/* 暖色（轮次卡 token 构成条的输入侧用）：浅色主题加深一档、深色主题提亮一档。
+   走势图那 7 条线各有自己的 --series 色（见 .series-*），与本变量无关 */
 .overview-section {
+  --comp-warm: #c97a12;
+  --comp-warm-soft: rgb(201 122 18 / 30%);
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+html.dark .overview-section {
+  --comp-warm: #f0a94a;
+  --comp-warm-soft: rgb(240 169 74 / 20%);
 }
 
 /* 标题栏：这块是独立组件，吃不到 RightPanel 的 scoped 标题样式，这里自带一套 */
@@ -412,7 +674,7 @@ watch(
   color: var(--el-text-color-primary);
 }
 
-/* 与仪表盘同色系的小方标，让标题和下方极光卡连成一体 */
+/* 标题小方标：发丝线 + 单强调色图标（原三色渐变改掉） */
 .overview-title-icon {
   display: inline-flex;
   align-items: center;
@@ -420,9 +682,9 @@ watch(
   width: 20px;
   height: 20px;
   border-radius: 6px;
-  color: #fff;
-  background: linear-gradient(135deg, #38bdf8 0%, #6366f1 60%, #a855f7 100%);
-  box-shadow: 0 2px 8px rgb(99 102 241 / 40%);
+  color: var(--el-color-primary);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
 }
 
 .overview-header-right {
@@ -431,16 +693,16 @@ watch(
   gap: 8px;
 }
 
-/* 计数胶囊：跟轮次卡呼应的双色渐变 */
+/* 计数胶囊：中性淡彩底 + 强调色数字（原双色渐变改掉） */
 .overview-count {
   padding: 2px 9px;
   border-radius: 999px;
-  color: #fff;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.04em;
-  background: linear-gradient(135deg, #6366f1, #06b6d4);
-  box-shadow: 0 2px 8px rgb(99 102 241 / 32%);
+  color: var(--el-color-primary);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--el-color-primary) 7%, transparent);
 }
 
 .overview-refresh {
@@ -467,6 +729,37 @@ watch(
 
 .overview-refresh.is-loading svg {
   animation: overviewSpin 0.9s linear infinite;
+}
+
+/* 折叠/展开 Hero：和刷新按钮同款的圆形按钮（原来是 11px 裸字形，太小看不出能点） */
+.overview-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--el-border-color);
+  border-radius: 999px;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.overview-collapse svg {
+  transition: transform 0.2s ease;
+}
+
+/* 折叠后箭头转向，按钮本身也带着状态 */
+.overview-collapse.is-collapsed svg {
+  transform: rotate(-90deg);
+}
+
+.overview-collapse:hover {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+  background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
 }
 
 @keyframes overviewSpin {
@@ -511,109 +804,200 @@ watch(
   background: var(--el-bg-color);
 }
 
-/* 总览仪表盘：深色渐变，与下方轮次卡彻底区分；深浅主题下都保持深底白字 */
+/* 遥测仪表盘：中性底 + 发丝线 + 顶部受光，深浅主题自动适配 */
 .overview-hero {
   position: relative;
   overflow: hidden;
   border-radius: 14px;
   padding: 14px 14px 12px;
-  color: #f8fafc;
-  border: 1px solid rgb(255 255 255 / 14%);
-  background:
-    radial-gradient(115% 85% at 100% 0%, rgb(34 211 238 / 55%) 0%, transparent 52%),
-    radial-gradient(115% 100% at 0% 100%, rgb(168 85 247 / 58%) 0%, transparent 52%),
-    radial-gradient(90% 80% at 50% 130%, rgb(244 114 182 / 45%) 0%, transparent 58%),
-    linear-gradient(135deg, #1e1b4b 0%, #4c1d95 48%, #0e7490 100%);
-  background-size: 180% 180%;
-  box-shadow:
-    0 6px 22px rgb(76 29 149 / 40%),
-    inset 0 1px 0 rgb(255 255 255 / 18%);
-  animation: heroAurora 16s ease-in-out infinite;
+  color: var(--el-text-color-primary);
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-bg-color);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
 }
 
-/* 仪表盘上掠过的流光：让极光渐变缓慢流动 */
-.overview-hero::after {
+/* 工程点阵纹理：currentColor 低透明度，随主题自动反色；只铺上半部，底部渐隐不干扰文字 */
+.overview-hero::before {
   content: '';
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(
-    115deg,
-    transparent 40%,
-    rgb(255 255 255 / 12%) 48%,
-    rgb(255 255 255 / 22%) 52%,
-    transparent 60%
-  );
-  background-size: 260% 100%;
-  background-repeat: no-repeat;
-  animation: heroSheen 7s linear infinite;
-}
-
-@keyframes heroAurora {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-}
-
-@keyframes heroSheen {
-  0% { background-position: 140% 0; }
-  100% { background-position: -40% 0; }
+  background-image: radial-gradient(circle, currentColor 1px, transparent 1px);
+  background-size: 18px 18px;
+  opacity: 0.05;
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 70%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 70%);
 }
 
 .hero-grid {
+  position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: repeat(4, 1fr);
 }
 
+/* 第二行只有 3 格（过程指标）：列数跟着变，避免右侧留一个空列 */
+.hero-grid.is-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.hero-grid + .hero-grid {
+  margin-top: 10px;
+}
+
+/* 指标格同时是走势图的开关（点一下只看这条），所以是个 button */
 .hero-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 1px;
   min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 .hero-cell + .hero-cell {
-  border-left: 1px solid rgb(255 255 255 / 12%);
+  border-left: 1px solid var(--el-border-color-lighter);
+}
+
+/* 未选中的指标：整格变淡、色点变灰，表示"这条线现在不画" */
+.hero-cell.is-muted .hero-cell-value,
+.hero-cell.is-muted .hero-cell-label {
+  color: var(--el-text-color-placeholder);
+}
+
+.hero-cell.is-muted .series-dot {
+  background: var(--el-text-color-placeholder);
+}
+
+.hero-cell:hover .hero-cell-label,
+.hero-cell:focus-visible .hero-cell-label {
+  color: var(--el-color-primary);
+}
+
+.hero-cell:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--el-color-primary) 45%, transparent);
+  outline-offset: 2px;
 }
 
 .hero-cell-value {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-primary);
 }
 
-.hero-cell-window .hero-cell-value {
-  color: #67e8f9;
-}
-
-.hero-cell-cached .hero-cell-value {
-  color: #6ee7b7;
+/* 当前窗口是 Hero 里唯一的"活指标"：强调色 + 略大字号 */
+.hero-cell-value.is-accent {
+  color: var(--el-color-primary);
+  font-size: 17px;
 }
 
 .hero-cell-label {
-  font-size: 10px;
-  color: rgb(224 242 254 / 65%);
-}
-
-.hero-foot {
-  display: flex;
-  gap: 14px;
-  margin-top: 9px;
-  font-size: 11px;
-  font-weight: 600;
-  color: rgb(224 242 254 / 80%);
-}
-
-.hero-foot-item {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
 }
 
-/* 总耗时与轮次/工具同排，用薄荷色区分 */
-.hero-foot-time {
-  color: #a7f3d0;
+/* 色点：把格子里的数值与下方图表里对应的那条线绑起来 */
+.series-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--series);
+  flex-shrink: 0;
 }
+
+/* 批量显隐行：左边状态，右边两个按钮 */
+.hero-chart-tip {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.hero-chart-tip-count {
+  margin-right: auto;
+  font-size: 10px;
+  color: var(--el-text-color-placeholder);
+}
+
+.hero-chart-btn {
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--el-color-primary) 7%, transparent);
+  color: var(--el-color-primary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.hero-chart-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--el-color-primary) 14%, transparent);
+}
+
+/* 该动作已经是当前状态时置灰（已经全显示了，"显示全部"就点不动） */
+.hero-chart-btn:disabled {
+  color: var(--el-text-color-placeholder);
+  border-color: var(--el-border-color-lighter);
+  background: transparent;
+  cursor: default;
+}
+
+/* 走势图容器：兼作"全部隐藏"时空状态提示的定位参照 */
+.hero-chart-wrap {
+  position: relative;
+  margin-top: 10px;
+}
+
+/* 7 条逐轮走势叠加图 */
+.hero-chart {
+  display: block;
+  width: 100%;
+  height: 56px;
+}
+
+/* 全部隐藏时的占位提示（图还在，只是没线） */
+.hero-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--el-text-color-placeholder);
+  pointer-events: none;
+}
+
+.hero-chart polyline {
+  fill: none;
+  stroke: var(--series);
+  stroke-width: 1.25;
+  stroke-opacity: 0.85;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* 7 条线各自的颜色。叠加之后"位置"不再是区分手段，只能靠色相，
+   所以这里必须每条一个颜色——这属于功能性用色（等同于图表图例），不是装饰性彩虹 */
+.series-window { --series: #4a9eff; }
+.series-input { --series: #f0a94a; }
+.series-output { --series: #67c23a; }
+.series-cache { --series: #b06ae0; }
+.series-calls { --series: #e36d8a; }
+.series-tools { --series: #2fb8ad; }
+.series-duration { --series: #8d97a5; }
 
 /* 会话深链行 */
 .hero-share {
@@ -622,9 +1006,9 @@ watch(
   gap: 6px;
   margin-top: 9px;
   padding-top: 8px;
-  border-top: 1px solid rgb(255 255 255 / 14%);
+  border-top: 1px solid var(--el-border-color-lighter);
   font-size: 11px;
-  color: rgb(224 242 254 / 85%);
+  color: var(--el-text-color-secondary);
 }
 
 .hero-share-icon {
@@ -638,18 +1022,17 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #a5f3fc;
+  color: var(--el-color-primary);
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   text-decoration: none;
 }
 
 .hero-share-url:hover {
-  color: #cffafe;
   text-decoration: underline;
 }
 
 .hero-share-url.is-empty {
-  color: rgb(224 242 254 / 55%);
+  color: var(--el-text-color-secondary);
   font-family: inherit;
 }
 
@@ -657,28 +1040,28 @@ watch(
   flex-shrink: 0;
   padding: 1px 8px;
   border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 22%);
-  background: rgb(255 255 255 / 14%);
-  color: #fff;
+  border: 1px solid var(--el-border-color);
+  background: transparent;
+  color: var(--el-text-color-secondary);
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 
 .hero-share-copy:hover {
-  background: rgb(255 255 255 / 28%);
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+  background: color-mix(in srgb, var(--el-color-primary) 8%, transparent);
 }
 
-/* 轮次卡：每轮按轮次号轮换 6 种主题色，徽章 / 图标统一跟随 */
+/* 轮次卡：中性底，区分度交给左轨色条与构成条 */
 .overview-timeline {
   display: flex;
   flex-direction: column;
 }
 
 .timeline-item {
-  --accent-a: #38bdf8;
-  --accent-b: #1d4ed8;
   width: 100%;
   padding: 0;
   border: none;
@@ -687,16 +1070,47 @@ watch(
   cursor: pointer;
 }
 
-.timeline-item.accent-1 { --accent-a: #a78bfa; --accent-b: #6d28d9; }
-.timeline-item.accent-2 { --accent-a: #34d399; --accent-b: #047857; }
-.timeline-item.accent-3 { --accent-a: #fbbf24; --accent-b: #b45309; }
-.timeline-item.accent-4 { --accent-a: #f472b6; --accent-b: #be123c; }
-.timeline-item.accent-5 { --accent-a: #22d3ee; --accent-b: #0e7490; }
-
 .timeline-item:focus-visible {
   outline: 2px solid var(--el-color-primary-light-3);
   outline-offset: 1px;
   border-radius: 10px;
+}
+
+.timeline-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 4px 0 10px;
+  padding: 11px 12px 11px 14px; /* 左侧多留 2px 给色条 */
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  background: var(--el-bg-color);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* 左轨：历史轮浅灰，最新一轮点亮（全面板唯一的彩色信号） */
+.timeline-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--el-text-color-primary) 14%, transparent);
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.timeline-item.is-latest .timeline-card::before {
+  background: var(--el-color-primary);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--el-color-primary) 55%, transparent);
+}
+
+.timeline-item:hover .timeline-card {
+  border-color: var(--el-border-color);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
 }
 
 /* 卡片首行：轮次徽章 + 提问文本 */
@@ -707,75 +1121,23 @@ watch(
   min-width: 0;
 }
 
-/* 白底徽章：在彩色卡面上最跳，也和仪表盘左边缘严格对齐 */
 .timeline-badge {
   flex-shrink: 0;
   margin-top: 1px;
   padding: 0 7px;
   border-radius: 999px;
-  background: rgb(255 255 255 / 92%);
-  color: color-mix(in srgb, var(--accent-b) 80%, #000);
+  background: color-mix(in srgb, var(--el-text-color-primary) 8%, transparent);
+  color: var(--el-text-color-secondary);
   font-size: 10px;
   font-weight: 800;
   line-height: 17px;
   white-space: nowrap;
-  box-shadow: 0 1px 5px rgb(0 0 0 / 22%);
-  transition: transform 0.18s ease;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
-.timeline-item:hover .timeline-badge {
-  transform: translateY(-1px);
-}
-
-.timeline-card {
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  margin: 4px 0 10px;
-  padding: 11px 12px;
-  border: 1px solid rgb(255 255 255 / 20%);
-  border-radius: 12px;
-  background:
-    radial-gradient(130% 150% at 0% 0%, rgb(255 255 255 / 20%) 0%, transparent 42%),
-    linear-gradient(135deg, var(--accent-a) 0%, var(--accent-b) 100%);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent-b) 42%, transparent);
-  transition: box-shadow 0.18s ease, transform 0.18s ease;
-}
-
-/* 悬停时滑过卡面的高光 */
-.timeline-card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    115deg,
-    transparent 42%,
-    rgb(255 255 255 / 20%) 50%,
-    transparent 58%
-  );
-  background-size: 240% 100%;
-  background-repeat: no-repeat;
-  background-position: 150% 0;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.timeline-item:hover .timeline-card::after {
-  opacity: 1;
-  animation: cardSheen 0.9s ease-out;
-}
-
-@keyframes cardSheen {
-  0% { background-position: 150% 0; }
-  100% { background-position: -50% 0; }
-}
-
-.timeline-item:hover .timeline-card {
-  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent-b) 58%, transparent);
-  transform: translateY(-2px);
+.timeline-item.is-latest .timeline-badge {
+  color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 10%, transparent);
 }
 
 .timeline-question {
@@ -785,17 +1147,35 @@ watch(
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  color: #fff;
+  color: var(--el-text-color-primary);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.5;
-  text-shadow: 0 1px 3px rgb(0 0 0 / 28%);
 }
 
+/* 轮次/工具/耗时：跟在用户问题右侧，与问题首行齐平 */
+.timeline-foot {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.timeline-foot-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 指标行：淡中性底盒，标签次要色、数值主色 */
 .timeline-metrics {
   display: flex;
-  background: rgb(255 255 255 / 16%);
-  border: 1px solid rgb(255 255 255 / 16%);
+  background: color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
   border-radius: 8px;
   padding: 7px 4px;
 }
@@ -811,56 +1191,67 @@ watch(
 }
 
 .timeline-metric + .timeline-metric {
-  border-left: 1px solid rgb(255 255 255 / 22%);
+  border-left: 1px solid var(--el-border-color-lighter);
 }
 
 .timeline-metric i {
   font-style: normal;
   font-size: 10px;
-  color: rgb(255 255 255 / 78%);
+  color: var(--el-text-color-secondary);
 }
 
 .timeline-metric b {
   font-weight: 800;
   font-size: 12px;
-  color: #fff;
+  color: var(--el-text-color-primary);
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  text-shadow: 0 1px 2px rgb(0 0 0 / 22%);
+  font-variant-numeric: tabular-nums;
 }
 
-.metric-cached b {
-  color: #d1fae5;
+/* token 构成条：缓存命中（淡暖底 + 45° 斜纹，弱化）/ 未命中输入（实心暖色）/ 输出（绿）。
+   5px 高度是斜纹可辨的最低要求；缓存段靠「纹理」而非「第三个色相」区分 */
+.timeline-comp {
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  gap: 1px;
+  background: color-mix(in srgb, var(--el-text-color-primary) 6%, transparent);
 }
 
-/* 轮次/工具/耗时：跟在用户问题右侧，与问题首行齐平 */
-.timeline-foot {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 10px;
-  margin-top: 2px;
-  font-size: 11px;
-  font-weight: 600;
-  color: rgb(255 255 255 / 90%);
+.timeline-comp i {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  transition: width 0.3s ease;
 }
 
-.timeline-foot-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.timeline-comp .comp-cache {
+  background-color: var(--comp-warm-soft);
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--comp-warm) 70%, transparent) 0 1px,
+    transparent 1px 6px
+  );
 }
 
-.timeline-foot-item svg {
-  color: rgb(255 255 255 / 95%);
+.timeline-comp .comp-input {
+  background: var(--comp-warm);
 }
 
-/* 尊重系统的「减少动态效果」偏好：关掉极光流动、流光与刷新转圈 */
+.timeline-comp .comp-output {
+  background: var(--el-color-success);
+}
+
+/* 尊重系统的「减少动态效果」偏好 */
 @media (prefers-reduced-motion: reduce) {
-  .overview-hero,
-  .overview-hero::after,
-  .timeline-item:hover .timeline-card::after,
   .overview-refresh.is-loading svg {
     animation: none;
+  }
+  .timeline-card,
+  .timeline-card::before,
+  .timeline-comp i {
+    transition: none;
   }
 }
 </style>
