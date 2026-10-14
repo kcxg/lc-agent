@@ -1,5 +1,5 @@
 ---
-name: langchain-middleware
+name: my-langchain-middleware
 description: >-
   Guide on how to use LangChain's AgentMiddleware to add tools and inject system prompts into
   lc-agent agents, as opposed to registering tools via the @tool decorator.

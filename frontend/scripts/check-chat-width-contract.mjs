@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const chatView = readFileSync(join(root, 'src/views/ChatView.vue'), 'utf8')
+const app = readFileSync(join(root, 'src/App.vue'), 'utf8')
 
 // 工具卡片拆成多张后，窄屏保护要每张都有：头部可换行、标题可省略、小屏标题独占一行
 const toolCards = [
@@ -29,6 +30,12 @@ function expectMatch(pattern, message) {
 function expectNotMatch(pattern, message) {
   if (pattern.test(chatView)) {
     failures.push(`ChatView.vue ${message}`)
+  }
+}
+
+function expectAppMatch(pattern, message) {
+  if (!pattern.test(app)) {
+    failures.push(`App.vue ${message}`)
   }
 }
 
@@ -94,6 +101,20 @@ for (const card of toolCards) {
     '移动端工具名应独占一行，避免被状态和统计信息挤窄',
   )
 }
+
+// 聊天区整块横向封顶（App.vue）：标签栏 + 消息区 + 输入框一起不超过 860px 并居中
+expectAppMatch(
+  /\.chat-main\s*\{[\s\S]*?max-width:\s*860px/,
+  '.chat-main 缺少横向封顶 max-width: 860px，窗口变宽时聊天区会无限拉宽',
+)
+expectAppMatch(
+  /\.chat-main\s*\{[\s\S]*?margin-inline:\s*auto/,
+  '.chat-main 缺少 margin-inline: auto，封顶后聊天块没有居中',
+)
+expectAppMatch(
+  /@media\s*\(max-width:\s*900px\)[\s\S]*?\.chat-main\s*\{[\s\S]*?max-width:\s*none/,
+  '移动端未解除聊天区横向封顶，窄屏下无法铺满',
+)
 
 if (failures.length > 0) {
   console.error('聊天气泡宽度契约测试失败:')

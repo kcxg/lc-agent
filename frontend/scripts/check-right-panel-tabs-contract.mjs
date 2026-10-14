@@ -25,10 +25,10 @@ function expectMatch(content, pattern, message) {
   if (!pattern.test(content)) failures.push(message)
 }
 
-// 1. tab 按钮存在且顺序为 模型/能力/变更/(文件)/任务
+// 1. tab 按钮存在且顺序为 概览/模型/能力/变更/(文件)/任务
 // 只按 tabs 列表的定义（id: 'xxx'）比顺序：文件别处也会出现这些裸字符串
 // （例如滚动容器的 :class="{ 'is-editor': activeTab === 'editor' }"），按裸字符串比对会误判
-const tabOrder = ['model', 'abilities', 'changes', 'editor', 'tasks']
+const tabOrder = ['overview', 'model', 'abilities', 'changes', 'editor', 'tasks']
 let cursor = -1
 for (const id of tabOrder) {
   const at = rightPanel.indexOf(`id: '${id}'`)
@@ -39,13 +39,17 @@ for (const id of tabOrder) {
 expect(!rightPanel.includes("'appearance'"), 'RightPanel.vue 仍残留 appearance tab（外观已并入模型）')
 expect(rightPanel.includes('v-for="tab in tabs"'), 'RightPanel.vue 未按 tabs 列表渲染 tab 按钮')
 expect(
-  uiStore.includes("export type RightPanelTab = 'model' | 'abilities' | 'changes' | 'editor' | 'tasks'"),
+  uiStore.includes("export type RightPanelTab = 'overview' | 'model' | 'abilities' | 'changes' | 'editor' | 'tasks'"),
   'ui store 缺少 RightPanelTab 联合类型',
 )
 expect(
-  uiStore.includes("export const RIGHT_PANEL_TABS: RightPanelTab[] = ['model', 'abilities', 'changes', 'editor', 'tasks']"),
+  uiStore.includes("export const RIGHT_PANEL_TABS: RightPanelTab[] = ['overview', 'model', 'abilities', 'changes', 'editor', 'tasks']"),
   'ui store 缺少 RIGHT_PANEL_TABS 顺序定义',
 )
+// 概览 tab：全量历史轮次索引，点击回跳聊天区
+expect(exists('src/components/panels/ChatOverviewPanel.vue'), '缺少概览面板组件 ChatOverviewPanel.vue')
+expect(rightPanel.includes("import ChatOverviewPanel from '@/components/panels/ChatOverviewPanel.vue'"), 'RightPanel.vue 未导入 ChatOverviewPanel')
+expect(rightPanel.includes('<ChatOverviewPanel'), 'RightPanel.vue 概览 tab 未渲染 ChatOverviewPanel')
 // 文件查看区：打开的文件以标签展示，editor tab 渲染 FileEditorPane
 expect(
   /list\.push\(\{ id: 'editor'/.test(rightPanel),
@@ -114,11 +118,11 @@ expect(
   'FileTreeNode.vue 仍依赖 filter prop',
 )
 
-// 2. 默认 tab 为模型
+// 2. 默认 tab 为概览（overview）
 expectMatch(
   uiStore,
-  /function loadActiveTab\(\)[\s\S]*return 'model'/,
-  'ui store 默认 tab 必须回落到 model',
+  /function loadActiveTab\(\)[\s\S]*return 'overview'/,
+  'ui store 默认 tab 必须回落到 overview',
 )
 // 任务进度只属于任务 tab：不得放在跨 tab 置顶区，也不得残留置顶样式
 expect(!rightPanel.includes('right-panel-pinned'), 'RightPanel.vue 仍残留跨 tab 的待办置顶区（任务进度只能在任务 tab 内）')
@@ -134,7 +138,7 @@ expect(
 )
 
 // 3. last-tab localStorage 记忆逻辑存在
-expect(uiStore.includes("'lc-agent:right-panel:activeTab'"), 'ui store 缺少 last-tab localStorage key')
+expect(uiStore.includes("'lc-agent:right-panel:activeTab:v3'"), 'ui store 缺少 last-tab localStorage key')
 expect(
   /watch\(activeTab, \(tab\) => \{[\s\S]*localStorage\.setItem\(ACTIVE_TAB_KEY, tab\)/.test(uiStore),
   'ui store 未在 tab 变化时写入 localStorage',
@@ -144,11 +148,11 @@ expect(
   'ui store 未在初始化时读取 localStorage',
 )
 
-// 4. 切换 agent 重置回模型
+// 4. 切换 agent 重置回概览（overview）
 expectMatch(
   uiStore,
-  /watch\(\(\) => agentsStore\.currentAgentId, \(\) => \{\s*activeTab\.value = 'model'\s*\}\)/,
-  'ui store 未在切换 agent 时把 tab 重置回模型',
+  /watch\(\(\) => agentsStore\.currentAgentId, \(\) => \{\s*activeTab\.value = 'overview'\s*\}\)/,
+  'ui store 未在切换 agent 时把 tab 重置回 overview',
 )
 
 // 5. badge 规则：运行中进程数 / MCP error 数，> 0 才显示

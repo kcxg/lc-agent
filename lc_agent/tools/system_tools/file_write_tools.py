@@ -1,5 +1,6 @@
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Annotated
 
@@ -9,6 +10,11 @@ from lc_agent.tools.system_tools._file_change_tracker import emit_file_change
 
 _CONTEXT_LINES = 5
 _WRITE_PREVIEW_LINES = 20
+
+# Serializes edit_block executions process-wide. edit_block performs a
+# read-modify-write: two concurrent calls on the same file both read the
+# original content, and the later write silently drops the earlier change.
+_EDIT_BLOCK_LOCK = threading.Lock()
 
 
 def _emit_edit_diff(
@@ -264,6 +270,16 @@ def edit_block(
     IMPORTANT: Call `read_file` on the target file before using this tool. The old_string must match the current file content exactly (character-for-character, including indentation and newlines) — use the text returned by `read_file` as the source.
     Requires old_string to appear exactly expected_replacements times; refuses to edit if the count doesn't match, preventing accidental bulk changes.
     """
+    with _EDIT_BLOCK_LOCK:
+        return _edit_block_impl(file_path, old_string, new_string, expected_replacements)
+
+
+def _edit_block_impl(
+    file_path: str,
+    old_string: str,
+    new_string: str,
+    expected_replacements: int = 1,
+) -> str:
     try:
         resolved = validate_write_path(file_path)
     except PermissionError as e:

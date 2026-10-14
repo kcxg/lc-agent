@@ -58,7 +58,7 @@
 |---|---|---|---|
 | [baidu-search/SKILL.md](file:///d:/codes/lc-agent/lc_agent/skills/contrib_skills/baidu-search/SKILL.md#L18) | L18, L72, L79 | `run_skill_script`、`read_skill_resource` | 改 `skill__execute_script` / `skill__read_content`；调用形式要改成完整命令 |
 | [create-skill/validate_skill.py](file:///d:/codes/lc-agent/lc_agent/skills/contrib_skills/create-skill/scripts/validate_skill.py#L103) | L103 | 提示文本提到 `load_skill` | 改 `skill__load_skill` |
-| [langchain-middleware/SKILL.md](file:///d:/codes/lc-agent/.agents/skills/langchain-middleware/SKILL.md#L134) | L134 | `SkillsMiddleware` / `langchain_agentskills` / `load_skill 等` | 改新包名与工具名 |
+| [my-langchain-middleware/SKILL.md](file:///d:/codes/lc-agent/.agents/skills/my-langchain-middleware/SKILL.md#L134) | L134 | `SkillsMiddleware` / `langchain_agentskills` / `load_skill 等` | 改新包名与工具名 |
 
 其余 `.agents/skills/*` 与 `contrib_skills/*` 已扫过，无旧工具名残留。但**凡 SKILL.md 里写了"跑脚本"的措辞，都要按新入参（完整 shell 命令）复核**——`skill__execute_script` 不解析 `script_name`。
 

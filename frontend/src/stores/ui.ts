@@ -3,20 +3,21 @@ import { ref, watch } from 'vue'
 import { useAgentsStore } from '@/stores/agents'
 import { useFileChangesStore } from '@/stores/file-changes'
 
-export type RightPanelTab = 'model' | 'abilities' | 'changes' | 'editor' | 'tasks'
+export type RightPanelTab = 'overview' | 'model' | 'abilities' | 'changes' | 'editor' | 'tasks'
 
-export const RIGHT_PANEL_TABS: RightPanelTab[] = ['model', 'abilities', 'changes', 'editor', 'tasks']
+export const RIGHT_PANEL_TABS: RightPanelTab[] = ['overview', 'model', 'abilities', 'changes', 'editor', 'tasks']
 
 export type SidebarView = 'chats' | 'files'
 
-const ACTIVE_TAB_KEY = 'lc-agent:right-panel:activeTab:v2'
+// key 带版本号：改默认 tab 时递增，让旧的记忆值失效、新默认立即生效
+const ACTIVE_TAB_KEY = 'lc-agent:right-panel:activeTab:v3'
 
 function loadActiveTab(): RightPanelTab {
   try {
     const raw = localStorage.getItem(ACTIVE_TAB_KEY)
     if (raw && (RIGHT_PANEL_TABS as string[]).includes(raw)) return raw as RightPanelTab
   } catch { /* ignore */ }
-  return 'model'
+  return 'overview'
 }
 
 export const useUiStore = defineStore('ui', () => {
@@ -36,7 +37,7 @@ export const useUiStore = defineStore('ui', () => {
 
   const agentsStore = useAgentsStore()
   watch(() => agentsStore.currentAgentId, () => {
-    activeTab.value = 'model'
+    activeTab.value = 'overview'
   })
 
   function setActiveTab(tab: RightPanelTab) {

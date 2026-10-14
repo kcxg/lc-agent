@@ -558,6 +558,11 @@ function closeMobileDrawers() {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  /* 聊天区横向封顶：标签栏 + 消息区 + 输入框整块不超过 860px，
+     多余空间左右平分，聊天块在侧栏与右侧面板之间居中 */
+  width: 100%;
+  max-width: 860px;
+  margin-inline: auto;
 }
 
 .resizer {
@@ -595,6 +600,9 @@ function closeMobileDrawers() {
   .chat-main {
     width: 100%;
     min-width: 0;
+    /* 移动端解除横向封顶，聊天区铺满可用宽度 */
+    max-width: none;
+    margin-inline: 0;
   }
 
   .mobile-drawer-backdrop {
