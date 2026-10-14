@@ -50,6 +50,15 @@ def get_command_config() -> dict[str, Any]:
     return get_config_value(get_system_tools_config(), "command", {})
 
 
+def multimodal_tool_results_enabled() -> bool:
+    """工具结果是否允许以多模态 content blocks 返回（图片直接交给模型查看）。
+
+    配置键 ``agent.multimodal_tool_results``，默认 True。端点不支持工具消息内联
+    图片时设为 False，图片读取会退回旧的 base64 文本形态。
+    """
+    return bool(get_config_value(get_config(), "agent.multimodal_tool_results", True))
+
+
 def _get_effective_allowed_dirs(config_dirs: list[str]) -> list[str]:
     """Compute effective allowed directories considering active project context."""
     root = _active_project_root_var.get()

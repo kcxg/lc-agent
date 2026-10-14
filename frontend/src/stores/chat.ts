@@ -146,6 +146,9 @@ export interface ToolCall {
   startTime?: number
   duration?: number
   resultLength?: number
+  /** 工具结果里的图片张数 / 图片估算 token（图片不进 result 文本，需单独报） */
+  resultImageCount?: number
+  resultImageTokens?: number
   is_subagent?: boolean
   sub_session_id?: string
 }
@@ -311,6 +314,8 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     startTime: tc.startTime ?? tc.start_time,
     duration: tc.duration,
     resultLength: tc.resultLength ?? tc.result_length ?? tc.result?.length,
+    resultImageCount: tc.resultImageCount ?? tc.result_image_count ?? 0,
+    resultImageTokens: tc.resultImageTokens ?? tc.result_image_tokens ?? 0,
     is_subagent: tc.is_subagent || false,
     sub_session_id: tc.sub_session_id || '',
     // 后端入库时已把当时的 diff 挂在 tool_call 上，刷新后直接渲染
@@ -932,6 +937,8 @@ export const useChatStore = defineStore('chat', () => {
             tc.duration = tc.startTime ? Date.now() - tc.startTime : undefined
           }
           tc.resultLength = msg.result?.length || 0
+          tc.resultImageCount = msg.image_count || 0
+          tc.resultImageTokens = msg.image_tokens || 0
           let resultStatus: unknown
           try {
             resultStatus = JSON.parse(msg.result || '').status

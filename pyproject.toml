@@ -26,7 +26,7 @@ dependencies = [
     "mcp>=1.0",
     "langmem",
     "apscheduler>=3.11,<4",
-  
+    "Pillow",
 ]
 
 [project.optional-dependencies]
@@ -51,7 +51,6 @@ postgres = [
 office = [
     "defusedxml",
     "lxml",
-    "Pillow",
     "openpyxl",
     "pandas",
     "python-docx",

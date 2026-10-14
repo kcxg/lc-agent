@@ -9,7 +9,7 @@
       </span>
       <span v-else-if="finalElapsed" class="live-timer is-finished">{{ finalElapsed }}</span>
       <span v-if="exitBadge" class="tt-exit" :class="{ 'is-error': exitIsError }">{{ exitBadge }}</span>
-      <span v-if="toolCall.status === 'done' && resultSizeText" class="meta-item" title="命令输出大小（字符 / 估算 token）">
+      <span v-if="toolCall.status === 'done' && resultSizeText" class="meta-item" title="命令输出大小（字符 · 估算 token；图片按像素单独估算）">
         📦 {{ resultSizeText }}<template v-if="tokenText"> | {{ tokenText }}</template>
       </span>
       <span

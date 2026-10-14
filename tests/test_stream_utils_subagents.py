@@ -96,6 +96,8 @@ def test_nested_agent_tool_events_are_regular_tool_events():
                 "name": "mcp__nbrag__nbrag_retrieve",
                 "tool_call_id": "def456",
                 "result": "found",
+                "image_count": 0,
+                "image_tokens": 0,
             },
         )
     ]
@@ -242,6 +244,8 @@ def test_subagent_internal_tool_call_and_result():
                 "result": "found",
                 "status": "done",
                 "is_error": False,
+                "image_count": 0,
+                "image_tokens": 0,
             },
         )
     ]
@@ -264,6 +268,8 @@ def test_subagent_internal_tool_error_result_has_explicit_status():
                 "result": "[Tool error: boom]",
                 "status": "error",
                 "is_error": True,
+                "image_count": 0,
+                "image_tokens": 0,
             },
         )
     ]
@@ -288,7 +294,13 @@ def test_regular_tool_with_single_segment_namespace_emits_normal_tool_events():
         ("tool_call", {"name": "calculator", "tool_call_id": "regular-task-123", "args": {"expression": "1 + 1"}})
     ]
     assert convert_stream_event(end_event, subagent_tool_names={"research_expert"}) == [
-        ("tool_result", {"name": "calculator", "tool_call_id": "regular-task-123", "result": "2"})
+        ("tool_result", {
+            "name": "calculator",
+            "tool_call_id": "regular-task-123",
+            "result": "2",
+            "image_count": 0,
+            "image_tokens": 0,
+        })
     ]
 
 

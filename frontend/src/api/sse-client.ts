@@ -21,6 +21,9 @@ export interface SseMessage {
   query?: string
   status?: 'running' | 'done' | 'error' | string
   result_preview?: string
+  // 工具结果里的图片张数 / 图片估算 token（图片不进 result 文本）
+  image_count?: number
+  image_tokens?: number
   duration?: number
   tool_count?: number
   token_count?: number

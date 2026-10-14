@@ -87,6 +87,9 @@ class AppConfig(BaseModel):
         "streaming": True,
         "recursion_limit": DEFAULT_RECURSION_LIMIT,
         "max_subagent_depth": DEFAULT_MAX_SUBAGENT_DEPTH,
+        # 工具结果是否以多模态 content blocks 返回（如 read_file 读图后直接交给模型查看）；
+        # 端点不支持工具消息内联图片时设为 False，图片读取退回 base64 文本形态。
+        "multimodal_tool_results": True,
     })
     mcp: dict = Field(default_factory=dict)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)

@@ -9,7 +9,7 @@
         <span class="live-dot"></span>{{ liveElapsed }}
       </span>
       <span v-else-if="toolCall.duration != null" class="meta-item">{{ formatDuration(toolCall.duration) }}</span>
-      <span v-if="toolCall.status === 'done' && resultSizeText" class="meta-item" title="工具返回内容大小（字符 / 估算 token）">
+      <span v-if="toolCall.status === 'done' && resultSizeText" class="meta-item" title="工具返回内容大小（字符 · 估算 token；图片按像素单独估算）">
         📦 {{ resultSizeText }}<template v-if="tokenText"> | {{ tokenText }}</template>
       </span>
       <button

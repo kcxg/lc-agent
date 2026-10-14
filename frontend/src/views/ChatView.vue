@@ -624,6 +624,7 @@ const subLiveBubbleList = computed((): ChatBubbleItem[] => {
   }
   const toolCalls: ToolCall[] = entry.innerToolCalls.map((tc, i) => {
     content += `\n<!--TOOL:${i}-->\n`
+    const meta = tc as unknown as { resultImageCount?: number; resultImageTokens?: number }
     return {
       name: tc.name,
       runId: `sub-tc-${i}`,
@@ -633,6 +634,8 @@ const subLiveBubbleList = computed((): ChatBubbleItem[] => {
       startTime: undefined,
       duration: undefined,
       resultLength: tc.result?.length,
+      resultImageCount: meta.resultImageCount ?? 0,
+      resultImageTokens: meta.resultImageTokens ?? 0,
     }
   })
   if (entry.tokens) {
