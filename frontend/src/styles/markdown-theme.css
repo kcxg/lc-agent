@@ -1390,6 +1390,16 @@ html[data-md-layout="joplin-notes"] {
   }
 }
 
+/* 超宽屏（≥2200px）：改用固定留白——内容列 = 100vw - 1020px，两侧留白恒定约 220px
+   （1020 - 侧栏245 - 右栏330 ≈ 445，左右各分一半），吃到 1600px 上限为止。
+   与上一档在 2200px 处衔接（都是 1180px），斜率 30vw 在超宽屏下留白占比越来越大，这里拉平 */
+@media (min-width: 2200px) {
+  :root,
+  html[data-md-layout] {
+    --md-answer-width: min(1600px, calc(100vw - 1020px));
+  }
+}
+
 /* Notion Editorial is the default treatment for every final assistant answer. */
 .markdown-body.answer-markdown {
   max-width: var(--md-answer-width);

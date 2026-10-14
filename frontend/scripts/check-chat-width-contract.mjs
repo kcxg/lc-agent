@@ -102,10 +102,10 @@ for (const card of toolCards) {
   )
 }
 
-// 聊天区整块横向封顶（App.vue）：标签栏 + 消息区 + 输入框一起不超过 860px 并居中
+// 聊天区整块横向封顶（App.vue）：标签栏 + 消息区 + 输入框一起跟随 --md-answer-width 并居中
 expectAppMatch(
-  /\.chat-main\s*\{[\s\S]*?max-width:\s*860px/,
-  '.chat-main 缺少横向封顶 max-width: 860px，窗口变宽时聊天区会无限拉宽',
+  /\.chat-main\s*\{[\s\S]*?max-width:\s*calc\(var\(--md-answer-width\)\s*\+\s*18px\)/,
+  '.chat-main 缺少横向封顶 max-width: calc(var(--md-answer-width) + 18px)，窗口变宽时聊天区会无限拉宽',
 )
 expectAppMatch(
   /\.chat-main\s*\{[\s\S]*?margin-inline:\s*auto/,

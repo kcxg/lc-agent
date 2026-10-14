@@ -558,10 +558,11 @@ function closeMobileDrawers() {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  /* 聊天区横向封顶：标签栏 + 消息区 + 输入框整块不超过 860px，
-     多余空间左右平分，聊天块在侧栏与右侧面板之间居中 */
+  /* 聊天区横向封顶：标签栏 + 消息区 + 输入框整块跟随内容列宽度
+     （--md-answer-width 及其大屏拉伸档位），多余空间左右平分，
+     聊天块在侧栏与右侧面板之间居中 */
   width: 100%;
-  max-width: 860px;
+  max-width: calc(var(--md-answer-width) + 18px);
   margin-inline: auto;
 }
 
