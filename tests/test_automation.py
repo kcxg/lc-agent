@@ -7,7 +7,14 @@ from lc_agent.config.runtime import reset_config, set_config
 from lc_agent.db.engine import get_async_session, init_db, reset_engine
 from lc_agent.db.repository import AutomationRunRepository, AutomationTaskRepository
 from lc_agent.server.agent_runner import AgentRunService
-from lc_agent.server.automation import AutomationRunner, AutomationScheduleError, AutomationScheduler, normalize_schedule
+from lc_agent.server.automation import (
+    AutomationRunner,
+    AutomationScheduleError,
+    AutomationScheduler,
+    _in_active_window,
+    active_window_minutes,
+    normalize_schedule,
+)
 from lc_agent.server.automation_notifications import NotificationDeliverySummary
 
 
@@ -51,6 +58,110 @@ def test_normalize_schedule_rejects_invalid_values():
         normalize_schedule("interval", {"value": 0, "unit": "minutes"}, "Asia/Shanghai", now=now)
     with pytest.raises(AutomationScheduleError):
         normalize_schedule("one_time", {"run_at": "2026-08-27T09:00:00"}, "Asia/Shanghai", now=now)
+
+
+def test_active_window_helpers():
+    day = ZoneInfo("Asia/Shanghai")
+    assert active_window_minutes({"value": 1, "unit": "hours"}) is None
+    assert active_window_minutes({"active_start": "08:00", "active_end": "18:00"}) == (480, 1080)
+    assert active_window_minutes({"active_start": "22:00", "active_end": "06:00"}) == (1320, 360)
+
+    daytime = (480, 1080)
+    assert _in_active_window(datetime(2026, 8, 27, 8, 0, tzinfo=day), daytime) is True
+    assert _in_active_window(datetime(2026, 8, 27, 17, 59, tzinfo=day), daytime) is True
+    assert _in_active_window(datetime(2026, 8, 27, 18, 0, tzinfo=day), daytime) is False
+    assert _in_active_window(datetime(2026, 8, 27, 7, 59, tzinfo=day), daytime) is False
+
+    overnight = (1320, 360)
+    assert _in_active_window(datetime(2026, 8, 27, 23, 30, tzinfo=day), overnight) is True
+    assert _in_active_window(datetime(2026, 8, 27, 5, 0, tzinfo=day), overnight) is True
+    assert _in_active_window(datetime(2026, 8, 27, 12, 0, tzinfo=day), overnight) is False
+
+
+def test_normalize_interval_with_active_window():
+    tz = ZoneInfo("Asia/Shanghai")
+    now = datetime(2026, 8, 27, 10, 0, tzinfo=tz)
+    config, _, next_run = normalize_schedule(
+        "interval",
+        {
+            "value": 2,
+            "unit": "hours",
+            "start_at": "2026-08-27T00:00:00",
+            "active_start": "8:0",
+            "active_end": "18:00",
+        },
+        "Asia/Shanghai",
+        now=now,
+    )
+    assert config["active_start"] == "08:00"
+    assert config["active_end"] == "18:00"
+    assert next_run == datetime(2026, 8, 27, 10, 0, tzinfo=tz)
+
+
+def test_normalize_interval_active_window_skips_night():
+    tz = ZoneInfo("Asia/Shanghai")
+    now = datetime(2026, 8, 27, 19, 0, tzinfo=tz)
+    _, _, next_run = normalize_schedule(
+        "interval",
+        {"value": 1, "unit": "hours", "start_at": "2026-08-27T00:00:00", "active_start": "08:00", "active_end": "18:00"},
+        "Asia/Shanghai",
+        now=now,
+    )
+    assert next_run == datetime(2026, 8, 28, 8, 0, tzinfo=tz)
+
+
+def test_normalize_interval_active_window_supports_overnight():
+    tz = ZoneInfo("Asia/Shanghai")
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=tz)
+    _, _, next_run = normalize_schedule(
+        "interval",
+        {"value": 1, "unit": "hours", "start_at": "2026-08-27T00:00:00", "active_start": "22:00", "active_end": "06:00"},
+        "Asia/Shanghai",
+        now=now,
+    )
+    assert next_run == datetime(2026, 8, 27, 22, 0, tzinfo=tz)
+
+
+def test_normalize_interval_active_window_rejects_invalid_values():
+    now = datetime(2026, 8, 27, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    with pytest.raises(AutomationScheduleError):
+        normalize_schedule("interval", {"value": 1, "unit": "hours", "active_start": "08:00"}, "Asia/Shanghai", now=now)
+    with pytest.raises(AutomationScheduleError):
+        normalize_schedule("interval", {"value": 1, "unit": "hours", "active_end": "18:00"}, "Asia/Shanghai", now=now)
+    with pytest.raises(AutomationScheduleError):
+        normalize_schedule("interval", {"value": 1, "unit": "hours", "active_start": "09:00", "active_end": "09:00"}, "Asia/Shanghai", now=now)
+
+
+@pytest.mark.asyncio
+async def test_run_scheduled_respects_active_window(db_url, monkeypatch):
+    from types import SimpleNamespace
+
+    async with get_async_session(db_url) as db:
+        task = await AutomationTaskRepository(db).create(
+            user_id="user-1",
+            name="白天任务",
+            agent_id="power",
+            prompt="整理今天的摘要",
+            schedule_type="interval",
+            schedule_config={
+                "value": 1,
+                "unit": "hours",
+                "start_at": "2026-01-01T00:00:00",
+                "active_start": "08:00",
+                "active_end": "18:00",
+            },
+            timezone="Asia/Shanghai",
+            enabled=True,
+        )
+        task_id = task.id
+
+    runner = AutomationRunner(object(), SimpleNamespace(state=SimpleNamespace()))
+
+    monkeypatch.setattr("lc_agent.server.automation._in_active_window", lambda moment, window: False)
+    assert await runner.run_scheduled(task_id) is None
+
+    monkeypatch.setattr("lc_agent.server.automation._in_active_window", lambda moment, window: True)
+    assert await runner.run_scheduled(task_id) is not None
 
 
 @pytest.mark.asyncio

@@ -9,13 +9,21 @@ from pathlib import Path
 from typing import Annotated
 
 from lc_agent.tools.registry import tool
-from lc_agent.tools.system_tools._config import validate_read_path
+from lc_agent.tools.system_tools._config import (
+    multimodal_tool_results_enabled,
+    validate_read_path,
+)
 
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+# 可内联成图片块、直接交给模型查看的格式（provider 普遍支持）
+_INLINE_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+# 按"图片"处理的全部扩展名：svg 是 XML 文本，交回文本分支读
+_IMAGE_EXTENSIONS = _INLINE_IMAGE_EXTENSIONS | {".bmp"}
 _DEFAULT_LINE_LIMIT = 1000
 _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 _MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 _MAX_DIRECTORY_ITEMS = 10_000
+# 单次 read_multiple_files 最多内联几张图，避免一次把上下文塞满
+_MAX_INLINE_IMAGES_PER_CALL = 5
 
 
 @tool(group="file_read", group_description="文件读取")
@@ -29,8 +37,8 @@ def read_file(
         int,
         "Maximum number of lines to read (default 1000). Set -1 to read the entire file.",
     ] = _DEFAULT_LINE_LIMIT,
-) -> str:
-    """Read a file and return its content. Supports text files (with optional line-range paging) and images (returned as base64).
+) -> str | list[dict]:
+    """Read a file and return its content. Supports text files (with optional line-range paging) and images — an image file (png/jpeg/gif/webp) is returned to you as viewable image content, so you can look at it directly with no extra steps.
 
     Paths resolve relative to the project root (project mode) or server working directory; absolute paths are also accepted.
     Files larger than 10 MB return an error — use offset/length to page through large files (default: 1000 lines per call).
@@ -45,8 +53,6 @@ def read_file(
 
     file_size = file_path.stat().st_size
     if file_path.suffix.lower() in _IMAGE_EXTENSIONS:
-        if file_size > _MAX_IMAGE_SIZE:
-            return f"Error: Image too large ({file_size / 1024 / 1024:.1f} MB). Max {_MAX_IMAGE_SIZE // 1024 // 1024} MB."
         return _read_image(file_path)
 
     if file_size > _MAX_FILE_SIZE:
@@ -58,18 +64,46 @@ def read_file(
     return _read_text(file_path, offset, length)
 
 
-def _read_image(file_path: Path) -> str:
+def _read_image(file_path: Path) -> str | list[dict]:
+    """读取图片文件。
+
+    可内联格式返回标准 content blocks（图片块形如
+    ``{"type": "image", "base64": ..., "mime_type": ...}``），模型下一轮即可看到；
+    开关关闭时退回旧的 base64 文本形态（供端点不支持工具内联图片时使用）。
+    不支持的格式（如 bmp）只回文本提示，绝不把二进制当文本读。
+    """
+    ext = file_path.suffix.lower()
+    name = file_path.name
+    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    try:
+        size = file_path.stat().st_size
+    except OSError as e:
+        return f"Error reading image: {e}"
+    size_kb = size / 1024
+
+    if ext not in _INLINE_IMAGE_EXTENSIONS:
+        return (
+            f"[Image: {name}, {size_kb:.1f} KB, type={mime}]\n"
+            "该图片格式暂不支持查看（仅支持 png/jpeg/gif/webp）。"
+        )
+    if size > _MAX_IMAGE_SIZE:
+        return (
+            f"Error: Image too large ({size / 1024 / 1024:.1f} MB). "
+            f"Max {_MAX_IMAGE_SIZE // 1024 // 1024} MB."
+        )
     try:
         data = file_path.read_bytes()
-        b64 = base64.b64encode(data).decode("ascii")
-        mime = mimetypes.guess_type(str(file_path))[0] or "image/png"
-        size_kb = len(data) / 1024
-        return (
-            f"[Image: {file_path.name}, {size_kb:.1f} KB, type={mime}]\n"
-            f"data:{mime};base64,{b64}"
-        )
-    except Exception as e:
+    except OSError as e:
         return f"Error reading image: {e}"
+
+    b64 = base64.b64encode(data).decode("ascii")
+    if not multimodal_tool_results_enabled():
+        return f"[Image: {name}, {size_kb:.1f} KB, type={mime}]\ndata:{mime};base64,{b64}"
+
+    return [
+        {"type": "text", "text": f"[Image: {name}, {size_kb:.1f} KB, {mime}]"},
+        {"type": "image", "base64": b64, "mime_type": mime},
+    ]
 
 
 def _read_text(file_path: Path, offset: int, length: int) -> str:
@@ -101,22 +135,51 @@ def _read_text(file_path: Path, offset: int, length: int) -> str:
     return f"{header}\n{content}"
 
 
+def _text_block(text: str) -> dict:
+    return {"type": "text", "text": text}
+
+
 @tool(group="file_read", group_description="文件读取")
 def read_multiple_files(
     paths: Annotated[list[str], "List of file paths to read"],
-) -> str:
-    """Read multiple files in one call. Prefer this over sequential read_file calls when you need to read multiple known paths — it's faster and reduces round-trips. A single file failure does not affect the others; each result is prefixed with its path."""
-    results: list[str] = []
+) -> str | list[dict]:
+    """Read multiple files in one call. Prefer this over sequential read_file calls when you need to read multiple known paths — it's faster and reduces round-trips. A single file failure does not affect the others; each result is prefixed with its path. Image files (png/jpeg/gif/webp) are returned as viewable image content; at most 5 images are inlined per call."""
+    blocks: list[dict] = []
+    inlined_images = 0
+
     for p in paths:
         try:
             resolved = validate_read_path(p)
             file_path = Path(resolved)
             if not file_path.exists():
-                results.append(f"--- {p} ---\nError: File not found")
+                blocks.append(_text_block(f"--- {p} ---\nError: File not found"))
                 continue
             if file_path.is_dir():
-                results.append(f"--- {p} ---\nError: Is a directory")
+                blocks.append(_text_block(f"--- {p} ---\nError: Is a directory"))
                 continue
+
+            if file_path.suffix.lower() in _IMAGE_EXTENSIONS:
+                will_inline = (
+                    file_path.suffix.lower() in _INLINE_IMAGE_EXTENSIONS
+                    and multimodal_tool_results_enabled()
+                    and file_path.stat().st_size <= _MAX_IMAGE_SIZE
+                )
+                if will_inline and inlined_images >= _MAX_INLINE_IMAGES_PER_CALL:
+                    blocks.append(_text_block(
+                        f"--- {p} ---\n"
+                        f"已省略：单次最多内联查看 {_MAX_INLINE_IMAGES_PER_CALL} 张图片，请分批读取。"
+                    ))
+                    continue
+                if will_inline:
+                    inlined_images += 1
+                image_result = _read_image(file_path)
+                if isinstance(image_result, list):
+                    blocks.append(_text_block(f"--- {p} ---"))
+                    blocks.extend(image_result)
+                else:
+                    blocks.append(_text_block(f"--- {p} ---\n{image_result}"))
+                continue
+
             text = file_path.read_text(encoding="utf-8", errors="replace")
             lines = text.splitlines(keepends=True)
             if len(lines) > _DEFAULT_LINE_LIMIT:
@@ -124,12 +187,16 @@ def read_multiple_files(
                 content += f"\n... [{len(lines) - _DEFAULT_LINE_LIMIT} more lines truncated]"
             else:
                 content = text
-            results.append(f"--- {p} ---\n{content}")
+            blocks.append(_text_block(f"--- {p} ---\n{content}"))
         except PermissionError as e:
-            results.append(f"--- {p} ---\nError: {e}")
+            blocks.append(_text_block(f"--- {p} ---\nError: {e}"))
         except Exception as e:
-            results.append(f"--- {p} ---\nError: {e}")
-    return "\n\n".join(results)
+            blocks.append(_text_block(f"--- {p} ---\nError: {e}"))
+
+    # 全是文本时仍返回字符串，保持既有返回类型与输出格式不变
+    if all(block["type"] == "text" for block in blocks):
+        return "\n\n".join(block["text"] for block in blocks)
+    return blocks
 
 
 @tool(group="file_read", group_description="文件读取")

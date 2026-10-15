@@ -132,6 +132,20 @@
           <label class="field-label" for="automation-start-at">开始时间（可选）</label>
           <input id="automation-start-at" v-model="form.start_at" class="native-control" type="datetime-local" />
         </div>
+        <div class="interval-window-field">
+          <div class="window-toggle-row">
+            <label class="field-label">仅在指定时段内运行</label>
+            <el-switch v-model="form.active_window_enabled" size="small" aria-label="仅在指定时段内运行" />
+          </div>
+          <div v-if="form.active_window_enabled" class="window-inputs">
+            <input v-model="form.active_start" class="native-control" type="time" aria-label="时段开始时间" />
+            <span class="window-sep">至</span>
+            <input v-model="form.active_end" class="native-control" type="time" aria-label="时段结束时间" />
+          </div>
+          <p v-if="form.active_window_enabled" class="window-hint">
+            仅在该时段内按间隔执行，时段外的触发会自动跳过（不含结束时刻）；结束时间早于开始时间表示跨夜。
+          </p>
+        </div>
       </div>
 
       <div v-else class="schedule-fields calendar-fields">
@@ -396,6 +410,9 @@ const form = reactive({
   interval_value: 1,
   interval_unit: 'hours',
   start_at: '',
+  active_window_enabled: false,
+  active_start: '08:00',
+  active_end: '18:00',
   time: '09:00',
   day_of_week: 0,
   enabled: true,
@@ -408,7 +425,14 @@ const canSave = computed(() => {
   if (!form.name.trim() || !form.agent_id || !form.prompt.trim()) return false
   if (!form.notification_targets.every(canTestNotificationTarget)) return false
   if (form.schedule_type === 'one_time') return Boolean(form.run_at)
-  if (form.schedule_type === 'interval') return form.interval_value > 0
+  if (form.schedule_type === 'interval') {
+    if (form.interval_value <= 0) return false
+    if (form.active_window_enabled) {
+      if (!form.active_start || !form.active_end) return false
+      if (form.active_start === form.active_end) return false
+    }
+    return true
+  }
   return Boolean(form.time)
 })
 
@@ -431,6 +455,9 @@ function resetForm() {
   form.interval_value = 1
   form.interval_unit = 'hours'
   form.start_at = ''
+  form.active_window_enabled = false
+  form.active_start = '08:00'
+  form.active_end = '18:00'
   form.time = '09:00'
   form.day_of_week = 0
   form.enabled = true
@@ -470,6 +497,11 @@ function fillFormFromTask(task: AutomationTask) {
   form.interval_value = Number(task.schedule_config.value || 1)
   form.interval_unit = String(task.schedule_config.unit || 'hours')
   form.start_at = String(task.schedule_config.start_at || '').slice(0, 16)
+  const activeStart = String(task.schedule_config.active_start || '')
+  const activeEnd = String(task.schedule_config.active_end || '')
+  form.active_window_enabled = Boolean(activeStart && activeEnd)
+  form.active_start = activeStart || '08:00'
+  form.active_end = activeEnd || '18:00'
   form.time = String(task.schedule_config.time || '09:00')
   form.day_of_week = Number(task.schedule_config.day_of_week || 0)
   form.enabled = task.enabled
@@ -513,6 +545,9 @@ function buildScheduleConfig() {
       value: form.interval_value,
       unit: form.interval_unit,
       ...(form.start_at ? { start_at: form.start_at } : {}),
+      ...(form.active_window_enabled
+        ? { active_start: form.active_start, active_end: form.active_end }
+        : {}),
     }
   }
   if (form.schedule_type === 'weekly') return { day_of_week: form.day_of_week, time: form.time }
@@ -663,7 +698,10 @@ function formatSchedule(task: AutomationTask) {
   if (task.schedule_type === 'one_time') return `一次性 ${formatDate(String(config.run_at || ''))}`
   if (task.schedule_type === 'interval') {
     const unit = { minutes: '分钟', hours: '小时', days: '天' }[String(config.unit)] || String(config.unit)
-    return `每 ${config.value || 1} ${unit}`
+    const base = `每 ${config.value || 1} ${unit}`
+    const activeStart = String(config.active_start || '')
+    const activeEnd = String(config.active_end || '')
+    return activeStart && activeEnd ? `${base} · 仅 ${activeStart}–${activeEnd}` : base
   }
   if (task.schedule_type === 'weekly') return `每${WEEKDAYS[Number(config.day_of_week) || 0]?.label.replace('星期', '周') || '周一'} ${config.time || ''}`
   return `每天 ${config.time || ''}`
@@ -1023,8 +1061,43 @@ defineExpose({ open })
   gap: 10px;
 }
 
-.interval-start-field {
+.interval-start-field,
+.interval-window-field {
   grid-column: 1 / -1;
+}
+
+.window-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.window-toggle-row .field-label {
+  margin: 0;
+}
+
+.window-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.window-inputs .native-control {
+  flex: 1;
+}
+
+.window-sep {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.window-hint {
+  margin: 7px 0 0;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .calendar-fields {
@@ -1491,6 +1564,7 @@ defineExpose({ open })
   }
 
   .interval-start-field,
+  .interval-window-field,
   .notification-target-wide {
     grid-column: auto;
   }

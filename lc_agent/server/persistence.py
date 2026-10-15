@@ -182,6 +182,108 @@ async def save_ui_message(
         raise
 
 
+async def save_partial_assistant_message(
+    thread_id: str,
+    *,
+    content_parts: list[str],
+    tool_calls: list[dict[str, Any]],
+    usage_rounds: list[dict[str, Any]],
+    elapsed_ms: int,
+) -> bool:
+    """把「已产生的部分」落成一条 assistant UI 消息，返回是否真的写了。
+
+    正常结束路径本来就会写；取消 / 前端断开 / 异常这些早退路径过去直接 return，
+    导致这一轮的 usage 与工具调用在 chat_ui_messages 里永久缺失（只有用量账单表
+    record_usage 有记录），右侧概览与刷新后的历史都看不到。
+    """
+    if not (content_parts or tool_calls or usage_rounds):
+        return False
+    from lc_agent.server.stream_utils import split_chat_usage_rounds
+
+    # 还没跑完的工具在快照里仍是 running，落库前统一标成 interrupted，
+    # 否则历史里那张卡片会永远显示"执行中"。
+    persisted_tool_calls = [
+        {**tc, "status": "interrupted"} if tc.get("status") in (None, "running") else tc
+        for tc in tool_calls
+    ]
+
+    await save_ui_message(
+        thread_id,
+        "assistant",
+        [{"type": "text", "text": "".join(content_parts)}],
+        tool_calls=persisted_tool_calls or None,
+        usage={
+            "rounds": split_chat_usage_rounds(usage_rounds),
+            "tool_call_count": len(tool_calls),
+            "total_duration_ms": elapsed_ms,
+        },
+    )
+    return True
+
+
+async def persist_interrupted_round(
+    thread_id: str,
+    *,
+    content_parts: list[str],
+    tool_calls: list[dict[str, Any]],
+    usage_rounds: list[dict[str, Any]],
+    elapsed_ms: int,
+) -> None:
+    """早退路径（取消 / 前端断开 / 异常）补写这一轮已产生的 UI 记录。
+
+    失败只记日志、不向上抛：调用方随后还要给前端发终止事件，
+    不能让落库问题打断收尾流程。
+    """
+    try:
+        wrote = await save_partial_assistant_message(
+            thread_id,
+            content_parts=content_parts,
+            tool_calls=tool_calls,
+            usage_rounds=usage_rounds,
+            elapsed_ms=elapsed_ms,
+        )
+        if wrote:
+            await increment_session_message_count(thread_id)
+    except Exception:
+        logger.exception("Failed to persist interrupted round for session %s", thread_id)
+
+
+async def persist_interrupted_resume_round(
+    thread_id: str,
+    *,
+    content_parts: list[str],
+    tool_calls: list[dict[str, Any]],
+    usage_rounds: list[dict[str, Any]],
+    elapsed_ms: int,
+) -> None:
+    """中断续跑（resume）早退时，把已产生的部分**追加**到上一条 assistant 消息。
+
+    resume 与首次发送不同：整轮共用同一条 assistant 消息（正常结束走
+    append_to_last_assistant_message），所以这里也必须追加而不是新建，
+    否则续跑被取消/出错会多出一条重复的 assistant 气泡；消息数也不递增。
+    失败只记日志、不向上抛。
+    """
+    new_content = "".join(content_parts)
+    if not (new_content or tool_calls or usage_rounds):
+        return
+    try:
+        from lc_agent.server.stream_utils import split_chat_usage_rounds
+
+        persisted_tool_calls = [
+            {**tc, "status": "interrupted"} if tc.get("status") in (None, "running") else tc
+            for tc in tool_calls
+        ]
+        await append_to_last_assistant_message(
+            thread_id,
+            new_content,
+            all_tool_calls=persisted_tool_calls or None,
+            usage_rounds=split_chat_usage_rounds(usage_rounds) or None,
+            resume_duration_ms=elapsed_ms,
+        )
+    except Exception:
+        logger.exception("Failed to persist interrupted resume round for session %s", thread_id)
+
+
 async def truncate_from_message(thread_id: str, message_id: str) -> None:
     """Delete persisted UI messages from the edited anchor onward."""
     try:
@@ -211,7 +313,7 @@ async def load_resume_context(thread_id: str) -> tuple[list[dict[str, Any]], int
             last_msg = await repo.get_last_assistant(thread_id)
             if last_msg is None:
                 return [], 0
-            return list(last_msg.tool_calls or []), len(last_msg.http_traces or [])
+            return list(last_msg.tool_calls or []), last_msg.http_traces_count or 0
         finally:
             await session.close()
     except Exception:
@@ -262,6 +364,7 @@ async def append_to_last_assistant_message(
                 }
             if http_traces:
                 last_msg.http_traces = (last_msg.http_traces or []) + list(http_traces)
+                last_msg.http_traces_count = len(last_msg.http_traces)
             session.add(last_msg)
             await session.commit()
         finally:

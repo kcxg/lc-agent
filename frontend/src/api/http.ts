@@ -297,6 +297,15 @@ export const api = {
   getMessageTraces: (sessionId: string, messageId: string) =>
     fetchApi<{ traces: any[] }>(`/sessions/${sessionId}/messages/${messageId}/traces`),
 
+  // 线程运行状态：刷新页面/断流后判断"这一轮是否还在服务端跑"，以及远程停止
+  getThreadRunStatus: (id: string) =>
+    fetchApi<{ running: boolean }>(`/threads/${id}/run-status`),
+  cancelThreadRun: (id: string) =>
+    fetchApi<{ ok: boolean; thread_id: string }>(`/threads/${id}/runs/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+
   // Automation tasks
   getAutomationTasks: () => fetchApi<any[]>('/automation/tasks'),
   getAutomationTimezone: () => fetchApi<{ timezone: string }>('/automation/timezone'),

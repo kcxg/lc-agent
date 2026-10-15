@@ -21,6 +21,8 @@ FILE_READ_USAGE_PROMPT = """\
 - 需要同时读取多个已知路径时，用 `read_multiple_files` 批量读取，而不是逐个调用 `read_file`
 - 只需知道文件元数据（大小、行数等）时，用 `get_file_info` 而不是读取全文
 - 需要读取大文件的局部内容时，使用 `read_file` 的 `offset`/`length` 参数指定行范围
+- 图片文件（png/jpeg/gif/webp）直接 `read_file` 即可看到图片内容，无需其它操作
+- 图片很占上下文：一次别读太多张，按需读取（`read_multiple_files` 单次最多内联 5 张）
 
 ### 搜索代码与目录
 - 查找函数、类名、字符串内容时，用 `search_files` 并指定 `search_type='content'`；

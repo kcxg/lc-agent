@@ -13,6 +13,10 @@ export interface SessionState {
 
   // Streaming state
   isStreaming: Ref<boolean>
+  /** 服务端是否仍在该会话上运行：本地没有流时（刷新过页面）靠轮询 /run-status 得知 */
+  serverRunning: Ref<boolean>
+  /** 正在请求停止（防止重复点击把状态反复改写） */
+  cancelling: Ref<boolean>
   inThinking: boolean       // mutable flag, intentionally not Ref
   streamStartTime: number   // mutable, not Ref
   currentRoundStart: number // mutable, not Ref
@@ -32,6 +36,8 @@ export function createSessionState(): SessionState {
     loadingOlder: ref(false),
     isHistoryLoading: ref(false),
     isStreaming: ref(false),
+    serverRunning: ref(false),
+    cancelling: ref(false),
     inThinking: false,
     streamStartTime: 0,
     currentRoundStart: 0,

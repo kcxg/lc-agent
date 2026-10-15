@@ -146,6 +146,9 @@ export interface ToolCall {
   startTime?: number
   duration?: number
   resultLength?: number
+  /** 工具结果里的图片张数 / 图片估算 token（图片不进 result 文本，需单独报） */
+  resultImageCount?: number
+  resultImageTokens?: number
   is_subagent?: boolean
   sub_session_id?: string
 }
@@ -311,6 +314,8 @@ function normalizeHistoryMessage(msg: any): ChatMessage | null {
     startTime: tc.startTime ?? tc.start_time,
     duration: tc.duration,
     resultLength: tc.resultLength ?? tc.result_length ?? tc.result?.length,
+    resultImageCount: tc.resultImageCount ?? tc.result_image_count ?? 0,
+    resultImageTokens: tc.resultImageTokens ?? tc.result_image_tokens ?? 0,
     is_subagent: tc.is_subagent || false,
     sub_session_id: tc.sub_session_id || '',
     // 后端入库时已把当时的 diff 挂在 tool_call 上，刷新后直接渲染
@@ -744,6 +749,8 @@ export const useChatStore = defineStore('chat', () => {
 
   const messages = computed<ChatMessage[]>(() => _active()?.messages.value ?? [])
   const isStreaming = computed(() => _active()?.isStreaming.value ?? false)
+  /** 服务端仍在跑这一轮（本地可能没有流，例如刷新过页面） */
+  const serverRunning = computed(() => _active()?.serverRunning.value ?? false)
   const interrupt = computed(() => _active()?.interrupt.value ?? null)
   const todos = computed(() => _active()?.todos.value ?? [])
   const errorMessage = computed(() => _active()?.errorMessage.value ?? null)
@@ -789,21 +796,29 @@ export const useChatStore = defineStore('chat', () => {
     if (state) _releaseBackgroundSession(sessionId, state)
   }
 
+  /**
+   * 幂等：确保会话已进入「运行中」并存在 assistant 占位气泡。
+   * 发送消息时立即调用，避免「已发出、但还没收到首个事件」这段窗口里会话看起来
+   * 是空闲的——那时切走会被当作可释放会话而 abort SSE，服务端会把它当成用户取消。
+   */
+  function _ensureAssistantPlaceholder(state: SessionState): void {
+    if (state.isStreaming.value) return
+    state.isStreaming.value = true
+    state.streamStartTime = Date.now()
+    state.currentRoundStart = Date.now()
+    state.messages.value.push({
+      id: createClientId(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: true,
+      usage: { rounds: [], toolCallCount: 0 },
+    })
+  }
+
   function _registerHandlers(client: ChatSseClient, state: SessionState, sessionId: string) {
     client.on('thinking', (msg: SseMessage) => {
-      if (!state.isStreaming.value) {
-        state.isStreaming.value = true
-        state.streamStartTime = Date.now()
-        state.currentRoundStart = Date.now()
-        state.messages.value.push({
-          id: createClientId(),
-          role: 'assistant',
-          content: '',
-          timestamp: Date.now(),
-          isStreaming: true,
-          usage: { rounds: [], toolCallCount: 0 },
-        })
-      }
+      _ensureAssistantPlaceholder(state)
       const last = state.messages.value[state.messages.value.length - 1]
       if (last && last.role === 'assistant') {
         if (!state.inThinking) {
@@ -815,19 +830,7 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     client.on('token', (msg: SseMessage) => {
-      if (!state.isStreaming.value) {
-        state.isStreaming.value = true
-        state.streamStartTime = Date.now()
-        state.currentRoundStart = Date.now()
-        state.messages.value.push({
-          id: createClientId(),
-          role: 'assistant',
-          content: '',
-          timestamp: Date.now(),
-          isStreaming: true,
-          usage: { rounds: [], toolCallCount: 0 },
-        })
-      }
+      _ensureAssistantPlaceholder(state)
       const last = state.messages.value[state.messages.value.length - 1]
       if (last && last.role === 'assistant') {
         if (state.inThinking) {
@@ -862,19 +865,7 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     client.on('tool_call', (msg: SseMessage) => {
-      if (!state.isStreaming.value) {
-        state.isStreaming.value = true
-        state.streamStartTime = Date.now()
-        state.currentRoundStart = Date.now()
-        state.messages.value.push({
-          id: createClientId(),
-          role: 'assistant',
-          content: '',
-          timestamp: Date.now(),
-          isStreaming: true,
-          usage: { rounds: [], toolCallCount: 0 },
-        })
-      }
+      _ensureAssistantPlaceholder(state)
       const last = state.messages.value[state.messages.value.length - 1]
       if (last && last.role === 'assistant') {
         if (state.inThinking) {
@@ -932,6 +923,8 @@ export const useChatStore = defineStore('chat', () => {
             tc.duration = tc.startTime ? Date.now() - tc.startTime : undefined
           }
           tc.resultLength = msg.result?.length || 0
+          tc.resultImageCount = msg.image_count || 0
+          tc.resultImageTokens = msg.image_tokens || 0
           let resultStatus: unknown
           try {
             resultStatus = JSON.parse(msg.result || '').status
@@ -1243,6 +1236,12 @@ export const useChatStore = defineStore('chat', () => {
 
     client.on('error', (msg: SseMessage) => {
       state.isStreaming.value = false
+      // 后端 409「该会话已在运行中」：不是错误，同步成"正在运行"即可（B 语义下不该发得出去）
+      if (msg.error_code === 'run_in_progress') {
+        state.serverRunning.value = true
+        void refreshServerRunning(sessionId)
+        return
+      }
       if (state.inThinking) {
         const last = state.messages.value[state.messages.value.length - 1]
         if (last && last.role === 'assistant') {
@@ -1333,6 +1332,31 @@ export const useChatStore = defineStore('chat', () => {
     return activeSessions.get(sessionId)?.isStreaming.value ?? false
   }
 
+  /**
+   * 查询服务端该会话是否还在跑（本地断流后使用：刷新页面、换标签页回来）。
+   * 查询失败时保持原值，避免把"正在跑"误清成空闲。
+   */
+  async function refreshServerRunning(sessionId: string): Promise<void> {
+    const state = activeSessions.get(sessionId)
+    if (!state) return
+    try {
+      const resp = await api.getThreadRunStatus(sessionId)
+      const wasRunning = state.serverRunning.value
+      const nowRunning = Boolean(resp?.running)
+      state.serverRunning.value = nowRunning
+      // 从"在跑"变成"跑完"：重新拉一次消息，让跑完的结果自己出现
+      if (wasRunning && !nowRunning && sessionId === activeSessionId.value) {
+        await loadMessages(sessionId)
+      }
+    } catch {
+      /* 保持原状 */
+    }
+  }
+
+  function isSessionServerRunning(sessionId: string): boolean {
+    return activeSessions.get(sessionId)?.serverRunning.value ?? false
+  }
+
   function getStreamingSessionIds(): string[] {
     return [...activeSessions.keys()].filter(id =>
       activeSessions.get(id)?.isStreaming.value
@@ -1373,10 +1397,24 @@ export const useChatStore = defineStore('chat', () => {
       timestamp: Date.now(),
     })
 
+    // 发送即进入运行态：这段"还没收到首个事件"的窗口里若显示为空闲，
+    // 切走会被释放并 abort SSE（服务端当成取消）。
+    _ensureAssistantPlaceholder(state)
+
     state.client.sendMessage(content, presetId, modelId, {
       replaceFromMessageId: options.replaceFromMessageId,
       history: options.history,
       llmParams: options.llmParams,
+    }).catch((e: unknown) => {
+      // 发送本身失败（如无 threadId）：收敛状态，避免占位气泡永远停在"流式中"
+      state.isStreaming.value = false
+      const last = state.messages.value[state.messages.value.length - 1]
+      if (last && last.role === 'assistant') last.isStreaming = false
+      state.errorMessage.value = {
+        title: '发送失败',
+        detail: e instanceof Error ? e.message : String(e),
+        errorCode: 'SEND_FAILED',
+      }
     })
   }
 
@@ -1511,10 +1549,51 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function stopGeneration() {
+  function stopGeneration(): void {
     const state = _active()
     if (state?.client && state.isStreaming.value) {
       state.client.sendCancel()
+      return
+    }
+    // 本地没有流（例如刷新过页面）：服务端可能仍在这一轮上跑，直接请求取消，
+    // 等它收尾落库后重新拉一次消息，把中断快照显示出来。
+    void _stopRemoteRun(state)
+  }
+
+  async function _stopRemoteRun(state: SessionState | undefined): Promise<void> {
+    const sessionId = activeSessionId.value
+    if (!sessionId || !state) return
+    if (state.cancelling.value) return // 正在停：忽略重复点击，避免状态被反复改写
+    const running = await api
+      .getThreadRunStatus(sessionId)
+      .then(r => Boolean(r?.running))
+      .catch(() => false)
+    if (!running) {
+      state.serverRunning.value = false
+      return
+    }
+    state.cancelling.value = true
+    try {
+      await api.cancelThreadRun(sessionId)
+      // 注意：这里不要乐观地把状态改成"没在跑"——服务端还在收尾时，
+      // 下一轮轮询会把它翻回"运行中"，界面就会来回跳。等它真的停下再说。
+      for (let i = 0; i < 24; i++) {
+        await new Promise(resolve => setTimeout(resolve, 250))
+        const stillRunning = await api
+          .getThreadRunStatus(sessionId)
+          .then(r => Boolean(r?.running))
+          .catch(() => false)
+        if (!stillRunning) {
+          state.serverRunning.value = false
+          break
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 300))
+      await loadMessages(sessionId)
+    } catch (e) {
+      console.warn('[Chat] Cancel remote run failed:', e)
+    } finally {
+      state.cancelling.value = false
     }
   }
 
@@ -1561,6 +1640,9 @@ export const useChatStore = defineStore('chat', () => {
     switchToSession,
     isSessionStreaming,
     getStreamingSessionIds,
+    serverRunning,
+    refreshServerRunning,
+    isSessionServerRunning,
     releaseSession,
     loadMessages,
     loadOlderMessages,

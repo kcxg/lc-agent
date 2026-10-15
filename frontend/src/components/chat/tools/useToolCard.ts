@@ -172,12 +172,21 @@ export function useToolCard(options: UseToolCardOptions): {
 
   const resultSizeText = computed(() => {
     const len = options.toolCall().resultLength ?? options.toolCall().result?.length ?? 0
-    return len > 0 ? formatSize(len) : ''
+    const size = len > 0 ? formatSize(len) : ''
+    const images = options.toolCall().resultImageCount ?? 0
+    // 图片不占 result 文本，必须单独标出来，否则"只有 86 chars"会让人以为读图不要钱
+    if (images <= 0) return size
+    return size ? `${size} · ${images} 图` : `${images} 图`
   })
 
-  const tokenText = computed(() => (
-    tokenCount.value !== null ? `${formatTokenCount(tokenCount.value)} tokens` : ''
-  ))
+  const tokenText = computed(() => {
+    const images = options.toolCall().resultImageCount ?? 0
+    const imageTokens = options.toolCall().resultImageTokens ?? 0
+    const total = (tokenCount.value ?? 0) + imageTokens
+    if (total <= 0) return ''
+    if (images <= 0) return `${formatTokenCount(total)} tokens`
+    return `${formatTokenCount(total)} tokens（含 ${images} 图 ≈${imageTokens}）`
+  })
 
   // --- 复制按钮：一张卡里可能有多个复制点（工具名 / 命令），按 key 各存各的状态 ---
   const copyStates = ref<Record<string, string>>({})

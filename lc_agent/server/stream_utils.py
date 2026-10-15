@@ -10,6 +10,22 @@ from typing import Any
 
 from langgraph.errors import GraphInterrupt
 
+from lc_agent.core.engine_helpers.content_helpers import blocks_to_display_text
+from lc_agent.utils.image_tokens import estimate_content_image_tokens
+
+
+def _tool_result_display(output: Any) -> tuple[str, int, int]:
+    """工具输出 → ``(展示文本, 图片张数, 图片估算 token)``。
+
+    工具可能返回多模态 content blocks（如 read_file 读图后的图片块）：展示文本走
+    blocks_to_display_text 把图片压成占位（避免 base64 灌进 SSE 事件），同时单独报出
+    图片张数与 token 估算——否则卡片上那个"估算 token"会把图片算成 0，误导用户。
+    """
+    content = output.content if hasattr(output, "content") else output
+    text = blocks_to_display_text(content)
+    image_count, image_tokens = estimate_content_image_tokens(content)
+    return text, image_count, image_tokens
+
 
 def _is_interrupt_pause(error: Any) -> bool:
     """Whether a tool "error" is langgraph's interrupt() pause.
@@ -275,10 +291,7 @@ def convert_stream_event(
         tool_name = event.get("name", "")
         tool_call_id = _extract_tools_task_id(checkpoint_ns) or event.get("run_id", "")
         output = event.get("data", {}).get("output", "")
-        if hasattr(output, "content"):
-            result_str = output.content if isinstance(output.content, str) else str(output.content)
-        else:
-            result_str = str(output)
+        result_str, image_count, image_tokens = _tool_result_display(output)
         tool_input = event.get("data", {}).get("input", {})
         if _is_subagent_tool_end(tool_name, tool_input, subagent_tool_names, active_subagent_tool_call_ids, tool_call_id):
             # Main agent's sub-agent tool finished (single-segment checkpoint_ns)
@@ -304,6 +317,8 @@ def convert_stream_event(
                 "result": result_str,
                 "status": status,
                 "is_error": is_error,
+                "image_count": image_count,
+                "image_tokens": image_tokens,
             }))
         else:
             # Regular main-agent tool finished
@@ -311,6 +326,8 @@ def convert_stream_event(
                 "name": tool_name,
                 "tool_call_id": _extract_tools_task_id(checkpoint_ns) or event.get("run_id", ""),
                 "result": result_str,
+                "image_count": image_count,
+                "image_tokens": image_tokens,
             }))
 
     elif kind == "on_tool_error":
@@ -550,10 +567,7 @@ def accumulate_display_state(
         if _is_subagent_tool_end(tool_name, tool_input, subagent_tool_names, active_subagent_tool_call_ids, tool_call_id):
             # Main agent's sub-agent tool finished
             raw_output = event.get("data", {}).get("output", "")
-            if hasattr(raw_output, "content"):
-                result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
-            else:
-                result_str = str(raw_output)
+            result_str, image_count, image_tokens = _tool_result_display(raw_output)
             sa_tc_id = (
                 _extract_tools_task_id(checkpoint_ns)  # LangGraph task UUID (matches on_tool_start)
                 or event.get("run_id", "")             # fallback
@@ -565,14 +579,13 @@ def accumulate_display_state(
                     tc["result"] = result_str
                     tc["duration"] = int(time.time() * 1000) - start_time if start_time else None
                     tc["resultLength"] = len(result_str)
+                    tc["resultImageCount"] = image_count
+                    tc["resultImageTokens"] = image_tokens
                     break
         elif not is_in_subagent:
             # Regular main-agent tool finished
             raw_output = event.get("data", {}).get("output", "")
-            if hasattr(raw_output, "content"):
-                result_str = raw_output.content if isinstance(raw_output.content, str) else str(raw_output.content)
-            else:
-                result_str = str(raw_output)
+            result_str, image_count, image_tokens = _tool_result_display(raw_output)
             tool_call_id = _extract_tools_task_id(checkpoint_ns) or event.get("run_id", "")
             tool_call = next(
                 (tc for tc in tool_calls if tc.get("runId") == tool_call_id), None,
@@ -583,6 +596,8 @@ def accumulate_display_state(
                 tool_call["status"] = "done"
                 tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
                 tool_call["resultLength"] = len(result_str)
+                tool_call["resultImageCount"] = image_count
+                tool_call["resultImageTokens"] = image_tokens
         # else: sub-agent's internal tool result (is_in_subagent=True, not a subagent tool) — skip
 
     elif kind == "on_tool_error":

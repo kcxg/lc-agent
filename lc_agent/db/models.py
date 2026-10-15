@@ -170,4 +170,7 @@ class ChatUiMessage(SQLModel, table=True):
     tool_calls: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
     usage: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     http_traces: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
+    # http_traces 正文（单个会话可达数百 MB）不能随消息一起加载，所以单独存条数供 UI 使用。
+    # 读消息时务必用 load_only() 跳过 http_traces 正文，条数一律读这一列。
+    http_traces_count: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default=text("0")))
     created_at: datetime = Field(default_factory=utcnow)

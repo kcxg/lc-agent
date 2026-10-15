@@ -195,6 +195,8 @@ class SubAgentRunTracker:
                 tool_call["result"] = result
                 tool_call["duration"] = int(time.time() * 1000) - start_time if start_time else None
                 tool_call["resultLength"] = len(result)
+                tool_call["resultImageCount"] = payload.get("image_count", 0)
+                tool_call["resultImageTokens"] = payload.get("image_tokens", 0)
                 return
 
     def _sub_usage_rounds(self, sub_session_id: str) -> list[dict[str, Any]]:

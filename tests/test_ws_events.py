@@ -108,6 +108,8 @@ def test_convert_stream_event_tool_result_uses_langgraph_task_id():
             "name": "ask_user",
             "tool_call_id": "stable-task-id",
             "result": "用户回答: 红色",
+            "image_count": 0,
+            "image_tokens": 0,
         },
     )]
 

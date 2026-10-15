@@ -346,7 +346,7 @@
     <template v-else>
       <ChatInput
         ref="chatInputRef"
-        :is-streaming="isStreaming"
+        :is-streaming="isStreaming || serverRunning"
         :edit-content="editingContent"
         :edit-attachments="editingAttachments"
         :is-editing="Boolean(editingMessageId)"
@@ -509,7 +509,7 @@ const sessionTabsStore = useSessionTabsStore()
 const agentsStore = useAgentsStore()
 const toolsStore = useToolsStore()
 const openedFilesStore = useOpenedFilesStore()
-const { messages, isStreaming, interrupt, errorMessage, hasOlderMessages, loadingOlder, isHistoryLoading } = storeToRefs(chatStore)
+const { messages, isStreaming, serverRunning, interrupt, errorMessage, hasOlderMessages, loadingOlder, isHistoryLoading } = storeToRefs(chatStore)
 const editingMessageId = ref<string | null>(null)
 const editingContent = ref('')
 const editingAttachments = ref<Attachment[]>([])
@@ -627,6 +627,7 @@ const subLiveBubbleList = computed((): ChatBubbleItem[] => {
   }
   const toolCalls: ToolCall[] = entry.innerToolCalls.map((tc, i) => {
     content += `\n<!--TOOL:${i}-->\n`
+    const meta = tc as unknown as { resultImageCount?: number; resultImageTokens?: number }
     return {
       name: tc.name,
       runId: `sub-tc-${i}`,
@@ -636,6 +637,8 @@ const subLiveBubbleList = computed((): ChatBubbleItem[] => {
       startTime: undefined,
       duration: undefined,
       resultLength: tc.result?.length,
+      resultImageCount: meta.resultImageCount ?? 0,
+      resultImageTokens: meta.resultImageTokens ?? 0,
     }
   })
   if (entry.tokens) {
@@ -673,11 +676,38 @@ const subLiveBubbleList = computed((): ChatBubbleItem[] => {
   return items
 })
 
+// 等待首个内容：仅当「本会话确实有活跃流」且「最后一条 assistant 还没吐出任何内容」时为真。
+// 注意不要写成「最后一条是 user 消息 && 没有流」——那会把「这轮在别处跑 / 这轮已死」
+// 也显示成"正在思考"，于是切走再切回、后台任务、历史中断会话都会永久转圈。
 const isLoading = computed(() => {
+  // 服务端确实还在跑这一轮（本地断流也能知道）：显示"正在运行"是诚实的
+  if (serverRunning.value) return true
+  if (!isStreaming.value) return false
   const msgs = messages.value
   if (msgs.length === 0) return false
   const last = msgs[msgs.length - 1]
-  return last.role === 'user' && !isStreaming.value
+  if (last.role !== 'assistant') return false
+  const text = typeof last.content === 'string' ? last.content : ''
+  return !text.trim()
+})
+
+// 本地没有流时轮询服务端运行状态：刷新页面后仍能知道"这一轮还在跑"并显示停止按钮
+const RUN_STATUS_POLL_MS = 4000
+let runStatusTimer: number | null = null
+function pollRunStatus() {
+  if (document.hidden || isStreaming.value) return
+  const sid = sessionsStore.effectiveThreadId || sessionsStore.currentSessionId
+  if (sid) void chatStore.refreshServerRunning(sid)
+}
+onMounted(() => {
+  pollRunStatus() // 立即查一次：刷新后不用等一个轮询周期才显示"正在运行"
+  runStatusTimer = window.setInterval(pollRunStatus, RUN_STATUS_POLL_MS)
+})
+onBeforeUnmount(() => {
+  if (runStatusTimer !== null) {
+    window.clearInterval(runStatusTimer)
+    runStatusTimer = null
+  }
 })
 
 async function handleRetryHistoryLoad() {
@@ -801,6 +831,13 @@ const bubbleList = computed((): ChatBubbleItem[] => {
       timestamp: ts,
       enterClass,
     })
+  }
+
+  // 占位气泡（流刚开始、尚无任何内容）不渲染：等待首个字由列表下方的 Loading 指示器承担，
+  // 保持与旧版一致的视觉；一旦吐出内容（哪怕只是思考标记）就恢复渲染。
+  for (let i = out.length - 1; i >= 0; i--) {
+    const item = out[i] as MessageBubbleItem
+    if (item.role === 'ai' && item.loading && !item.segments?.length) out.splice(i, 1)
   }
 
   if (hasOlderMessages.value) out.unshift(createLoadOlderItem())

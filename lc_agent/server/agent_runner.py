@@ -214,4 +214,12 @@ class AgentRunService:
                 source="automation",
                 run_id=usage_run_id,
             )
+            # 异常中断同样要收尾落库：已产生的轮次与工具调用不该随异常一起消失
+            await persistence.persist_interrupted_round(
+                session_id,
+                content_parts=content_parts,
+                tool_calls=tool_calls,
+                usage_rounds=usage_rounds,
+                elapsed_ms=int((time.time() - stream_start_time) * 1000),
+            )
             return AgentRunResult(error=str(exc), final_output="".join(content_parts))

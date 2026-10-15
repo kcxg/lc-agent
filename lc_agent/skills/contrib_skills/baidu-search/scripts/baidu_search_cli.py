@@ -169,6 +169,7 @@ def extract_url(url: str, max_chars: int = 20000, http_client: str = "curl_cffi"
         http_client: 请求方式。"curl_cffi"（默认，模拟 Chrome 浏览器指纹）；
             个别站点对 curl_cffi 不兼容（如证书、HTTP/2 异常）时改用 "requests"。
     """
+    # 传百度跳转链接时，这里会自动跟随 302 到目标页；传普通 URL 时保持原样
     if http_client == "curl_cffi":
         resp = curl_requests.get(url, impersonate="chrome", timeout=15, allow_redirects=True)
     else:
@@ -185,7 +186,7 @@ def extract_url(url: str, max_chars: int = 20000, http_client: str = "curl_cffi"
         resp.content, output_format="markdown", include_links=True
     )
     if not full_text:
-        raise RuntimeError(f"提取失败: {real_url}（页面无正文，可能是 JS 动态渲染页面）")
+        raise RuntimeError(f"提取失败: {real_url}（页面无正文，可能是 JS 动态渲染页面或反爬，请用浏览器重新尝试打开）")
 
     # 元数据：extract_metadata() 返回 Document 对象
     meta = trafilatura.extract_metadata(resp.content)

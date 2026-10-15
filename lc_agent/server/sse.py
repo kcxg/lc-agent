@@ -23,7 +23,7 @@ from lc_agent.core.http_trace import (
     init_subagent_collector_registry,
     reset_http_trace_collector,
 )
-from lc_agent.server import persistence, stream_utils
+from lc_agent.server import persistence, run_session, stream_utils
 from lc_agent.server.subagent_tracker import SubAgentRunTracker
 from lc_agent.server.usage_recorder import build_model_map, record_usage
 from lc_agent.utils.loggers import server_logger
@@ -33,7 +33,6 @@ router = APIRouter(prefix="/api/threads", tags=["chat-sse"])
 logger = logging.getLogger(__name__)
 
 _cancel_flags: dict[str, bool] = {}
-_run_locks: dict[str, asyncio.Lock] = {}
 
 _engine: AgentEngine | None = None
 
@@ -48,6 +47,40 @@ def _get_engine() -> AgentEngine:
     if _engine is None:
         raise RuntimeError("SSE module not configured. Call sse.configure() first.")
     return _engine
+
+
+def _is_thread_running(thread_id: str) -> bool:
+    """该线程是否有正在进行的一轮运行。
+
+    依据是运行会话注册表（`RunSession`）——运行的生死与 SSE 连接无关，
+    所以刷新页面之后这里仍然是 True。
+    """
+    return run_session.is_running(thread_id)
+
+
+def _run_in_progress_response(thread_id: str) -> JSONResponse:
+    """该线程已有活跃运行时，拒绝再起一轮（前端据此提示"正在运行中"）。"""
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": "该会话正在运行中，请先停止或等待完成",
+            "code": "run_in_progress",
+            "thread_id": thread_id,
+        },
+    )
+
+
+def _sse_response(session: "run_session.RunSession", queue: asyncio.Queue) -> StreamingResponse:
+    """把订阅队列包成 SSE 响应；客户端断开只会让 subscribe 生成器被关闭。"""
+    return StreamingResponse(
+        session.subscribe(queue),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _extract_existing_subsession_ids(tool_calls: list[dict[str, Any]]) -> set[str]:
@@ -185,15 +218,13 @@ async def _check_sse_agent_access(request: Request, preset_id: str) -> JSONRespo
     return None
 
 
-def _get_lock(thread_id: str) -> asyncio.Lock:
-    if thread_id not in _run_locks:
-        _run_locks[thread_id] = asyncio.Lock()
-    return _run_locks[thread_id]
-
-
 @router.post("/{thread_id}/runs/stream")
 async def run_stream(thread_id: str, req: RunStreamRequest, request: Request):
-    """Unified entry: send message or resume interrupt, returning SSE stream."""
+    """Unified entry: send message or resume interrupt, returning SSE stream.
+
+    这里不再抢占前一轮：有活跃运行时由 _send_stream / _resume_stream 直接回 409，
+    能否真的起一轮由 run_session 注册表原子判定。
+    """
     auth_error = await _check_sse_auth(request, thread_id)
     if auth_error is not None:
         return auth_error
@@ -201,29 +232,6 @@ async def run_stream(thread_id: str, req: RunStreamRequest, request: Request):
     agent_access_error = await _check_sse_agent_access(request, req.preset_id)
     if agent_access_error is not None:
         return agent_access_error
-
-    lock = _get_lock(thread_id)
-    if lock.locked():
-        _cancel_flags[thread_id] = True
-        try:
-            await asyncio.wait_for(lock.acquire(), timeout=10)
-            lock.release()
-        except asyncio.TimeoutError:
-            async def timeout_stream():
-                yield stream_utils.format_sse_event("error", {
-                    "title": "请求超时",
-                    "detail": "等待前一个请求完成超时，请稍后重试。",
-                    "suggestions": ["稍后再次发送消息"],
-                    "error_code": "LOCK_TIMEOUT",
-                    "tech_detail": "Timed out waiting for previous run to complete",
-                    "message": "Timed out waiting for previous run to complete",
-                })
-
-            return StreamingResponse(
-                timeout_stream(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
-            )
 
     if req.command is not None:
         return await _resume_stream(thread_id, req, request)
@@ -239,7 +247,26 @@ async def cancel_run(thread_id: str, request: Request):
         return JSONResponse(status_code=401, content={"detail": "认证失败"})
 
     _cancel_flags[thread_id] = True
+    # 光靠标记要等下一个事件才生效（长工具期间可能几分钟没有事件），
+    # 这里让运行自己安排一个兜底取消，停止按钮才真的是"立刻停"。
+    active = run_session.get_active(thread_id)
+    if active is not None and active.is_running():
+        active.request_cancel()
     return {"ok": True, "thread_id": thread_id}
+
+
+@router.get("/{thread_id}/run-status")
+async def get_thread_run_status(thread_id: str, request: Request):
+    """轻量查询：该线程当前是否有正在进行的运行。
+
+    前端在断流后（刷新页面 / 换设备）用它判断"这一轮是不是还在服务端跑"，
+    从而决定要不要显示停止按钮，以及要不要显示"正在运行"。
+    """
+    auth_error = await _check_sse_auth(request, thread_id)
+    if auth_error is not None:
+        return auth_error
+
+    return {"running": _is_thread_running(thread_id)}
 
 
 @router.get("/{thread_id}/state")
@@ -289,6 +316,63 @@ def _extract_text_from_blocks(content: list[dict[str, Any]]) -> str:
     return " ".join(parts)
 
 
+# 流被强行拆掉时（浏览器刷新 / 任务被取消）需要"取消安全"的兜底收尾。
+# 这类情况下生成器会在 yield 处被取消，循环里的取消/异常分支根本不会执行，
+# 所以只能挂 finally；而 finally 里 await 会立刻再抛 CancelledError，
+# 因此用 create_task 派出去跑，并把 task 存起来避免被 GC 回收。
+_teardown_tasks: set[asyncio.Task] = set()
+
+
+def _schedule_round_teardown(
+    *,
+    thread_id: str,
+    user_id: str,
+    preset_id: str,
+    usage_rounds: list[dict],
+    usage_run_id: str,
+    content_parts: list[str],
+    tool_calls: list[dict[str, Any]],
+    stream_start_time: float,
+    append: bool,
+) -> None:
+    """流被取消/断开时的兜底收尾：补记用量账单 + 补写已产生的 UI 记录。
+
+    append=True 用于 resume 流程（整轮共用同一条 assistant 消息，必须追加而非新建）。
+    """
+
+    async def _teardown() -> None:
+        try:
+            await record_usage(
+                usage_rounds,
+                session_id=thread_id,
+                user_id=user_id,
+                agent_id=preset_id,
+                source="chat",
+                run_id=usage_run_id,
+            )
+        except Exception:
+            logger.exception("Failed to record interrupted usage for session %s", thread_id)
+        persist = (
+            persistence.persist_interrupted_resume_round
+            if append
+            else persistence.persist_interrupted_round
+        )
+        try:
+            await persist(
+                thread_id,
+                content_parts=content_parts,
+                tool_calls=tool_calls,
+                usage_rounds=usage_rounds,
+                elapsed_ms=int((time.time() - stream_start_time) * 1000),
+            )
+        except Exception:
+            logger.exception("Failed to persist interrupted round for session %s", thread_id)
+
+    task = asyncio.create_task(_teardown())
+    _teardown_tasks.add(task)
+    task.add_done_callback(_teardown_tasks.discard)
+
+
 async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
     """Handle new message: save to DB, stream agent response as SSE."""
     engine = _get_engine()
@@ -311,11 +395,15 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
 
+    # 已有活跃运行 → 直接拒绝。必须在写用户消息之前判定，
+    # 否则会留下一条"没有回复、也没有运行"的孤儿用户消息。
+    session = run_session.try_register(thread_id)
+    if session is None:
+        return _run_in_progress_response(thread_id)
+
     preset_id = req.preset_id
     model_id = req.model
     llm_params = req.llm_params
-    lock = _get_lock(thread_id)
-    _cancel_flags[thread_id] = False
     user = await _authenticate_sse(request)
 
     try:
@@ -344,6 +432,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             error_info["message"] = str(error)
             yield stream_utils.format_sse_event("error", error_info)
 
+        session.mark_finished()  # 还没起跑就失败：放掉注册，别拦住下一轮
         return StreamingResponse(
             error_stream(),
             media_type="text/event-stream",
@@ -352,7 +441,6 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
     async def event_stream():
         nonlocal is_first
-        await lock.acquire()
         try:
             usage_rounds: list[dict] = []
             usage_run_id = str(uuid.uuid4())
@@ -426,6 +514,10 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
             trace_collector = HttpTraceCollector(provider=provider, model=resolved_model)
             trace_token = bind_http_trace_collector(trace_collector)
 
+            # 本轮是否已完成收尾（账单 + UI 记录）。没完成时 finally 会兜底补写，
+            # 覆盖"生成器被直接取消"（浏览器刷新 / 任务取消）这类进不了分支的情况。
+            round_finalized = False
+            round_is_resume = False
             try:
                 stream = engine.chat_stream(
                     content,
@@ -448,22 +540,17 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                             source="chat",
                             run_id=usage_run_id,
                         )
-                        yield stream_utils.format_sse_event("cancelled", {})
-                        return
-
-                    if await request.is_disconnected():
-                        _cancel_flags[thread_id] = True
-                        for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
-                            yield stream_utils.format_sse_event(evt_type, evt_data)
-                        await subagent_tracker.drain()
-                        await record_usage(
-                            usage_rounds,
-                            session_id=thread_id,
-                            user_id=user.id if user else "",
-                            agent_id=preset_id,
-                            source="chat",
-                            run_id=usage_run_id,
+                        # 已产生的 UI 记录（usage/工具调用）照常落库：否则这一轮在
+                        # chat_ui_messages 里永久缺失，右侧概览与刷新后的历史都看不到
+                        await persistence.persist_interrupted_round(
+                            thread_id,
+                            content_parts=content_parts,
+                            tool_calls=tool_calls,
+                            usage_rounds=usage_rounds,
+                            elapsed_ms=int((time.time() - stream_start_time) * 1000),
                         )
+                        round_finalized = True
+                        yield stream_utils.format_sse_event("cancelled", {})
                         return
 
                     in_thinking = stream_utils.accumulate_display_state(
@@ -606,6 +693,7 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                     },
                     http_traces=http_traces or None,
                 )
+            round_finalized = True
 
             yield stream_utils.format_sse_event("done", done_payload)
 
@@ -631,23 +719,42 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
                 source="chat",
                 run_id=usage_run_id,
             )
+            # 异常中断同样要收尾落库：已产生的轮次与工具调用不该随异常一起消失
+            await persistence.persist_interrupted_round(
+                thread_id,
+                content_parts=content_parts,
+                tool_calls=tool_calls,
+                usage_rounds=usage_rounds,
+                elapsed_ms=int((time.time() - stream_start_time) * 1000),
+            )
+            round_finalized = True
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
             error_info["message"] = str(e)
             yield stream_utils.format_sse_event("error", error_info)
         finally:
-            lock.release()
+            # 生成器被直接取消（刷新 / 任务取消）时，上面所有分支都不会执行，
+            # 只能在这里兜底：create_task 派出去，避开"取消状态下 await 立刻再抛"。
+            if not round_finalized:
+                _schedule_round_teardown(
+                    thread_id=thread_id,
+                    user_id=user.id if user else "",
+                    preset_id=preset_id,
+                    usage_rounds=usage_rounds,
+                    usage_run_id=usage_run_id,
+                    content_parts=content_parts,
+                    tool_calls=tool_calls,
+                    stream_start_time=stream_start_time,
+                    append=round_is_resume,
+                )
             _cancel_flags.pop(thread_id, None)
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    # 起一轮"独立于连接"的运行：先挂订阅队列再起后台任务，
+    # 避免开头几个事件在订阅之前被丢掉。
+    _cancel_flags[thread_id] = False
+    queue = session.attach()
+    session.start(event_stream())
+    return _sse_response(session, queue)
 
 
 async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request):
@@ -656,9 +763,13 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     preset_id = req.preset_id
     model_id = req.model
     llm_params = req.llm_params
-    lock = _get_lock(thread_id)
-    _cancel_flags[thread_id] = False
     user = await _authenticate_sse(request)
+    # 运行任务可能比请求活得久：先取出后面要用到的东西，别把 request 带进后台任务
+    permissions = getattr(request.app.state, "permissions", None)
+    # 已有活跃运行 → 直接拒绝（与 _send_stream 同）
+    session = run_session.try_register(thread_id)
+    if session is None:
+        return _run_in_progress_response(thread_id)
 
     # Restore project context so tool path/cwd constraints are active during resume.
     try:
@@ -675,7 +786,6 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
     resume_value = req.command.get("resume", {}) if req.command else {}
 
     async def event_stream():
-        await lock.acquire()
         try:
             # Resume continues the existing round: round = current user message count.
             round_number = await persistence.get_session_user_message_count(thread_id)
@@ -751,6 +861,10 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             )
             trace_token = bind_http_trace_collector(trace_collector)
 
+            # 本轮是否已完成收尾（账单 + UI 记录）。没完成时 finally 会兜底补写，
+            # 覆盖"生成器被直接取消"（浏览器刷新 / 任务取消）这类进不了分支的情况。
+            round_finalized = False
+            round_is_resume = True
             try:
                 stream_kwargs: dict[str, Any] = {"config": config, "version": "v2"}
                 if engine._should_use_memory_context(preset_id):
@@ -776,22 +890,16 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                             source="chat",
                             run_id=usage_run_id,
                         )
-                        yield stream_utils.format_sse_event("cancelled", {})
-                        return
-
-                    if await request.is_disconnected():
-                        _cancel_flags[thread_id] = True
-                        for evt_type, evt_data in subagent_tracker.finalize_open_runs(status="cancelled"):
-                            yield stream_utils.format_sse_event(evt_type, evt_data)
-                        await subagent_tracker.drain()
-                        await record_usage(
-                            usage_rounds,
-                            session_id=thread_id,
-                            user_id=user.id if user else "",
-                            agent_id=preset_id,
-                            source="chat",
-                            run_id=usage_run_id,
+                        # 续跑与首次发送不同：整轮共用同一条 assistant 消息，必须追加
+                        await persistence.persist_interrupted_resume_round(
+                            thread_id,
+                            content_parts=content_parts,
+                            tool_calls=tool_calls,
+                            usage_rounds=usage_rounds,
+                            elapsed_ms=int((time.time() - stream_start_time) * 1000),
                         )
+                        round_finalized = True
+                        yield stream_utils.format_sse_event("cancelled", {})
                         return
 
                     in_thinking = stream_utils.accumulate_display_state(
@@ -897,10 +1005,11 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
 
             if isinstance(resume_value, dict):
                 permanently_allow = resume_value.get("permanently_allow")
-                if permanently_allow and hasattr(request.app.state, "permissions"):
+                # 运行可能比请求活得久，所以这里用预先取好的 permissions，不再碰 request
+                if permanently_allow and permissions is not None:
                     # Only admin can permanently allow tools
                     if user and user.role == "admin":
-                        request.app.state.permissions.allow_tool(permanently_allow)
+                        permissions.allow_tool(permanently_allow)
 
             _mark_stale_running_subagent_tool_calls_interrupted(
                 tool_calls,
@@ -939,6 +1048,7 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                     http_traces=http_traces or None,
                     resume_duration_ms=int((time.time() - stream_start_time) * 1000),
                 )
+            round_finalized = True
 
             yield stream_utils.format_sse_event("done", done_payload)
 
@@ -956,23 +1066,42 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
                 source="chat",
                 run_id=usage_run_id,
             )
+            # 续跑异常中断也追加到上一条 assistant 消息
+            await persistence.persist_interrupted_resume_round(
+                thread_id,
+                content_parts=content_parts,
+                tool_calls=tool_calls,
+                usage_rounds=usage_rounds,
+                elapsed_ms=int((time.time() - stream_start_time) * 1000),
+            )
+            round_finalized = True
             error_info = stream_utils.categorize_error(e)
             error_info["tech_detail"] = str(e)
             error_info["message"] = str(e)
             yield stream_utils.format_sse_event("error", error_info)
         finally:
-            lock.release()
+            # 生成器被直接取消（刷新 / 任务取消）时，上面所有分支都不会执行，
+            # 只能在这里兜底：create_task 派出去，避开"取消状态下 await 立刻再抛"。
+            if not round_finalized:
+                _schedule_round_teardown(
+                    thread_id=thread_id,
+                    user_id=user.id if user else "",
+                    preset_id=preset_id,
+                    usage_rounds=usage_rounds,
+                    usage_run_id=usage_run_id,
+                    content_parts=content_parts,
+                    tool_calls=tool_calls,
+                    stream_start_time=stream_start_time,
+                    append=round_is_resume,
+                )
             _cancel_flags.pop(thread_id, None)
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    # 起一轮"独立于连接"的运行：先挂订阅队列再起后台任务，
+    # 避免开头几个事件在订阅之前被丢掉。
+    _cancel_flags[thread_id] = False
+    queue = session.attach()
+    session.start(event_stream())
+    return _sse_response(session, queue)
 
 
 async def _generate_and_yield_title(

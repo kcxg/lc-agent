@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from lc_agent.core.engine_helpers.content_helpers import blocks_to_display_text
 from lc_agent.db.models_auth import User
 from lc_agent.db.repository import ChatUiMessageRepository, SessionRepository
 from lc_agent.server.auth_middleware import get_current_user
@@ -225,7 +226,7 @@ async def get_session_messages(
                     "content": msg.content,
                     "tool_calls": msg.tool_calls or [],
                     "usage": msg.usage,
-                    "http_traces_count": len(msg.http_traces) if msg.http_traces else 0,
+                    "http_traces_count": msg.http_traces_count or 0,
                     "round_number": round_of.get(msg.id),
                     "created_at": msg.created_at.isoformat(),
                 }
@@ -263,6 +264,10 @@ async def get_session_messages(
                 role = "user"
             elif msg_type == "ai":
                 role = "assistant"
+
+            # 工具结果里的图片块只留占位，避免 base64 撑爆历史接口响应体
+            if msg_type == "tool" and isinstance(content, list):
+                content = blocks_to_display_text(content)
 
             item = {"role": role, "content": content}
 
