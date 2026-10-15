@@ -20,6 +20,8 @@ export interface SessionState {
   inThinking: boolean       // mutable flag, intentionally not Ref
   streamStartTime: number   // mutable, not Ref
   currentRoundStart: number // mutable, not Ref
+  /** 本轮对话轮次号（后端 conversation_round 事件回填）：给直播消息打戳，前端不再自己数轮次 */
+  currentRoundNumber: number // mutable, not Ref
   todos: Ref<TodoItem[]>
   interrupt: Ref<InterruptInfo | null>
   errorMessage: Ref<ErrorInfo | null>
@@ -41,6 +43,7 @@ export function createSessionState(): SessionState {
     inThinking: false,
     streamStartTime: 0,
     currentRoundStart: 0,
+    currentRoundNumber: 0,
     todos: ref([]),
     interrupt: ref(null),
     errorMessage: ref(null),

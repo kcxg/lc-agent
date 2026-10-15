@@ -506,6 +506,11 @@ async def _send_stream(thread_id: str, req: RunStreamRequest, request: Request):
 
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
             bind_session_for_file_tracking(thread_id, round_number=round_number)
+            # 把本轮轮次号告诉前端：直播消息靠它回填 roundNumber，前端不必再自己数轮次
+            yield stream_utils.format_sse_event("conversation_round", {
+                "thread_id": thread_id,
+                "round_number": round_number,
+            })
 
             from lc_agent.core.model_resolve import find_model
             model_info = find_model(model_id, engine.config) if model_id else None
@@ -791,6 +796,11 @@ async def _resume_stream(thread_id: str, req: RunStreamRequest, request: Request
             round_number = await persistence.get_session_user_message_count(thread_id)
             from lc_agent.tools.system_tools._file_change_tracker import bind_session_for_file_tracking
             bind_session_for_file_tracking(thread_id, round_number=round_number)
+            # 续跑沿用同一轮：同样把轮次号告诉前端
+            yield stream_utils.format_sse_event("conversation_round", {
+                "thread_id": thread_id,
+                "round_number": round_number,
+            })
 
             usage_rounds: list[dict] = []
             usage_run_id = str(uuid.uuid4())

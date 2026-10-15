@@ -752,20 +752,25 @@ function createTimeSeparatorItem(ts: number): TimeSeparatorItem {
   }
 }
 
-/** 每条消息 → 所属对话轮次（用户消息序号）。
- *  历史消息用后端带回的 round_number（分页加载时本地计数会错位），
- *  直播消息没有该字段，从最后已知轮次递增；概览跳转在 id 对不上时靠它兜底。 */
-const roundOfMessage = computed<Map<string, number>>(() => {
-  const map = new Map<string, number>()
+/** 轮次号唯一来源（不要再写第二份推导）。
+ *  口径：轮次号 = 含本轮 user 消息的序号，与后端 FileChange.round_number、消息接口同源。
+ *  每条消息的 roundNumber 都由后端给出：历史消息来自消息接口，
+ *  直播消息由 conversation_round 事件回填；`?? round + 1` 只是极老数据的兜底。 */
+const messageRounds = computed(() => {
+  const byMessage = new Map<string, number>()
+  const lastAssistantOfRound = new Map<number, string>()
   let round = 0
   for (const msg of messages.value) {
-    if (msg.role !== 'user' && msg.role !== 'assistant') continue
     if (msg.isSystem) continue
+    if (msg.role !== 'user' && msg.role !== 'assistant') continue
     if (msg.role === 'user') round = msg.roundNumber ?? round + 1
-    map.set(msg.id, round)
+    byMessage.set(msg.id, round)
+    if (msg.role === 'assistant') lastAssistantOfRound.set(round, msg.id)
   }
-  return map
+  return { byMessage, lastAssistantOfRound }
 })
+
+const roundOfMessage = computed<Map<string, number>>(() => messageRounds.value.byMessage)
 
 const bubbleList = computed((): ChatBubbleItem[] => {
   // When in live sub-session mode, render from SubAgentEntry without touching main SSE
@@ -880,25 +885,22 @@ const lastUserMessage = computed(() =>
 )
 
 // 每轮回复末尾的「文件已更改」卡片：messageId → 轮次。
-// 轮次号优先用后端带回的 round_number（分页加载时本地计数会错位），
-// 直播消息没有该字段，从最后已知轮次递增；卡片挂在每轮最后一条非系统 assistant 消息上。
+// 卡片挂在「该轮最后一条非系统 assistant 消息」上，复用 messageRounds 的同一份轮次口径。
 const roundFileCards = computed((): Record<string, { round: number }> => {
   const fc = useFileChangesStore()
   const map: Record<string, { round: number }> = {}
   if (fc.rounds.length === 0) return map
-  let round = 0
-  const lastAiIdByRound: Record<number, string> = {}
-  for (const msg of messages.value) {
-    if (msg.isSystem) continue
-    if (msg.role === 'user') {
-      round = msg.roundNumber ?? round + 1
-      continue
-    }
-    if (msg.role === 'assistant') lastAiIdByRound[round] = msg.id
-  }
+  const { lastAssistantOfRound } = messageRounds.value
   for (const r of fc.rounds) {
-    const id = lastAiIdByRound[r.round_number]
-    if (id && r.files.length > 0) map[id] = { round: r.round_number }
+    const id = lastAssistantOfRound.get(r.round_number)
+    if (!id || r.files.length === 0) continue
+    if (import.meta.env.DEV) {
+      const hit = messages.value.find(m => m.id === id)
+      if (hit?.roundNumber != null && hit.roundNumber !== r.round_number) {
+        console.warn('[roundFileCards] 轮次错位：卡片', r.round_number, '挂到了', hit.roundNumber, '的消息上', id)
+      }
+    }
+    map[id] = { round: r.round_number }
   }
   return map
 })

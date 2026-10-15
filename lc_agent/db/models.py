@@ -16,6 +16,12 @@ class PromptTemplateDB(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     name: str
     content: str = ""
+    # "builtin" = 框架自带模板（网页只读，禁止改删，见 lc_agent/db/builtin_prompts.py）
+    # "user"    = 用户自建模板
+    source: str = Field(
+        default="user",
+        sa_column=Column(String, nullable=False, server_default=text("'user'")),
+    )
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

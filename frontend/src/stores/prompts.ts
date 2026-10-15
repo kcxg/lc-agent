@@ -6,6 +6,8 @@ export interface PromptTemplate {
   id: string
   name: string
   content: string
+  /** builtin = 框架自带（只读，不可改删）；user = 用户自建 */
+  source: 'builtin' | 'user'
   created_at: string
   updated_at: string
 }

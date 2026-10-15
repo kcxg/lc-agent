@@ -817,6 +817,25 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function _registerHandlers(client: ChatSseClient, state: SessionState, sessionId: string) {
+    // 本轮对话轮次号（后端在流开头下发）。直播消息 push 时还不知道它，收到事件后回填，
+    // 让每条消息都带权威轮次号 —— 前端不再自己数轮次，列表被整体替换/截断也不会错位。
+    client.on('conversation_round', (msg: SseMessage) => {
+      const roundNumber = (msg as any).round_number
+      if (typeof roundNumber !== 'number') return
+      state.currentRoundNumber = roundNumber
+      for (let i = state.messages.value.length - 1; i >= 0; i--) {
+        const m = state.messages.value[i]
+        if (m.role === 'user' && !m.isSystem && m.roundNumber == null) {
+          m.roundNumber = roundNumber
+          break
+        }
+      }
+      const last = state.messages.value[state.messages.value.length - 1]
+      if (last && last.role === 'assistant' && last.roundNumber == null) {
+        last.roundNumber = roundNumber
+      }
+    })
+
     client.on('thinking', (msg: SseMessage) => {
       _ensureAssistantPlaceholder(state)
       const last = state.messages.value[state.messages.value.length - 1]

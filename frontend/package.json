@@ -10,6 +10,7 @@
     "test:chat-search": "node scripts/check-chat-search-contract.mjs",
     "test:code-agent": "node scripts/check-code-agent-contract.mjs",
     "test:chat-history": "node scripts/check-chat-history-contract.mjs",
+    "test:round-file-card": "node scripts/check-round-file-card-contract.mjs",
     "test:chat-edit": "node scripts/check-chat-edit-contract.mjs",
     "test:chat-identity": "node scripts/check-chat-identity-thinking-contract.mjs",
     "test:chat-connection": "node scripts/check-chat-connection-contract.mjs",

@@ -106,6 +106,10 @@
                 <div class="agent-item-info">
                   <span class="agent-item-name">{{ pt.name }}</span>
                 </div>
+                <span
+                  v-if="pt.source === 'builtin'"
+                  class="source-tag source-tag--builtin"
+                >内置</span>
               </div>
               <el-empty v-if="!promptsStore.prompts.length" description="暂无提示词" :image-size="48" />
             </div>
@@ -140,9 +144,23 @@
         <template v-if="viewMode === 'prompts'">
           <template v-if="!!editingPromptId || isNewPrompt">
             <div class="prompts-editor-body form-scroll">
+              <el-alert
+                v-if="isBuiltinPrompt"
+                type="info"
+                :closable="false"
+                show-icon
+                style="margin-bottom: 12px;"
+              >
+                lc-agent 内置提示词：内置提示词不会自动作为 lc-agent 发给模型的提示词，
+                用户需要时，在 Agent 的「关联提示词」中勾选该提示词才会生效。
+              </el-alert>
               <el-form label-position="top">
                 <el-form-item label="名称" required>
-                  <el-input v-model="promptForm.name" placeholder="提示词名称，例如：安全规范、代码风格" />
+                  <el-input
+                    v-model="promptForm.name"
+                    :disabled="isBuiltinPrompt"
+                    placeholder="提示词名称，例如：安全规范、代码风格"
+                  />
                 </el-form-item>
                 <el-form-item label="内容">
                   <div class="prompt-content-wrap">
@@ -164,6 +182,7 @@
                       v-if="!promptPreviewMode"
                       v-model="promptForm.content"
                       type="textarea"
+                      :readonly="isBuiltinPrompt"
                       :autosize="{ minRows: 8, maxRows: 20 }"
                       placeholder="在此填写提示词内容，将追加注入到绑定该模板的 Agent 系统提示词末尾..."
                     />
@@ -177,13 +196,22 @@
             </div>
             <div class="prompts-editor-footer form-footer">
               <div>
-                <el-button v-if="editingPromptId && !isNewPrompt" type="danger" @click="handleDeletePrompt">
+                <el-button
+                  v-if="editingPromptId && !isNewPrompt && !isBuiltinPrompt"
+                  type="danger"
+                  @click="handleDeletePrompt"
+                >
                   删除
                 </el-button>
               </div>
               <div class="prompts-editor-footer-right">
                 <el-button type="info" @click="cancelEditPrompt">取消</el-button>
-                <el-button type="primary" :loading="promptSaving" @click="handleSavePrompt">
+                <el-button
+                  v-if="!isBuiltinPrompt"
+                  type="primary"
+                  :loading="promptSaving"
+                  @click="handleSavePrompt"
+                >
                   {{ isNewPrompt ? '创建' : '保存' }}
                 </el-button>
               </div>
@@ -872,6 +900,11 @@
                           @update:model-value="toggleBoundPrompt(pt.id, $event)"
                         >
                           <span class="prompt-binding-name">{{ pt.name }}</span>
+                          <span
+                            v-if="pt.source === 'builtin'"
+                            class="source-tag source-tag--builtin"
+                            style="margin-left: 6px;"
+                          >内置</span>
                         </el-checkbox>
                         <p v-if="pt.content" class="prompt-binding-preview">
                           {{ pt.content.length > 100 ? pt.content.slice(0, 100) + '…' : pt.content }}
@@ -1005,6 +1038,12 @@ const promptForm = ref({ name: '', content: '' })
 const promptPreviewMode = ref(false)
 const renderedPromptContent = computed(() => renderMarkdown(promptForm.value.content))
 
+/** 内置提示词：框架自带，用户只读（后端也拦，改 / 删会 403） */
+const isBuiltinPrompt = computed(() => {
+  if (!editingPromptId.value) return false
+  return promptsStore.getById(editingPromptId.value)?.source === 'builtin'
+})
+
 function switchToPromptsView() {
   if (viewMode.value === 'prompts') return  // already active, don't reset
   viewMode.value = 'prompts'
@@ -1043,6 +1082,10 @@ function onMobilePromptSelectChange(val: string | null | undefined) {
 }
 
 async function handleSavePrompt() {
+  if (isBuiltinPrompt.value) {
+    ElMessage.warning('内置提示词不可修改')
+    return
+  }
   if (!promptForm.value.name.trim()) {
     ElMessage.error('提示词名称不能为空')
     return
@@ -1067,6 +1110,10 @@ async function handleSavePrompt() {
 
 async function handleDeletePrompt() {
   if (!editingPromptId.value) return
+  if (isBuiltinPrompt.value) {
+    ElMessage.warning('内置提示词不可删除')
+    return
+  }
   const pt = promptsStore.getById(editingPromptId.value)
   try {
     await ElMessageBox.confirm(

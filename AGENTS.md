@@ -56,6 +56,9 @@ ai可以从 `D:\ProgramData\miniconda3\envs\py312\Lib\site-packages\` 目录下�
 lc-agent 是一个框架，是作为python包被导入使用。
 `D:\codes\lc-agent-bfzs` 项目是基于lc-agent框架开发的演示项目。
 `D:\codes\lc-agent-bfzs\bfzs\main.py` 是演示项目的入口文件。
+`"D:\codes\nb_langchain_agentskills"` 是项目依赖的为langchain的skill管理器，已经pip install -e . 了。
 
 lc-agent-bfzs的数据库是 `D:\codes\lc-agent-bfzs\bfzs_data.db` 和 `D:\codes\lc-agent-bfzs\bfzs_checkpoints.db` 。不是在lc-agent框架的默认目录`D:\codes\lc-agent\` 下。
 
+# 5 如果需要用浏览器验证项目前端
+admin 123456 来登录

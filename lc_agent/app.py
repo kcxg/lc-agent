@@ -23,6 +23,7 @@ from lc_agent.core.checkpointer import build_checkpointer, is_postgres_url
 from lc_agent.core.engine import AgentEngine
 from lc_agent.core.memory import aclose_memory_store, create_sqlite_memory_store
 from lc_agent.core.permissions import PermissionsService
+from lc_agent.db.builtin_prompts import sync_builtin_prompts
 from lc_agent.db.engine import get_async_session, init_db
 from lc_agent.db.models_auth import User
 from lc_agent.mcp.manager import McpManager
@@ -147,6 +148,8 @@ class LcAgentApp:
         memory_store = None
         try:
             await init_db(self._db_url)
+            # 框架自带的关联提示词落库：用户可见、只读，勾选生效仍由用户自己决定
+            await sync_builtin_prompts(self._db_url)
             await self._init_auth(app)
             try:
                 self._checkpointer_bundle = await build_checkpointer(self._checkpoint_url)

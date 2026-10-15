@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 from lc_agent.core.engine import AgentEngine
+from lc_agent.db.builtin_prompts import BUILTIN_PROMPT_SOURCE
 from lc_agent.db.models import AgentPresetDB
 from lc_agent.db.models_auth import User
 from lc_agent.db.repository import PromptRepository
@@ -12,6 +13,9 @@ from lc_agent.server.dependencies import get_engine
 from sqlalchemy import select
 
 router = APIRouter(tags=["prompts"])
+
+# 框架自带模板对用户只读：前端不放开编辑入口，接口层也必须拦，否则能绕过前端直接改
+BUILTIN_PROMPT_READONLY_DETAIL = "Builtin prompts shipped with lc-agent are read-only"
 
 
 class PromptCreateRequest(BaseModel):
@@ -33,6 +37,7 @@ def _prompt_to_dict(pt) -> dict:
         "id": pt.id,
         "name": pt.name,
         "content": pt.content,
+        "source": pt.source,
         "created_at": pt.created_at.isoformat(),
         "updated_at": pt.updated_at.isoformat(),
     }
@@ -70,10 +75,13 @@ async def update_prompt(
     admin: User = Depends(require_admin),
 ):
     repo = PromptRepository(db)
+    existing = await repo.get_by_id(prompt_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    if existing.source == BUILTIN_PROMPT_SOURCE:
+        raise HTTPException(status_code=403, detail=BUILTIN_PROMPT_READONLY_DETAIL)
     kwargs = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     pt = await repo.update(prompt_id, **kwargs)
-    if pt is None:
-        raise HTTPException(status_code=404, detail="Prompt not found")
 
     # Refresh engine presets for all agents using this prompt
     affected_ids = await repo.get_agent_ids_using_prompt(prompt_id)
@@ -90,6 +98,11 @@ async def delete_prompt(
     admin: User = Depends(require_admin),
 ):
     repo = PromptRepository(db)
+    existing = await repo.get_by_id(prompt_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    if existing.source == BUILTIN_PROMPT_SOURCE:
+        raise HTTPException(status_code=403, detail=BUILTIN_PROMPT_READONLY_DETAIL)
     affected_ids = await repo.get_agent_ids_using_prompt(prompt_id)
     if affected_ids:
         raise HTTPException(
