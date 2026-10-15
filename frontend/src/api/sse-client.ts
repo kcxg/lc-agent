@@ -81,6 +81,10 @@ export class ChatSseClient {
   private _threadId: string | null = null
   private _abortController: AbortController | null = null
   private _streaming = false
+  // 每路请求一个独立标识：被更新的流取代后，旧流的迟到收尾不再补发终止事件
+  private _streamToken: object | null = null
+  // 本路流是否已发过终止事件（done / error / cancelled），保证只发一次
+  private _terminalEmitted = false
 
   constructor(baseUrl: string = '') {
     this.baseUrl = baseUrl || window.location.origin
@@ -150,7 +154,7 @@ export class ChatSseClient {
     this._abortController = null
     this._streaming = false
 
-    this.emit('cancelled', { type: 'cancelled' })
+    this._emitTerminal('cancelled', { type: 'cancelled' })
 
     try {
       const cancelUrl = appendTokenToUrl(`${this.baseUrl}/api/threads/${this._threadId}/runs/cancel`)
@@ -196,6 +200,11 @@ export class ChatSseClient {
   // --- Internal ---
 
   private async _startStream(body: Record<string, any>): Promise<void> {
+    // 每次请求换一个 token：旧流的迟到收尾据此判断自己是否已被新流取代
+    const token = {}
+    this._streamToken = token
+    this._terminalEmitted = false
+
     if (this._streaming) {
       console.warn('[SSE] Already streaming, aborting previous')
       this._abortController?.abort()
@@ -225,11 +234,26 @@ export class ChatSseClient {
       if (!response.ok) {
         if (response.status === 401) {
           window.dispatchEvent(new CustomEvent('auth:expired'))
-          this.emit('error', { type: 'error', title: '认证已过期', detail: '请重新登录' })
+          this._emitTerminal('error', { type: 'error', title: '认证已过期', detail: '请重新登录' })
+          return
+        }
+        if (response.status === 409) {
+          // 该会话已有一轮在跑：不是错误，交给上层同步"正在运行"状态
+          let detail = '该会话正在运行中，请先停止或等待完成'
+          try {
+            const body = await response.json()
+            if (body?.detail) detail = body.detail
+          } catch {}
+          this._emitTerminal('error', {
+            type: 'error',
+            title: '会话正在运行中',
+            detail,
+            error_code: 'run_in_progress',
+          })
           return
         }
         const text = await response.text()
-        this.emit('error', {
+        this._emitTerminal('error', {
           type: 'error',
           title: `HTTP ${response.status}`,
           detail: text,
@@ -240,13 +264,19 @@ export class ChatSseClient {
 
       const receivedTerminal = await this._consumeStream(response)
       if (!receivedTerminal && this._abortController === controller) {
-        this.emit('done', { type: 'done' })
+        this._emitTerminal('done', { type: 'done' })
       }
     } catch (e: any) {
       if (e.name === 'AbortError') {
+        // 中断也必须收敛前端状态：disconnect() / 停止 / 被新流取代 都走这里。
+        // 已被新流取代（token 变了）就不补发，交给新流自己收敛。
+        if (this._streamToken === token) {
+          this._emitTerminal('cancelled', { type: 'cancelled', reason: 'aborted' })
+        }
         return
       }
-      this.emit('error', {
+      if (this._streamToken !== token) return
+      this._emitTerminal('error', {
         type: 'error',
         title: '连接失败',
         detail: e.message || String(e),
@@ -279,7 +309,10 @@ export class ChatSseClient {
 
         for (const evt of events.parsed) {
           this.emit(evt.type, evt)
-          if (terminalTypes.has(evt.type)) receivedTerminal = true
+          if (terminalTypes.has(evt.type)) {
+            receivedTerminal = true
+            this._terminalEmitted = true
+          }
         }
       }
 
@@ -287,7 +320,10 @@ export class ChatSseClient {
         const events = this._parseSSE(buffer + '\n\n')
         for (const evt of events.parsed) {
           this.emit(evt.type, evt)
-          if (terminalTypes.has(evt.type)) receivedTerminal = true
+          if (terminalTypes.has(evt.type)) {
+            receivedTerminal = true
+            this._terminalEmitted = true
+          }
         }
       }
     } catch (e: any) {
@@ -339,5 +375,16 @@ export class ChatSseClient {
     handlers.forEach(h => h(msg))
     const allHandlers = this.handlers.get('*') || []
     allHandlers.forEach(h => h(msg))
+  }
+
+  /**
+   * 发终止事件（done / error / cancelled），同一路流只发一次。
+   * 目的是保证任何中断路径（点停止、会话被释放 disconnect、连接异常）下，
+   * 上层状态机都能收到唯一的终止信号并收敛，不会永远停在"流式中"。
+   */
+  private _emitTerminal(event: string, msg: SseMessage) {
+    if (this._terminalEmitted) return
+    this._terminalEmitted = true
+    this.emit(event, msg)
   }
 }

@@ -82,6 +82,83 @@ def _parse_time(value: Any) -> tuple[int, int]:
     return hour, minute
 
 
+# 活跃时段（active window）：仅对 interval 任务生效。触发时刻落在窗口内才真正执行，否则跳过。
+# 计算窗口感知的下一次执行时间时，最多向前探测这么多个触发点，避免配置矛盾时空转。
+_MAX_WINDOW_PROBE = 10000
+
+
+def _normalize_active_window(config: dict[str, Any]) -> dict[str, str] | None:
+    """Validate and normalize active window fields, or return None when disabled."""
+    raw_start = config.get("active_start")
+    raw_end = config.get("active_end")
+    if not raw_start and not raw_end:
+        return None
+    if bool(raw_start) != bool(raw_end):
+        raise AutomationScheduleError("活跃时段必须同时填写开始时间和结束时间")
+    start_hour, start_minute = _parse_time(raw_start)
+    end_hour, end_minute = _parse_time(raw_end)
+    if (start_hour, start_minute) == (end_hour, end_minute):
+        raise AutomationScheduleError("活跃时段的开始时间和结束时间不能相同")
+    return {
+        "active_start": f"{start_hour:02d}:{start_minute:02d}",
+        "active_end": f"{end_hour:02d}:{end_minute:02d}",
+    }
+
+
+def active_window_minutes(config: dict[str, Any] | None) -> tuple[int, int] | None:
+    """Return the active window as (start_minute, end_minute) of day, or None for all-day."""
+    if not config:
+        return None
+    raw_start = config.get("active_start")
+    raw_end = config.get("active_end")
+    if not raw_start or not raw_end:
+        return None
+    try:
+        start_hour, start_minute = _parse_time(raw_start)
+        end_hour, end_minute = _parse_time(raw_end)
+    except AutomationScheduleError:
+        return None
+    start = start_hour * 60 + start_minute
+    end = end_hour * 60 + end_minute
+    if start == end:
+        return None
+    return (start, end)
+
+
+def _in_active_window(moment: datetime, window: tuple[int, int]) -> bool:
+    """Whether a local datetime falls inside the half-open window [start, end), supporting overnight."""
+    minutes = moment.hour * 60 + moment.minute
+    start, end = window
+    if start < end:
+        return start <= minutes < end
+    return minutes >= start or minutes < end
+
+
+def next_active_fire_time(trigger, tz: Any, window: tuple[int, int], current: datetime) -> datetime | None:
+    """Return the first trigger fire time at/after ``current`` that lands inside the window."""
+    probe = current.astimezone(tz) if current.tzinfo else current.replace(tzinfo=tz)
+    previous: datetime | None = None
+    for _ in range(_MAX_WINDOW_PROBE):
+        next_fire = trigger.get_next_fire_time(previous, probe)
+        if next_fire is None:
+            return None
+        if _in_active_window(next_fire.astimezone(tz), window):
+            return next_fire
+        previous = next_fire
+        probe = next_fire
+    return None
+
+
+def compute_next_run(task, trigger, now_utc: datetime) -> datetime | None:
+    """Compute the next fire time for a task, honoring its active window when present."""
+    _, tz = resolve_timezone(task.timezone)
+    current = now_utc.astimezone(tz)
+    window = active_window_minutes(task.schedule_config or {})
+    if window is None:
+        return trigger.get_next_fire_time(None, current)
+    return next_active_fire_time(trigger, tz, window, current)
+
+
 def normalize_schedule(
     schedule_type: str,
     schedule_config: dict[str, Any] | None,
@@ -117,6 +194,9 @@ def normalize_schedule(
             raise AutomationScheduleError("间隔必须是正数，单位支持分钟、小时或天")
         start_at = _parse_datetime(config["start_at"], tz, "开始时间") if config.get("start_at") else current + timedelta(seconds=value * INTERVAL_UNITS[unit])
         normalized = {"value": value, "unit": unit, "start_at": start_at.isoformat()}
+        active_window = _normalize_active_window(config)
+        if active_window is not None:
+            normalized.update(active_window)
         trigger = IntervalTrigger(
             seconds=value * INTERVAL_UNITS[unit],
             start_date=start_at,
@@ -145,7 +225,11 @@ def normalize_schedule(
                 timezone=tz,
             )
 
-    next_run = trigger.get_next_fire_time(None, current)
+    window = active_window_minutes(normalized)
+    if window is None:
+        next_run = trigger.get_next_fire_time(None, current)
+    else:
+        next_run = next_active_fire_time(trigger, tz, window, current)
     if next_run is None:
         raise AutomationScheduleError("无法计算下一次执行时间")
     return normalized, normalized_timezone, next_run
@@ -348,6 +432,11 @@ class AutomationRunner:
             await db.close()
         if task is None or not task.enabled:
             return None
+        window = active_window_minutes(task.schedule_config or {})
+        if window is not None:
+            _, tz = resolve_timezone(task.timezone)
+            if not _in_active_window(datetime.now(tz), window):
+                return None
         return await self._run(task, scheduled_at or datetime.now(timezone.utc))
 
     async def run_now(self, task_id: str) -> AutomationRun:
@@ -575,17 +664,22 @@ class AutomationScheduler:
             coalesce=False,
             misfire_grace_time=3600,
         )
-        job = self.scheduler.get_job(job_id)
-        next_run_at = getattr(job, "next_run_time", None) if job else None
-        if next_run_at:
-            db = get_business_async_session()
-            try:
-                await AutomationTaskRepository(db).update(
-                    task.id,
-                    next_run_at=_as_utc(next_run_at),
-                )
-            finally:
-                await db.close()
+        await self._update_next_run_at(task.id)
+
+    async def _update_next_run_at(self, task_id: str) -> None:
+        """Refresh the stored next_run_at, honoring the task's active window."""
+        job = self.scheduler.get_job(self._job_id(task_id))
+        if job is None:
+            return
+        db = get_business_async_session()
+        try:
+            task = await AutomationTaskRepository(db).get_by_id(task_id)
+            if task is None:
+                return
+            next_run = compute_next_run(task, job.trigger, datetime.now(timezone.utc))
+            await AutomationTaskRepository(db).update(task_id, next_run_at=_as_utc(next_run))
+        finally:
+            await db.close()
 
     async def unschedule_task(self, task_id: str) -> None:
         job_id = self._job_id(task_id)
@@ -613,16 +707,7 @@ class AutomationScheduler:
     async def _dispatch(self, task_id: str) -> None:
         try:
             await self.runner.run_scheduled(task_id)
-            job = self.scheduler.get_job(self._job_id(task_id))
-            next_run_at = getattr(job, "next_run_time", None) if job else None
-            db = get_business_async_session()
-            try:
-                await AutomationTaskRepository(db).update(
-                    task_id,
-                    next_run_at=_as_utc(next_run_at),
-                )
-            finally:
-                await db.close()
+            await self._update_next_run_at(task_id)
         except Exception:
             logger.exception("Automation dispatch failed: task=%s", task_id)
 
