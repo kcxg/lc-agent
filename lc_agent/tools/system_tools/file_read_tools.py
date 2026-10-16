@@ -40,8 +40,9 @@ def read_file(
 ) -> str | list[dict]:
     """Read a file and return its content. Supports text files (with optional line-range paging) and images — an image file (png/jpeg/gif/webp) is returned to you as viewable image content, so you can look at it directly with no extra steps.
 
-    Paths resolve relative to the project root (project mode) or server working directory; absolute paths are also accepted.
+    Relative paths resolve from the agent's working directory; absolute paths are also accepted.
     Files larger than 10 MB return an error — use offset/length to page through large files (default: 1000 lines per call).
+    The header also names unusual file encoding when the file has any — `| CRLF line endings`, `| CR line endings`, `| mixed line endings`, `| UTF-8 BOM`; a plain LF file without a BOM adds nothing.
     """
     resolved = validate_read_path(path)
     file_path = Path(resolved)
@@ -106,9 +107,38 @@ def _read_image(file_path: Path) -> str | list[dict]:
     ]
 
 
+def _encoding_notes(raw: bytes) -> str:
+    """Markers describing unusual file encoding, appended to the read header.
+
+    Detection reads the raw bytes: decoding already normalizes line endings away,
+    so the decoded text cannot tell CRLF from LF. Plain LF without BOM yields ""
+    so the common case adds no noise.
+    """
+    crlf = raw.count(b"\r\n")
+    cr = raw.count(b"\r") - crlf
+    lf = raw.count(b"\n") - crlf
+    notes: list[str] = []
+    if sum(1 for count in (crlf, lf, cr) if count) > 1:
+        notes.append("mixed line endings")
+    elif crlf:
+        notes.append("CRLF line endings")
+    elif cr:
+        notes.append("CR line endings")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        notes.append("UTF-8 BOM")
+    return "".join(f" | {note}" for note in notes)
+
+
+def _decode_text(file_path: Path) -> tuple[str, str]:
+    """Return (LF-normalized text, encoding markers) for a text file."""
+    raw = file_path.read_bytes()
+    text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    return text, _encoding_notes(raw)
+
+
 def _read_text(file_path: Path, offset: int, length: int) -> str:
     try:
-        text = file_path.read_text(encoding="utf-8", errors="replace")
+        text, notes = _decode_text(file_path)
     except Exception as e:
         return f"Error reading file: {e}"
 
@@ -127,7 +157,7 @@ def _read_text(file_path: Path, offset: int, length: int) -> str:
 
     content = "".join(selected)
     end_line = start + len(selected)
-    header = f"[Lines {start + 1}-{end_line} of {total} total]"
+    header = f"[Lines {start + 1}-{end_line} of {total} total{notes}]"
 
     if end_line < total:
         header += f" (use offset={end_line} to read more)"
@@ -143,7 +173,7 @@ def _text_block(text: str) -> dict:
 def read_multiple_files(
     paths: Annotated[list[str], "List of file paths to read"],
 ) -> str | list[dict]:
-    """Read multiple files in one call. Prefer this over sequential read_file calls when you need to read multiple known paths — it's faster and reduces round-trips. A single file failure does not affect the others; each result is prefixed with its path. Image files (png/jpeg/gif/webp) are returned as viewable image content; at most 5 images are inlined per call."""
+    """Read multiple files in one call. Prefer this over sequential read_file calls when you need to read multiple known paths — it's faster and reduces round-trips. A single file failure does not affect the others; each result is prefixed with its path, plus its encoding when that is unusual (`| CRLF line endings`, `| CR line endings`, `| mixed line endings`, `| UTF-8 BOM`). Image files (png/jpeg/gif/webp) are returned as viewable image content; at most 5 images are inlined per call."""
     blocks: list[dict] = []
     inlined_images = 0
 
@@ -180,14 +210,14 @@ def read_multiple_files(
                     blocks.append(_text_block(f"--- {p} ---\n{image_result}"))
                 continue
 
-            text = file_path.read_text(encoding="utf-8", errors="replace")
+            text, notes = _decode_text(file_path)
             lines = text.splitlines(keepends=True)
             if len(lines) > _DEFAULT_LINE_LIMIT:
                 content = "".join(lines[:_DEFAULT_LINE_LIMIT])
                 content += f"\n... [{len(lines) - _DEFAULT_LINE_LIMIT} more lines truncated]"
             else:
                 content = text
-            blocks.append(_text_block(f"--- {p} ---\n{content}"))
+            blocks.append(_text_block(f"--- {p} ---{notes}\n{content}"))
         except PermissionError as e:
             blocks.append(_text_block(f"--- {p} ---\nError: {e}"))
         except Exception as e:

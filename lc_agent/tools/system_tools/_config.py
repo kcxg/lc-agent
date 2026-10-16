@@ -50,6 +50,19 @@ def get_command_config() -> dict[str, Any]:
     return get_config_value(get_system_tools_config(), "command", {})
 
 
+def get_shell_preference() -> str:
+    """The configured shell wish for run_command / start_background_process.
+
+    Empty means "probe" (see ``nb_langchain_agentskills.resolve_shell``). Kept
+    here so the execution layer and the ``<user_os>`` prompt block read the very
+    same config key.
+    """
+    try:
+        return (get_command_config() or {}).get("default_shell", "") or ""
+    except Exception:
+        return ""
+
+
 def multimodal_tool_results_enabled() -> bool:
     """工具结果是否允许以多模态 content blocks 返回（图片直接交给模型查看）。
 

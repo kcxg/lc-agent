@@ -62,7 +62,7 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 - **文件读写**：读取、写入、搜索、移动文件；精确字符串替换时前端渲染 **diff 预览**，整文件覆写时展示内容预览。前端支持excel word ppt pdf查看，通过lc_agent/skills/office支持excel word ppt pdf的编辑。
 - **命令执行**：运行 shell 命令，输出实时以"打字机"效果流式显示（ANSI 颜色支持）
 - **后台进程管理**：启动后台进程、查看输出、终止进程
-- **安全边界**：可配置 `allowed_directories` 限制文件读写范围；命令工具支持 `blocked_commands` 黑名单；写入可配置扩展名黑名单
+- **安全护栏**：可配置 `allowed_directories` 限制文件读写范围；命令工具支持 `blocked_commands` 黑名单（尽力而为的护栏，**不是**安全边界）；写入可配置扩展名黑名单
 
 ### Agent 智能能力
 - **Todo 任务分解**：AI 将复杂任务拆解为有序 todo 并追踪进度，支持多步骤工程任务
@@ -201,9 +201,9 @@ powershell -ExecutionPolicy Bypass -File "D:\codes\lc-agent\.agents\skills\resta
 
 > **流式打字机效果和 diff 预览是框架原生 Python 工具专属能力**。第三方 MCP 命令工具在 LangGraph 中是黑盒原子操作，无法中途推流，也无法渲染 diff。这是框架内置工具相比 MCP 工具的核心优势。
 
-#### 安全边界
+#### 安全护栏
 - `allowed_directories`：限制文件工具的读写目录范围
-- `blocked_commands`：命令黑名单
+- `blocked_commands`：命令黑名单（**尽力而为的护栏，不是安全边界**：变量拼接、解释器 `-c`、`iex`、脚本文件等间接形式识别不到；真正的边界是工具白名单 / HITL 审批 / 沙箱）
 - 写入扩展名黑名单（防止误写二进制文件）
 - 相对路径自动解析到配置的项目根目录
 
