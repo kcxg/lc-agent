@@ -68,6 +68,18 @@ class ChatOpenAIReasoning(ChatOpenAI):
             )
         return False
 
+    @property
+    def _default_params(self) -> dict[str, Any]:
+        # langchain-openai >=1.x 把 legacy ``max_tokens`` 统一改名成
+        # ``max_completion_tokens``，但大量 OpenAI 兼容网关只认 ``max_tokens``
+        # （收到 ``max_completion_tokens`` 直接 400）。这里还原成 legacy 字段，
+        # 并保证两个 token 上限字段不会同时出现在请求里。
+        params = super()._default_params
+        if params.get("max_completion_tokens") is not None:
+            params = dict(params)
+            params.setdefault("max_tokens", params.pop("max_completion_tokens"))
+        return params
+
     _think_mode: ClassVar[contextvars.ContextVar[bool]] = contextvars.ContextVar(
         "ChatOpenAIReasoning__think_mode", default=False,
     )
@@ -111,6 +123,11 @@ class ChatOpenAIReasoning(ChatOpenAI):
                 )
 
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+
+        # 与 _default_params 同理：payload 构造路径不经过 _default_params，
+        # 需要单独把 max_completion_tokens 还原成 legacy max_tokens。
+        if payload.get("max_completion_tokens") is not None and "max_tokens" not in payload:
+            payload["max_tokens"] = payload.pop("max_completion_tokens")
 
         if any(reasoning_by_assistant_idx) and "messages" in payload:
             ai_counter = 0
