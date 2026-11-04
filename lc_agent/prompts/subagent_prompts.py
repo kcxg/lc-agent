@@ -82,13 +82,13 @@ include ALL background, specify exactly what to return in the **final and only r
 (sections, format, language, length).
 
 **Good description example**:
-  "The user is building a Python project using LangChain. Please research LangChain
-  v0.3's checkpointing mechanism, focusing on: (1) InMemorySaver vs SqliteSaver
-  differences, (2) per-user memory configuration. Return a detailed Chinese analysis
-  with code examples, in sections: Overview / Comparison / Recommendation."
+  "A third-party service exposes a data-sync API. Please research how its rate limiting
+  works, focusing on: (1) burst vs sustained limits, (2) what happens to callers that
+  exceed them. Return a detailed Chinese analysis with examples, in sections:
+  Overview / Limits / Recommended client behaviour."
 **Bad description examples**:
-  ❌ "Research LangChain memory." (no context, no output format)
-  ❌ "Fix the checkpoint bug we discussed above." (sub-agent has no 'above' context)
+  ❌ "Research rate limiting." (no context, no output format)
+  ❌ "Fix the bug we discussed above." (sub-agent has no 'above' context)
 
 Use the exact `subagent_type` value from the list below.
 Do not rename it, paraphrase it, translate it, or invent a new value.

@@ -7,8 +7,15 @@ import threading
 import time
 from typing import Annotated
 
+from nb_langchain_agentskills import (
+    build_shell_command,
+    decode_output,
+    render_shell_report,
+    resolve_shell,
+)
+
 from lc_agent.tools.registry import tool
-from lc_agent.tools.system_tools._config import get_command_config
+from lc_agent.tools.system_tools._config import get_command_config, get_shell_preference
 
 
 # ---------------------------------------------------------------------------
@@ -71,11 +78,11 @@ def _reader_thread(entry: _ProcessEntry, stream, append_fn):
     """Background thread that reads lines from a process stream."""
     buffer_full = False
     try:
-        for line in iter(stream.readline, ""):
+        for line in iter(stream.readline, b""):
             if not line:
                 break
             if not buffer_full:
-                append_fn(line)
+                append_fn(decode_output(line))
                 with entry._lock:
                     if len(entry.stdout_buf) + len(entry.stderr_buf) > _MAX_BUFFER_LINES:
                         buffer_full = True
@@ -110,7 +117,12 @@ def _get_subprocess_env() -> dict[str, str]:
     return env
 
 
-_SHELL_SEPARATORS = re.compile(r"[;&|]|\|\||&&")
+# Newlines separate commands in every supported shell (sh/bash, PowerShell, cmd),
+# so they belong in the separator set next to ; & | — without them a blocked
+# command can hide behind a newline. The extractor stays best-effort: it is a
+# guardrail, not a security boundary (variables, interpreters and script files
+# are out of reach by design).
+_SHELL_SEPARATORS = re.compile(r"[;&|\r\n]|\|\||&&")
 _SUBCOMMAND_PATTERN = re.compile(r"\$\(([^)]+)\)|`([^`]+)`")
 
 
@@ -138,8 +150,27 @@ def _extract_commands(command: str) -> list[str]:
     return commands
 
 
+_EXE_SUFFIXES = (".exe", ".cmd", ".bat", ".com")
+
+
+def _normalize_command_name(token: str) -> str:
+    """Map `"rm"`, `rm.exe` and `/usr/bin/rm` onto the plain name `rm`."""
+    name = token.strip().strip("\"'`")
+    name = re.split(r"[/\\]", name)[-1] or name
+    lowered = name.lower()
+    for suffix in _EXE_SUFFIXES:
+        if lowered.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 def _validate_command(command: str) -> str | None:
-    """Check command against blocklist. Returns error message or None if allowed."""
+    """Check the command against the configured blocklist.
+
+    Best-effort guardrail, not a security boundary: it compares the command names
+    the shell is expected to run, and that cannot be extracted reliably for every
+    shell construct (variables, interpreters, script files).
+    """
     config = get_command_config()
     blocked = config.get("blocked_commands", [])
     if not blocked:
@@ -147,33 +178,25 @@ def _validate_command(command: str) -> str | None:
 
     extracted = _extract_commands(command)
     for cmd in extracted:
-        cmd_lower = cmd.lower()
+        cmd_name = _normalize_command_name(cmd).lower()
+        if not cmd_name:
+            continue
         for blocked_cmd in blocked:
-            if cmd_lower == blocked_cmd.lower() or cmd_lower.endswith(f"/{blocked_cmd.lower()}") or cmd_lower.endswith(f"\\{blocked_cmd.lower()}"):
+            blocked_lower = blocked_cmd.strip().lower()
+            if cmd_name == blocked_lower or cmd_name.endswith(f"/{blocked_lower}") or cmd_name.endswith(f"\\{blocked_lower}"):
                 return f"Command '{cmd}' is blocked by security configuration"
     return None
 
 
-def _get_shell() -> list[str]:
-    """Get the shell command prefix from config or system default."""
-    config = get_command_config()
-    shell = config.get("default_shell", "")
+def _shell_info():
+    """The shell commands will actually run through.
 
-    if not shell:
-        if platform.system() == "Windows":
-            shell = "powershell"
-        else:
-            shell = os.environ.get("SHELL", "/bin/sh")
-
-    shell_lower = shell.lower()
-    if "powershell" in shell_lower or "pwsh" in shell_lower:
-        return [shell, "-NoProfile", "-Command"]
-    elif "cmd" in shell_lower:
-        return [shell, "/c"]
-    elif "bash" in shell_lower or "zsh" in shell_lower:
-        return [shell, "-l", "-c"]
-    else:
-        return [shell, "-c"]
+    Resolved by the shared resolver from the configured preference — the very
+    same fact the ``<user_os>`` system prompt block is built from
+    (``middlewares/user_os_middleware.py``), so syntax guidance cannot drift
+    away from execution.
+    """
+    return resolve_shell(get_shell_preference())
 
 
 @tool(group="command", group_description="命令执行")
@@ -185,7 +208,7 @@ def run_command(
     ] = 30000,
     working_directory: Annotated[
         str | None,
-        "Working directory for the command; defaults to the project root (project mode) or server working directory",
+        "Working directory for the command; omit to use the agent's working directory",
     ] = None,
 ) -> str:
     """
@@ -193,10 +216,11 @@ def run_command(
     Generate commands according to the user’s operating system — do not execute Linux-syntax commands on Windows.
     
     Execute a one-shot command and wait for it to finish. The process is force-killed on timeout.
-    Returns a JSON object: {"exit_code": int, "duration_ms": int, "timed_out": bool, "stdout": str, "stderr": str}.
+    Returns a JSON object: {"exit_code": int, "duration_ms": int, "timed_out": bool, "stdout": str, "stderr": str, "shell": {exe, family, version, fallback_from}}.
+    The `shell` field reports which shell actually ran the command — write your next command in that shell's syntax.
 
-    Uses PowerShell (-NoProfile -Command) on Windows and $SHELL (default: /bin/sh) on Linux/macOS.
-    WARNING (Windows PowerShell 5.1): '&&' is not supported. Chain dependent commands with 'cmd1; if ($?) { cmd2 }' instead.
+    The shell is resolved per project config (see the <user_os> block of your system prompt for its syntax and
+    version-specific limits, e.g. whether `&&` and `??` work).
 
     Use for:  pip install, git status, build scripts, or any command that exits on its own.
     Do NOT use for: long-running servers (Flask, Celery, dev servers) — use start_background_process instead.
@@ -210,8 +234,8 @@ def run_command(
         max_run_ms = config.get("timeout_ms", 30000)
     timeout_s = max_run_ms / 1000.0
 
-    shell_cmd = _get_shell()
-    full_cmd = shell_cmd + [command]
+    shell_info = _shell_info()
+    full_cmd = build_shell_command(command, shell_info)
 
     cwd = working_directory
     if not cwd:
@@ -229,11 +253,8 @@ def run_command(
             full_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
             cwd=cwd,
             env=_get_subprocess_env(),
-            encoding="utf-8",
-            errors="replace",
         )
     except Exception as e:
         return f"Error executing command: {e}"
@@ -252,12 +273,13 @@ def run_command(
 
     def _read_stdout():
         try:
-            for line in iter(_stdout.readline, ""):
+            for line in iter(_stdout.readline, b""):
                 if not line:
                     break
+                text = decode_output(line)
                 with buf_lock:
-                    stdout_lines.append(line)
-                    stream_lines.append(line)
+                    stdout_lines.append(text)
+                    stream_lines.append(text)
         except (ValueError, OSError):
             pass
         finally:
@@ -269,12 +291,13 @@ def run_command(
 
     def _read_stderr():
         try:
-            for line in iter(_stderr.readline, ""):
+            for line in iter(_stderr.readline, b""):
                 if not line:
                     break
+                text = decode_output(line)
                 with buf_lock:
-                    stderr_lines.append(line)
-                    stream_lines.append(line)
+                    stderr_lines.append(text)
+                    stream_lines.append(text)
         except (ValueError, OSError):
             pass
         finally:
@@ -350,6 +373,7 @@ def run_command(
             "timed_out": timed_out,
             "stdout": _field("".join(stdout_lines)),
             "stderr": _field("".join(stderr_lines)),
+            "shell": render_shell_report(shell_info),
         },
         ensure_ascii=False,
         indent=2,
@@ -502,12 +526,13 @@ def start_background_process(
     ] = 10000,
     working_directory: Annotated[
         str | None,
-        "Working directory for the command; defaults to the project root (project mode) or server working directory",
+        "Working directory for the command; omit to use the agent's working directory",
     ] = None,
 ) -> str:
     """
     Start a long-running process in the background.
-    Returns a JSON object: {"pid": int, "status": str, "exit_code": int|null, "command": str, "stdout": str, "stderr": str} with initial output.
+    Returns a JSON object: {"pid": int, "status": str, "exit_code": int|null, "command": str, "stdout": str, "stderr": str, "shell": {exe, family, version, fallback_from}} with initial output.
+    The `shell` field reports which shell actually ran the command.
     Generate commands according to the user’s operating system — do not execute Linux-syntax commands on Windows.
 
     Use for: Flask/Django/FastAPI servers, Celery workers, webpack dev servers, or any daemon that doesn't exit on its own.
@@ -527,8 +552,8 @@ def start_background_process(
     if error:
         return f"Error: {error}"
 
-    shell_cmd = _get_shell()
-    full_cmd = shell_cmd + [command]
+    shell_info = _shell_info()
+    full_cmd = build_shell_command(command, shell_info)
 
     cwd = working_directory
     if not cwd:
@@ -545,11 +570,8 @@ def start_background_process(
             full_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
             cwd=cwd,
             env=_get_subprocess_env(),
-            encoding="utf-8",
-            errors="replace",
         )
     except Exception as e:
         return f"Error starting process: {e}"
@@ -607,6 +629,7 @@ def start_background_process(
             "command": command,
             "stdout": initial_stdout,
             "stderr": initial_stderr,
+            "shell": render_shell_report(shell_info),
         },
         ensure_ascii=False,
         indent=2,

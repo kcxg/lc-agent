@@ -1,3 +1,4 @@
+import difflib
 import os
 import shutil
 import threading
@@ -5,16 +6,174 @@ from pathlib import Path
 from typing import Annotated
 
 from lc_agent.tools.registry import tool
-from lc_agent.tools.system_tools._config import validate_write_path
+from lc_agent.tools.system_tools._config import get_file_write_config, validate_write_path
 from lc_agent.tools.system_tools._file_change_tracker import emit_file_change
 
 _CONTEXT_LINES = 5
 _WRITE_PREVIEW_LINES = 20
 
+# Real file text echoed around the edited area / around the closest fuzzy match.
+_EDIT_PREVIEW_LINES = 10
+# Blocks larger than this still run, but the result suggests splitting them.
+_EDIT_MAX_LINES_DEFAULT = 50
+# Similarity (0-1) at or above which the closest real text is handed back for an exact retry.
+_FUZZY_THRESHOLD = 0.7
+
+_BOM_UTF8 = b"\xef\xbb\xbf"
+
+# Characters that look alike on screen but differ in bytes.
+_CHAR_NAMES = {
+    "\t": "TAB",
+    " ": "SPACE",
+    "\r": "CR",
+    "\n": "LF",
+    "\u00a0": "NO-BREAK SPACE",
+    "\u3000": "IDEOGRAPHIC SPACE",
+    "\u200b": "ZERO-WIDTH SPACE",
+    "\ufeff": "BOM",
+}
+
 # Serializes edit_block executions process-wide. edit_block performs a
 # read-modify-write: two concurrent calls on the same file both read the
 # original content, and the later write silently drops the earlier change.
 _EDIT_BLOCK_LOCK = threading.Lock()
+
+
+def _edit_max_lines() -> int:
+    """Configured guideline for how many lines one edit block may span."""
+    try:
+        return int(get_file_write_config().get("edit_max_lines", _EDIT_MAX_LINES_DEFAULT))
+    except Exception:
+        return _EDIT_MAX_LINES_DEFAULT
+
+
+def _detect_newline(raw: bytes) -> str:
+    """Predominant line ending of the raw file bytes (platform default when empty)."""
+    crlf = raw.count(b"\r\n")
+    lf = raw.count(b"\n") - crlf
+    cr = raw.count(b"\r") - crlf
+    if crlf > lf and crlf > cr:
+        return "\r\n"
+    if lf > cr:
+        return "\n"
+    if cr > 0:
+        return "\r"
+    return "\r\n" if os.name == "nt" else "\n"
+
+
+def _read_text_preserving(path: Path) -> tuple[str, str, bool]:
+    """Read a file as LF-normalized text, remembering its line ending and BOM.
+
+    Matching happens on LF-normalized text so callers can use plain "\\n" anchors
+    regardless of how the file stores its line breaks; the original convention is
+    restored on write.
+    """
+    raw = path.read_bytes()
+    has_bom = raw.startswith(_BOM_UTF8)
+    text = raw.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+    return text, _detect_newline(raw), has_bom
+
+
+def _write_text_preserving(path: Path, text_lf: str, newline: str, has_bom: bool) -> None:
+    """Write LF-normalized text back with the file's own line ending and BOM."""
+    data = (_BOM_UTF8 if has_bom else b"") + text_lf.replace("\n", newline).encode("utf-8")
+    path.write_bytes(data)
+
+
+def _char_label(char: str) -> str:
+    name = _CHAR_NAMES.get(char)
+    return f"U+{ord(char):04X} ({name})" if name else f"U+{ord(char):04X}"
+
+
+def _first_difference(expected: str, actual: str) -> str:
+    """Describe the first differing character with line, column and code point."""
+    limit = min(len(expected), len(actual))
+    index = next((i for i in range(limit) if expected[i] != actual[i]), limit)
+    if index == limit and len(expected) == len(actual):
+        return "no character-level difference found"
+    line = expected.count("\n", 0, index) + 1
+    column = index - expected.rfind("\n", 0, index)
+    left = _char_label(expected[index]) if index < len(expected) else "the end of old_string"
+    right = _char_label(actual[index]) if index < len(actual) else "the end of the found text"
+    return f"first difference at line {line}, column {column}: old_string has {left}, the file has {right}"
+
+
+def _closest_match(text_lf: str, old_string: str, anchors: int = 5) -> tuple[float, str, int]:
+    """Find the file text most similar to old_string.
+
+    Two stages so large files stay fast: probe every line with a cheap ratio to pick
+    anchor positions, then score a block-sized window around each anchor.
+    Returns (similarity 0-1, closest text, 1-based start line); similarity is -1 when
+    the file is empty.
+    """
+    text_lines = text_lf.split("\n")
+    old_lines = old_string.split("\n")
+    span = max(1, len(old_lines))
+    probe = next((line for line in old_lines if line.strip()), old_lines[0])
+    ranked = sorted(
+        (
+            (difflib.SequenceMatcher(None, probe, line, autojunk=False).quick_ratio(), index)
+            for index, line in enumerate(text_lines)
+        ),
+        key=lambda item: item[0],
+        reverse=True,
+    )[:anchors]
+
+    best_ratio, best_text, best_start = -1.0, "", 1
+    for _, anchor in ranked:
+        for shift in (0, 1, 2):
+            start = max(0, anchor - 1) + shift
+            if start >= len(text_lines):
+                continue
+            block = text_lines[start:start + span + shift]
+            candidate = "\n".join(block)
+            if not candidate.strip():
+                continue
+            ratio = difflib.SequenceMatcher(None, old_string, candidate, autojunk=False).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_text, best_start = ratio, candidate, start + 1
+    return best_ratio, best_text, best_start
+
+
+def _not_found_report(resolved: str, text_lf: str, old_string: str) -> str:
+    """Error text for a missing old_string, returning the closest real text when close."""
+    ratio, candidate, start = _closest_match(text_lf, old_string)
+    if ratio < 0:
+        return f"Error: old_string not found in {resolved}."
+    percent = round(ratio * 100)
+    end = start + candidate.count("\n")
+    if ratio >= _FUZZY_THRESHOLD:
+        return (
+            f"Error: old_string not found in {resolved}. Nothing was modified.\n"
+            f"Closest match: lines {start}-{end} ({percent}% similar).\n\n"
+            f"--- exact text in the file ---\n{candidate}\n--- end of exact text ---\n\n"
+            f"--- difference ---\n{_first_difference(old_string, candidate)}\n\n"
+            f"Re-send the edit with the exact text above as old_string."
+        )
+    return (
+        f"Error: old_string not found in {resolved}. Nothing was modified.\n"
+        f"Closest match (lines {start}-{end}) is only {percent}% similar.\n"
+        f"{_first_difference(old_string, candidate)}\n"
+        f"Read the file again and copy its exact text, or shorten old_string to the target line "
+        f"plus 1-2 lines of context."
+    )
+
+
+def _edit_receipt(
+    resolved: str, new_text_lf: str, line_start: int, new_lines: int, count: int, old_lines: int,
+) -> str:
+    """Result text: what changed, where, and the real text around it."""
+    all_lines = new_text_lf.split("\n")
+    body_lines = len(all_lines) - 1 if new_text_lf.endswith("\n") else len(all_lines)
+    first = max(1, line_start - _EDIT_PREVIEW_LINES)
+    last = min(body_lines, line_start + new_lines - 1 + _EDIT_PREVIEW_LINES)
+    preview = "\n".join(all_lines[first - 1:last])
+    return (
+        f"Replaced {count} occurrence(s) in {resolved}\n"
+        f"  starting at line {line_start} ({old_lines} lines → {new_lines} lines); "
+        f"file has {body_lines} lines\n"
+        f"[lines {first}-{last} of {body_lines} — file content after the edit]\n\n{preview}"
+    )
 
 
 def _emit_edit_diff(
@@ -103,9 +262,10 @@ def write_file(
 ) -> str:
     """Write content to a file, creating it if it doesn't exist or replacing it entirely — no confirmation is asked.
 
-    Paths resolve relative to the project root (project mode) or server working directory; absolute paths are also accepted. Parent directories are created automatically.
+    Relative paths resolve from the agent's working directory; absolute paths are also accepted. Parent directories are created automatically.
     IMPORTANT: If the file already exists and you intend to rewrite it, call `read_file` first to avoid accidentally discarding content you didn't mean to remove.
     For partial edits to an existing file, prefer `edit_block` instead of a full rewrite.
+    Line endings are kept as they are: rewriting an existing file keeps its own line ending and BOM, appending follows the target file's line ending, and a new file is written exactly as given.
     """
     try:
         resolved = validate_write_path(path)
@@ -130,11 +290,27 @@ def write_file(
 
     try:
         if mode == "append":
-            with open(file_path, "a", encoding="utf-8") as f:
-                f.write(content)
+            newline = "\n"
+            if existed_before:
+                try:
+                    newline = _detect_newline(file_path.read_bytes())
+                except Exception:
+                    pass
+            appended = content.replace("\r\n", "\n").replace("\r", "\n").replace("\n", newline)
+            with open(file_path, "a", encoding="utf-8", newline="") as f:
+                f.write(appended)
             action = "Appended"
+        elif existed_before:
+            raw = file_path.read_bytes()
+            _write_text_preserving(
+                file_path,
+                content.replace("\r\n", "\n").replace("\r", "\n"),
+                _detect_newline(raw),
+                raw.startswith(_BOM_UTF8),
+            )
+            action = "Written"
         else:
-            file_path.write_text(content, encoding="utf-8")
+            file_path.write_bytes(content.encode("utf-8"))
             action = "Written"
     except Exception as e:
         return f"Error writing file: {e}"
@@ -258,17 +434,34 @@ def delete_file(
 @tool(group="file_write", group_description="文件写入")
 def edit_block(
     file_path: Annotated[str, "Path to the file to edit"],
-    old_string: Annotated[str, "Exact text to replace; must match the file content character-for-character including whitespace"],
-    new_string: Annotated[str, "Replacement text"],
+    old_string: Annotated[
+        str,
+        "Exact text to replace. Must match the file character-for-character, including indentation, "
+        "blank lines and trailing whitespace. Keep the target line plus 1-2 lines of context — enough "
+        "to be unique; copying it from read_file output is safer than retyping it.",
+    ],
+    new_string: Annotated[
+        str,
+        "Replacement text. Pass an empty string to delete the text matched by old_string.",
+    ],
     expected_replacements: Annotated[
         int,
-        "Expected number of replacements (default 1). The edit is refused if the actual match count differs, preventing accidental bulk changes.",
+        "How many times old_string is expected to occur, default 1. The tool counts the actual "
+        "occurrences and refuses the edit when the count differs; set it to the reported count when "
+        "every occurrence should be replaced.",
     ] = 1,
 ) -> str:
-    """Precisely find and replace a text block in a file.
+    """Precisely find and replace a text block in a file — use this for any change to an existing file instead of rewriting the whole file.
 
-    IMPORTANT: Call `read_file` on the target file before using this tool. The old_string must match the current file content exactly (character-for-character, including indentation and newlines) — use the text returned by `read_file` as the source.
-    Requires old_string to appear exactly expected_replacements times; refuses to edit if the count doesn't match, preventing accidental bulk changes.
+    Call `read_file` on the target file first. The tool reports an error and changes nothing when old_string occurs a different number of times than expected_replacements. Editing never changes the file's line ending or BOM.
+
+    Usage:
+    - Copy old_string from read_file output; do not retype it from memory.
+    - Keep old_string short but unique: the target line plus 1-2 lines of context. Extra context only adds chances of a whitespace mismatch.
+    - Same text occurs several times: to change one occurrence, widen old_string until it is unique; to change all of them, set expected_replacements to the reported count.
+    - When old_string is not found, the result returns the closest text in the file, its similarity and where the first difference is — re-send the edit with that exact text.
+    - The result names the edited line and shows the surrounding file content, so the change can be checked without reading the file again.
+    - Use `write_file` to create a file or to replace an entire file.
     """
     with _EDIT_BLOCK_LOCK:
         return _edit_block_impl(file_path, old_string, new_string, expected_replacements)
@@ -292,30 +485,26 @@ def _edit_block_impl(
         return f"Error: '{file_path}' is a directory"
 
     try:
-        content = path.read_text(encoding="utf-8")
+        content, newline, has_bom = _read_text_preserving(path)
     except Exception as e:
         return f"Error reading file: {e}"
 
     count = content.count(old_string)
     if count == 0:
-        snippet = old_string[:80]
-        return (
-            f"Error: old_string not found in file.\n"
-            f"Searched for: \"{snippet}{'...' if len(old_string) > 80 else ''}\"\n"
-            f"Make sure the text matches exactly (including whitespace and newlines)."
-        )
+        return _not_found_report(resolved, content, old_string)
 
     if count != expected_replacements:
         return (
-            f"Error: Expected {expected_replacements} occurrence(s) of old_string, "
-            f"but found {count}. Refusing to replace to avoid unintended modifications.\n"
-            f"Set expected_replacements={count} if you intend to replace all occurrences."
+            f"Error: old_string occurs {count} time(s) in {resolved}, but expected_replacements "
+            f"is {expected_replacements}. Nothing was modified.\n"
+            f"- To change one occurrence: add more surrounding lines to old_string until it is unique.\n"
+            f"- To change all {count} occurrences: set expected_replacements={count}."
         )
 
     new_content = content.replace(old_string, new_string, expected_replacements)
 
     try:
-        path.write_text(new_content, encoding="utf-8")
+        _write_text_preserving(path, new_content, newline, has_bom)
     except Exception as e:
         return f"Error writing file: {e}"
 
@@ -343,7 +532,13 @@ def _edit_block_impl(
         context_after="\n".join(context_after) or None,
     )
 
-    return (
-        f"Replaced {count} occurrence(s) in {resolved}\n"
-        f"  {old_lines} lines → {new_lines} lines"
-    )
+    receipt = _edit_receipt(resolved, new_content, line_start, new_lines, count, old_lines)
+    limit = _edit_max_lines()
+    biggest = max(old_lines, new_lines)
+    if biggest > limit:
+        return (
+            f"{receipt}\n\n"
+            f"Note: this block spans {biggest} lines (guideline: {limit}). Large blocks are harder "
+            f"to verify — splitting the change into smaller edits is safer."
+        )
+    return receipt

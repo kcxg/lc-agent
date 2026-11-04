@@ -1,57 +1,31 @@
+import platform
 from typing import Any
 
 from langchain_core.messages import SystemMessage
+from nb_langchain_agentskills import render_shell_fact, render_shell_guidance, resolve_shell
 
 from lc_agent.middlewares.system_prompt import SystemPromptMiddleware
+from lc_agent.tools.system_tools._config import get_shell_preference
 
 
 def _get_user_os_text() -> str:
-    """Build the <user_os> block: server OS + shell + syntax guidance.
+    """Build the <user_os> block: server OS + the shell commands actually run in.
 
-    Commands run on the deployed service, so the OS here is authoritative
-    for run_command / start_background_process syntax choice.
+    Both halves come from ``nb_langchain_agentskills.resolve_shell`` — the very
+    resolver ``run_command`` / ``start_background_process`` execute through — so
+    the facts and the syntax guidance handed to the agent cannot drift away from
+    what actually runs.
     """
-    import os
-    import platform
+    shell_info = resolve_shell(get_shell_preference())
 
     os_name = platform.system()
-    # Mirror run_command's shell selection logic for consistency:
-    # Windows defaults to powershell; Linux/macOS reads $SHELL.
-    # Check config.jsonc's system_tools.command.default_shell first.
-    try:
-        from lc_agent.tools.system_tools._config import get_command_config
-        _cmd_cfg = get_command_config()
-        _configured_shell = _cmd_cfg.get("default_shell", "")
-    except Exception:
-        _configured_shell = ""
-    if _configured_shell:
-        shell = _configured_shell.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
-    elif os_name == "Windows":
-        shell = "powershell"
-    else:
-        shell = os.environ.get("SHELL", "bash").rsplit("/", 1)[-1]
     try:
         os_version = platform.version() if os_name == "Linux" else platform.release()
-        os_info = f"{os_name} {os_version} ({shell})"
+        os_info = f"{os_name} {os_version} ({render_shell_fact(shell_info)})"
     except Exception:
-        os_info = f"{os_name} ({shell})"
+        os_info = f"{os_name} ({render_shell_fact(shell_info)})"
 
-    shell_lower = shell.lower()
-    if "powershell" in shell_lower or "pwsh" in shell_lower or os_name == "Windows":
-        guidance = (
-            "Commands MUST use PowerShell syntax. "
-            "NEVER use Linux commands (head/cat/grep/ls/tail). "
-            "Use Select-Object instead of head, Select-String instead of grep. "
-            "Chain dependent commands with `; if ($?) { ... }`, NOT `&&`."
-        )
-    elif "cmd" in shell_lower:
-        guidance = (
-            "Commands MUST use cmd.exe syntax. "
-            "NEVER use Linux commands (head/cat/grep/ls/tail)."
-        )
-    else:
-        guidance = "Commands MUST use bash/sh syntax."
-    return f"<user_os>\n**OS**: {os_info}\n{guidance}\n</user_os>"
+    return f"<user_os>\n**OS**: {os_info}\n{render_shell_guidance(shell_info)}\n</user_os>"
 
 
 class UserOsMiddleware(SystemPromptMiddleware):  # type: ignore[misc]

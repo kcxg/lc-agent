@@ -49,7 +49,7 @@
 | Token 费用统计 | 独立用量页面（管理页 + 个人页），每次 LLM 调用落库，按用户/agent/模型/天聚合金额，单价可配，可导出 CSV |
 | Auth & Permission | 支持登录认证、用户隔离、管理员能力、审批白名单 |
 | 联网、rag知识库 | 同时通过接入对应的mcp来给llm提供能力，例如anysearch 和 nbrag |
-| ai coding | 内置工具组和第三方mcp例如serena mcp都能使lc-aegnt 实现ai coding |
+| ai coding | 内置工具组已支持实现ai coding |
 | Context Management | 内置 SummarizationMiddleware，长对话自动压缩摘要，避免上下文溢出 |
 | Streaming & Diff | 命令执行实时流式输出、文件编辑 diff 预览、写入预览，过程全程可视 |
 | 自动化任务 | 用户可以配置定时任务，agent自动定时运行任务，并发送通知到钉钉 企业微信 飞书中 |
@@ -89,6 +89,9 @@
 
 **ai coding 编辑用户代码，类似cursor codex的代码变动 diff 红绿渲染**
 ![ai coding 编辑用户代码，类似cursor codex的代码变动 diff 红绿渲染](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/aicoding_edit.png)
+
+**ai coding 右侧清晰的聊天轮次，工具调用，token消耗，耗时**
+![ai coding 右侧清晰的聊天轮次，工具调用，token消耗，耗时](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/ai_coding3.png)
 
 **ai coding连续完成4个脚本，使用todolist自动规划任务步骤**
 ![ai coding2](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/aicoding2.png)
@@ -397,6 +400,17 @@ launch_desktop(host='127.0.0.1', port=8001, title="心有灵犀") # host port ti
 [启动gui客户端](https://github.com/ydf0509/lc-agent-bfzs/blob/6cf03fe2db265021cf82964851fb84af625744b3/bfzs/start_desktop.py)
 
 
+## 推荐做法
+
+### 如果是win用户推荐用户安装 PowerShell 7.xx版本（和lc-agent无关）
+
+推荐安装pwsh（PowerShell 7.xx）和lc-agent无关，是ai对powershell 5 不熟悉容易出错，powershell 5 本身语法不够先进。
+lc-agent对win用户优先自动探测并使用PowerShell 7.xx版本，pwsh 7.xx对命令行支持的更好。
+powershell 5.xx命令行表达能力很弱，对于复杂命令行命令agent很容易写错。
+
+安装pwsh (PowerShell 7.xx)
+`winget install --id Microsoft.PowerShell --source winget`
+
 ## FAQ
 
 ### lc-agent 是否内置 RAG 知识库？
@@ -458,20 +472,14 @@ launch_desktop(host='127.0.0.1', port=8001, title="心有灵犀") # host port ti
 checkpoint数据库支持sqlite postgre
 业务数据库使用的sqlmodel，所以支持所有sqlachemy支持的数据库
 
-### lc-agent 能不能作为aicoding 工具来使用？
+### lc-agent 能不能作为ai coding 工具来使用？
 
-答：完全可以，而且编程效果和体验都很好。
+答：完全可以，而且编程效果和体验都很好，agent改了什么发生了什么，前端做了非常好的适配。
+已经用lc-agent验证过vibe coding ，累计验证超过几十亿tokens。
 
-方案A:
-可以，你可以搭配serena mcp全套来编程。但是这个因为是第三方mcp，对于edit文件 和 执行命令，lc-agent的前端界面没有精细化适配，例如文件变更diff、执行命令的流式打字机效果等，对serena没支持。所以不推荐用serena mcp全套工具。
-方案A不好，和lc-agent的前端ui没有深度融合。
-
-方案B：
-开启lc-agent 内置赠送的工具组， 用户开启`file_read` `file_write` `command` 三个工具组，大约20个工具，足以编程了。另外你还可以搭配 nbrag 或者codegraph mcp，使代码语义和符号检索更强大。
-lc-agent前端对代码改动和代码执行的渲染，达到了 traework codex-gui 的体验效果。
+lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以作为 通用agent来使用，ai vibe coding只是能力之一。
 
 
-lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以作为 通用agent来使用，ai coding只是能力之一。
 
 ### agent 设置项目模式后有什么区别？
 
@@ -480,11 +488,30 @@ lc-agent 既可以作为 你的private gpt纯聊天页面来使用，也可以�
 
 ### 质疑lc-agent是不是装逼重复造轮子，为什么不直接用codex traework？
 
+lc-agent是框架，接管langchain graph对象。
+
 lc-agent既是产品又是框架， 是给希望开发agent人员用的，或者对agent开发感兴趣，或者对ai为什么能编程写代码有兴趣的人员用的。是给希望自定义开发agent的，尤其是使用langchain开发agent的人 用的。 里面的很多功能都是对观测llm行为有巨大帮助的，看下lc-agent的前端界面就知道了，里面有大量的功能是帮助看清和llm交互的详细过程，而不是简单的像`openwebui`那样给普通非码农用的普通聊天网页。从lc-agent前端就能很清楚知道到底和llm是怎么交互的，codex traework qoder是黑盒的，不方便你看到底层交互原理。
 
-codex是给普通码农编程用的，如果你对开发自己的agent毫无兴需求和兴趣，对和llm交互毫无兴趣，对ai原理毫无兴趣，只是希望用ai来完成写普通业务项目代码，那当然直接用codex就可以了。
+lc-agent中可以创建不同的特定agent，各种主流agent玩法功能已经全部包含了。
+
+codex是给普通码农编程用的，如果你对开发自己的agent毫无兴需求和兴趣，对和llm交互毫无兴趣，对ai agent原理毫无兴趣，只是希望用ai来完成写普通业务项目代码，那当然直接用codex就可以了。
+
+lc-agent系统提示词很少，除了必要的工具描述，不内置系统级提示词，是通过用户填写提示词，关联提示词，绝对的白盒，而不是一个黑盒内置系统级提示词，提示词完全由用户做主。
 
 lc-agent 是综合了openwebui openclaw trae-ide workbuddy 的功能，能bs方式部署，也能单机本机cs部署。
+
+
+###  为什么要使用lc-agent，而不是用豆包 deepseek官方网页版？
+
+这就好比workbuddy对比元宝，trae对比豆包一样。agent吊打官网模型家联网工具，官网的为了省成本很保守，不会主动多轮联网。
+
+举个实际例子，用户提问 "主流手机9000ma以上，价格3000以内的，都列举出来，要列出手机型号 cpu 充电速度 价格"
+
+lc-agent 加作者手写的 baidu-search skill（白嫖百度搜索）的，答案的手机机型 参数非常全面准确，如下图
+![baidu_search_phone_list](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/baidu_skill_phone_list.png)
+
+而豆包官网，虽然有字节跳动搜索引擎加持，回答却漏很多机型，参数不准
+![doubao_phone_list](https://raw.githubusercontent.com/ydf0509/lc-agent/main/docs_pic/doubao_phone_list.png)
 
 ## License
 

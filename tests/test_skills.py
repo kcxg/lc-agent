@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -165,8 +166,10 @@ def test_prompt_and_tool_chain_against_real_skills():
     result = tools["skill__execute_script"].invoke(
         {"skill_name": "baidu-search", "command": "echo skill-ok"}
     )
-    assert "exit_code: 0" in result
-    assert "skill-ok" in result
+    payload = json.loads(result)
+    assert payload["exit_code"] == 0
+    assert "skill-ok" in payload["stdout"]
+    assert payload["shell"]["family"] in {"pwsh", "powershell", "bash", "sh", "cmd"}
 
 
 @pytest.fixture

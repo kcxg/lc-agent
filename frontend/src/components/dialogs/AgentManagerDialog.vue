@@ -106,6 +106,10 @@
                 <div class="agent-item-info">
                   <span class="agent-item-name">{{ pt.name }}</span>
                 </div>
+                <span
+                  v-if="pt.source === 'builtin'"
+                  class="source-tag source-tag--builtin"
+                >内置</span>
               </div>
               <el-empty v-if="!promptsStore.prompts.length" description="暂无提示词" :image-size="48" />
             </div>
@@ -140,9 +144,23 @@
         <template v-if="viewMode === 'prompts'">
           <template v-if="!!editingPromptId || isNewPrompt">
             <div class="prompts-editor-body form-scroll">
+              <el-alert
+                v-if="isBuiltinPrompt"
+                type="info"
+                :closable="false"
+                show-icon
+                style="margin-bottom: 12px;"
+              >
+                lc-agent 内置提示词：内置提示词不会自动作为 lc-agent 发给模型的提示词，
+                用户需要时，在 Agent 的「关联提示词」中勾选该提示词才会生效。
+              </el-alert>
               <el-form label-position="top">
                 <el-form-item label="名称" required>
-                  <el-input v-model="promptForm.name" placeholder="提示词名称，例如：安全规范、代码风格" />
+                  <el-input
+                    v-model="promptForm.name"
+                    :disabled="isBuiltinPrompt"
+                    placeholder="提示词名称，例如：安全规范、代码风格"
+                  />
                 </el-form-item>
                 <el-form-item label="内容">
                   <div class="prompt-content-wrap">
@@ -164,6 +182,7 @@
                       v-if="!promptPreviewMode"
                       v-model="promptForm.content"
                       type="textarea"
+                      :readonly="isBuiltinPrompt"
                       :autosize="{ minRows: 8, maxRows: 20 }"
                       placeholder="在此填写提示词内容，将追加注入到绑定该模板的 Agent 系统提示词末尾..."
                     />
@@ -177,13 +196,22 @@
             </div>
             <div class="prompts-editor-footer form-footer">
               <div>
-                <el-button v-if="editingPromptId && !isNewPrompt" type="danger" @click="handleDeletePrompt">
+                <el-button
+                  v-if="editingPromptId && !isNewPrompt && !isBuiltinPrompt"
+                  type="danger"
+                  @click="handleDeletePrompt"
+                >
                   删除
                 </el-button>
               </div>
               <div class="prompts-editor-footer-right">
                 <el-button type="info" @click="cancelEditPrompt">取消</el-button>
-                <el-button type="primary" :loading="promptSaving" @click="handleSavePrompt">
+                <el-button
+                  v-if="!isBuiltinPrompt"
+                  type="primary"
+                  :loading="promptSaving"
+                  @click="handleSavePrompt"
+                >
                   {{ isNewPrompt ? '创建' : '保存' }}
                 </el-button>
               </div>
@@ -561,6 +589,10 @@
                                   <span class="skill-group-icon">📁</span>
                                   <span class="skill-group-name" :title="grp.path || grp.folder">{{ grp.folder }}</span>
                                   <span class="skill-group-count">{{ grp.skills.length }}</span>
+                                  <span class="skill-group-actions" @click.stop>
+                                    <button class="skill-group-action-btn" type="button" title="勾选该文件夹下全部 Skills" @click="checkAllSkillsInGroup(grp, 'global', true)">全部开启</button>
+                                    <button class="skill-group-action-btn is-off" type="button" title="取消勾选该文件夹下全部 Skills" @click="checkAllSkillsInGroup(grp, 'global', false)">全部禁用</button>
+                                  </span>
                                 </div>
                                 <el-collapse-transition>
                                   <div v-show="isSkillGroupOpen(grp.key)" class="skill-group-body">
@@ -634,6 +666,10 @@
                                   <span class="skill-group-icon">📁</span>
                                   <span class="skill-group-name" :title="grp.path || grp.folder">{{ grp.folder }}</span>
                                   <span class="skill-group-count">{{ grp.skills.length }}</span>
+                                  <span class="skill-group-actions" @click.stop>
+                                    <button class="skill-group-action-btn" type="button" title="勾选该文件夹下全部 Skills" @click="checkAllSkillsInGroup(grp, 'project', true)">全部开启</button>
+                                    <button class="skill-group-action-btn is-off" type="button" title="取消勾选该文件夹下全部 Skills" @click="checkAllSkillsInGroup(grp, 'project', false)">全部禁用</button>
+                                  </span>
                                 </div>
                                 <el-collapse-transition>
                                   <div v-show="isSkillGroupOpen(grp.key)" class="skill-group-body">
@@ -728,6 +764,10 @@
                                     <span class="skill-group-icon">📁</span>
                                     <span class="skill-group-name" :title="grp.path || grp.folder">{{ grp.folder }}</span>
                                     <span class="skill-group-count">{{ grp.skills.length }}</span>
+                                    <span class="skill-group-actions" @click.stop>
+                                      <button class="skill-group-action-btn" type="button" title="勾选该文件夹下全部 Skills" @click="checkAllSkillsInGroup(grp, 'extra', true)">全部开启</button>
+                                      <button class="skill-group-action-btn is-off" type="button" title="取消勾选该文件夹下全部 Skills" @click="checkAllSkillsInGroup(grp, 'extra', false)">全部禁用</button>
+                                    </span>
                                   </div>
                                   <el-collapse-transition>
                                     <div v-show="isSkillGroupOpen(grp.key)" class="skill-group-body">
@@ -872,6 +912,11 @@
                           @update:model-value="toggleBoundPrompt(pt.id, $event)"
                         >
                           <span class="prompt-binding-name">{{ pt.name }}</span>
+                          <span
+                            v-if="pt.source === 'builtin'"
+                            class="source-tag source-tag--builtin"
+                            style="margin-left: 6px;"
+                          >内置</span>
                         </el-checkbox>
                         <p v-if="pt.content" class="prompt-binding-preview">
                           {{ pt.content.length > 100 ? pt.content.slice(0, 100) + '…' : pt.content }}
@@ -1005,6 +1050,12 @@ const promptForm = ref({ name: '', content: '' })
 const promptPreviewMode = ref(false)
 const renderedPromptContent = computed(() => renderMarkdown(promptForm.value.content))
 
+/** 内置提示词：框架自带，用户只读（后端也拦，改 / 删会 403） */
+const isBuiltinPrompt = computed(() => {
+  if (!editingPromptId.value) return false
+  return promptsStore.getById(editingPromptId.value)?.source === 'builtin'
+})
+
 function switchToPromptsView() {
   if (viewMode.value === 'prompts') return  // already active, don't reset
   viewMode.value = 'prompts'
@@ -1043,6 +1094,10 @@ function onMobilePromptSelectChange(val: string | null | undefined) {
 }
 
 async function handleSavePrompt() {
+  if (isBuiltinPrompt.value) {
+    ElMessage.warning('内置提示词不可修改')
+    return
+  }
   if (!promptForm.value.name.trim()) {
     ElMessage.error('提示词名称不能为空')
     return
@@ -1067,6 +1122,10 @@ async function handleSavePrompt() {
 
 async function handleDeletePrompt() {
   if (!editingPromptId.value) return
+  if (isBuiltinPrompt.value) {
+    ElMessage.warning('内置提示词不可删除')
+    return
+  }
   const pt = promptsStore.getById(editingPromptId.value)
   try {
     await ElMessageBox.confirm(
@@ -1247,6 +1306,21 @@ function toggleSkillGroup(key: string) {
 }
 function isSkillGroupOpen(key: string): boolean {
   return expandedSkillGroups[key] !== false
+}
+
+// 批量勾选/取消一个文件夹分组内的全部 Skills（前端循环调用现有单技能接口的前提是这里只改本地选择）
+function checkAllSkillsInGroup(grp: SkillGroup, scope: 'global' | 'project' | 'extra', checked: boolean) {
+  const target = scope === 'global' ? selectedGlobalSkills : scope === 'project' ? selectedProjectSkills : selectedExtraSkills
+  const names = grp.skills.map(s => s.name)
+  if (checked) {
+    const have = new Set(target.value)
+    const add = names.filter(n => !have.has(n))
+    if (add.length) target.value = [...target.value, ...add]
+  } else {
+    const drop = new Set(names)
+    const next = target.value.filter(n => !drop.has(n))
+    if (next.length !== target.value.length) target.value = next
+  }
 }
 
 let _skillFetchSeq = 0
@@ -2737,6 +2811,41 @@ defineExpose({ open })
   background: var(--el-color-primary);
   border-radius: 999px;
   padding: 0 8px;
+}
+
+/* 分组头右侧的批量操作按钮：全部开启 / 全部禁用 */
+.skill-group-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.skill-group-action-btn {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--el-color-primary);
+  border-radius: 4px;
+  padding: 1px 8px;
+  transition: filter 0.15s ease, transform 0.05s ease;
+}
+
+.skill-group-action-btn:hover {
+  filter: brightness(1.12);
+}
+
+.skill-group-action-btn:active {
+  transform: translateY(1px);
+}
+
+.skill-group-action-btn.is-off {
+  background: var(--el-color-danger);
 }
 
 .skill-group-body {

@@ -547,6 +547,22 @@ const activeTab = computed(() => uiStore.activeTab)
 const runningProcessCount = computed(() =>
   bgProcesses.value.filter(proc => proc.status.startsWith('running')).length,
 )
+
+// 概览 tab 徽标：会话轮次数。历史消息带后端算好的全局 roundNumber，取最大值即总轮数，
+// 不受"只加载最后一页"影响；直播中的 user 消息还没有该字段，按 1 条算 1 轮补上。
+const roundCount = computed(() => {
+  let maxRound = 0
+  let liveRounds = 0
+  for (const msg of chatStore.messages) {
+    if (msg.role !== 'user' || msg.isSystem) continue
+    if (typeof msg.roundNumber === 'number') {
+      if (msg.roundNumber > maxRound) maxRound = msg.roundNumber
+    } else {
+      liveRounds += 1
+    }
+  }
+  return maxRound + liveRounds
+})
 const mcpErrorCount = computed(() =>
   toolsStore.filteredMcp.filter(server => server.allowed && server.status === 'error').length,
 )
@@ -558,7 +574,7 @@ const dirtyFileCount = computed(() =>
 
 const tabs = computed((): Array<{ id: RightPanelTab; label: string; icon: any; badge: number }> => {
   const list: Array<{ id: RightPanelTab; label: string; icon: any; badge: number }> = [
-    { id: 'overview', label: '概览', icon: DataAnalysis, badge: 0 },
+    { id: 'overview', label: '概览', icon: DataAnalysis, badge: roundCount.value },
     { id: 'model', label: '模型', icon: Cpu, badge: 0 },
     { id: 'abilities', label: '能力', icon: Tools, badge: mcpErrorCount.value },
     { id: 'changes', label: '变更', icon: Files, badge: fileChangesStore.fileCount },

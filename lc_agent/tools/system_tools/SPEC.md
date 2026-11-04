@@ -115,7 +115,7 @@ lc_agent/tools/system_tools/
 - 参数：`command: str`, `timeout_ms: int = 30000`, `shell: str | None = None`
 - 一次性执行，等待完成
 - 返回：stdout, stderr, exit_code, duration_ms
-- 安全：blocked_commands 校验（递归解析 && || ; 等组合命令）
+- 安全：blocked_commands 校验（递归解析 && || ; | 换行 等组合命令）
 - shell 默认从配置读取
 
 #### list_processes
@@ -135,8 +135,9 @@ lc_agent/tools/system_tools/
 3. 检查是否在 allowed_directories 内
 
 ### 5.2 命令校验（command 组）
-1. 解析命令字符串，提取所有子命令（处理 &&, ||, ;, |, $(), `` 等）
-2. 逐个检查是否在 blocked_commands 列表中
+1. 解析命令字符串，提取所有子命令（处理 &&, ||, ;, |, 换行, $(), `` 等）
+2. 命令名先归一化（去引号、取 basename、去 .exe/.cmd/.bat/.com 后缀）再与 blocked_commands 比对
+3. 定位：这是**尽力而为的护栏，不是安全边界**。字符串层识别不到的形态：变量拼接（`X=rm; $X --version`）、解释器（`bash -c "rm ..."`、`python -c ...`）、`iex`、脚本文件内部，以及通过其它可执行命令的工具绕过。真正的边界是工具白名单 / HITL 审批 / 沙箱。
 
 ## 6. 设计决策记录
 
