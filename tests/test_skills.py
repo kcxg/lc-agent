@@ -169,7 +169,7 @@ def test_prompt_and_tool_chain_against_real_skills():
     payload = json.loads(result)
     assert payload["exit_code"] == 0
     assert "skill-ok" in payload["stdout"]
-    assert payload["shell"]["family"] in {"pwsh", "powershell", "bash", "sh", "cmd"}
+    assert payload["shell"]["family"] in {"pwsh", "powershell", "bash", "sh", "zsh", "cmd"}
 
 
 @pytest.fixture
